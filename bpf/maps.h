@@ -1,0 +1,115 @@
+/*
+ * BPF Maps — inverted index + rule storage + event output.
+ *
+ *   ┌──────────────────────────────────────────────────────────┐
+ *   │  rule_index_map       ARRAY<u32, rule_meta>    [1024]    │
+ *   │    slot → rule metadata (id, priority, required_mask)    │
+ *   ├──────────────────────────────────────────────────────────┤
+ *   │  global_cfg_map       ARRAY<u32, global_cfg>    [1]      │
+ *   │    all_enabled_rules bitmap (initial candidates)         │
+ *   ├──────────────────────────────────────────────────────────┤
+ *   │  vlan_index_map       HASH<u16, mask1024_t>    [4096]    │
+ *   │  src_port_index_map   HASH<u16, mask1024_t>    [4096]    │
+ *   │  dst_port_index_map   HASH<u16, mask1024_t>    [4096]    │
+ *   │    key → bitmap of rules matching this key               │
+ *   ├──────────────────────────────────────────────────────────┤
+ *   │  src_prefix_lpm_map   LPM_TRIE<lpm_key, mask1024_t>      │
+ *   │  dst_prefix_lpm_map   LPM_TRIE<lpm_key, mask1024_t>      │
+ *   │    longest-prefix match → cumulative candidate bitmap    │
+ *   ├──────────────────────────────────────────────────────────┤
+ *   │  feature_index_map    HASH<u32, mask1024_t>    [32]      │
+ *   │    COND_* bit → bitmap of rules requiring this feature   │
+ *   ├──────────────────────────────────────────────────────────┤
+ *   │  event_ringbuf        RINGBUF    [16 MB]                 │
+ *   ├──────────────────────────────────────────────────────────┤
+ *   │  stats_map            PERCPU_ARRAY<u32, u64>  [5]        │
+ *   └──────────────────────────────────────────────────────────┘
+ */
+#ifndef SIDERSP_BPF_MAPS_H
+#define SIDERSP_BPF_MAPS_H
+
+#include <linux/bpf.h>
+#include <bpf/bpf_helpers.h>
+
+#include "rule.h"
+
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, MAX_RULE_SLOTS);
+    __type(key, __u32);
+    __type(value, struct rule_meta);
+} rule_index_map SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, __u32);
+    __type(value, struct global_cfg);
+} global_cfg_map SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 4096);
+    __type(key, __u16);
+    __type(value, mask1024_t);
+} src_port_index_map SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 4096);
+    __type(key, __u16);
+    __type(value, mask1024_t);
+} dst_port_index_map SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 4096);
+    __type(key, __u16);
+    __type(value, mask1024_t);
+} vlan_index_map SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 32);
+    __type(key, __u32);
+    __type(value, mask1024_t);
+} feature_index_map SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_LPM_TRIE);
+    __uint(max_entries, 4096);
+    __uint(map_flags, BPF_F_NO_PREALLOC);
+    __type(key, struct ipv4_lpm_key);
+    /*
+     * Value must be the cumulative candidate mask for the stored prefix.
+     *
+     * Since LPM lookup only returns the single longest matching entry,
+     * control-plane index construction must OR together all rules whose
+     * prefixes cover this key, not just the rules declared on the exact
+     * stored prefix length.
+     */
+    __type(value, mask1024_t);
+} src_prefix_lpm_map SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_LPM_TRIE);
+    __uint(max_entries, 4096);
+    __uint(map_flags, BPF_F_NO_PREALLOC);
+    __type(key, struct ipv4_lpm_key);
+    /* Same cumulative-mask contract as src_prefix_lpm_map. */
+    __type(value, mask1024_t);
+} dst_prefix_lpm_map SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_RINGBUF);
+    __uint(max_entries, 1 << 24);
+} event_ringbuf SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(max_entries, STAT_COUNT);
+    __type(key, __u32);
+    __type(value, __u64);
+} stats_map SEC(".maps");
+
+#endif
