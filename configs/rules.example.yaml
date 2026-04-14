@@ -1,8 +1,0 @@
-# Minimal sample rules for the first control-plane skeleton.
-rules:
-  - id: allow-dns
-    match: udp/53
-    action: observe
-  - id: suspicious-http-upload
-    match: http-upload
-    action: analyze
