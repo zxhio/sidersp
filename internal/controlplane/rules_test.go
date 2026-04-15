@@ -197,6 +197,36 @@ func TestLoadRulesRejectsEmptyAction(t *testing.T) {
 	}
 }
 
+func TestLoadRulesRejectsIPv6Prefix(t *testing.T) {
+	t.Parallel()
+
+	path := writeRulesFile(t, `{
+  "rules": [
+    {
+      "id": 1001,
+      "name": "ipv6-prefix",
+      "enabled": true,
+      "priority": 100,
+      "match": {
+        "src_prefixes": ["2001:db8::/32"]
+      },
+      "response": {
+        "action": "RST"
+      }
+    }
+  ]
+}`)
+
+	_, err := LoadRules(path)
+	if err == nil {
+		t.Fatal("LoadRules() error = nil, want IPv4-only validation error")
+	}
+
+	if !strings.Contains(err.Error(), "only IPv4 CIDRs are supported") {
+		t.Fatalf("LoadRules() error = %q, want IPv4-only validation error", err)
+	}
+}
+
 func writeRulesFile(t *testing.T, contents string) string {
 	t.Helper()
 

@@ -142,6 +142,9 @@ func normalizePrefixes(prefixes []string) ([]string, error) {
 		if err != nil {
 			return nil, fmt.Errorf("invalid CIDR %q", raw)
 		}
+		if !prefix.Addr().Is4() {
+			return nil, fmt.Errorf("only IPv4 CIDRs are supported, got %q", raw)
+		}
 		normalized = append(normalized, prefix.Masked().String())
 	}
 
