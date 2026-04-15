@@ -14,7 +14,7 @@
 #include <linux/types.h>
 #include <linux/in6.h>
 
-#include "mask1024.h"
+#include "mask.h"
 
 #define VLAN_ID_NONE 0xffff
 
@@ -108,7 +108,7 @@ struct rule_meta {
 };
 
 struct global_cfg {
-    mask1024_t all_enabled_rules;
+    mask_t all_enabled_rules;
 };
 
 struct ipv4_lpm_key {

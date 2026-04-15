@@ -6,7 +6,7 @@ Packet In
    ▼
 ┌──────────────────────────────────────────────────────────────┐
 │  parse_packet()                                              │
-│  Ethernet → [VLAN] → IPv4/IPv6/ARP → TCP/UDP/ICMP            │
+│  Ethernet → [VLAN] → IPv4 → TCP/UDP                          │
 │  extract: sip, dip, sport, dport, vlan, tcp_flags, payload   │
 └──────────────────────┬───────────────────────────────────────┘
                        │ fail → XDP_PASS
@@ -14,7 +14,7 @@ Packet In
 ┌──────────────────────────────────────────────────────────────┐
 │  RULE MATCHING PIPELINE                                      │
 │                                                              │
-│  1. candidates = global_cfg.all_enabled_rules   (mask1024)   │
+│  1. candidates = global_cfg.all_enabled_rules   (mask)       │
 │                         │                                    │
 │                         ▼                                    │
 │  2. Index pre-filter (AND candidates per dimension)          │
@@ -30,8 +30,8 @@ Packet In
 │                         │ NO                                 │
 │                         ▼                                    │
 │  3. detect_conditions() → pkt_conds bitmask                  │
-│     VLAN / SRC_PORT / DST_PORT / TCP_SYN / HTTP_METHOD /     │
-│     HTTP_11 / SRC_PREFIX / DST_PREFIX                        │
+│     VLAN / SRC_PORT / DST_PORT / TCP_SYN /                   │
+│     SRC_PREFIX / DST_PREFIX                                  │
 │                         │                                    │
 │                         ▼                                    │
 │  4. Feature pre-filter                                       │
@@ -59,21 +59,23 @@ Packet In
 
 ## Key Concepts
 
-### mask1024_t — 1024-bit candidate bitmap
+### mask_t
+
+Fixed-size bitmap backed by an array of `__u64` words. Each bit represents a rule slot; a set bit indicates the rule at that slot is a candidate.
 
 ```
-  bits[0]     bits[1]          bits[15]
+  bits[0]     bits[1]           bits[N-1]
   ┌──────────┬──────────┬···┬──────────┐
-  │ 64 bits  │ 64 bits  │   │ 64 bits  │  = 1024 bits total
+  │ 64 bits  │ 64 bits  │   │ 64 bits  │
   └──────────┴──────────┴···┴──────────┘
-  bit N = 1  →  rule at slot N is a candidate
+  bit K = 1  →  rule at slot K is a candidate
 ```
 
-Layout: `slot = group * 64 + bit`, where group ∈ [0,15], bit ∈ [0,63].
+Layout: `slot = group * 64 + bit`, where `group ∈ [0, N)`, `bit ∈ [0, 63)`. Total capacity = `N × 64`.
 
 ### Inverted Index Maps
 
-Each index map value is a `mask1024_t` representing "which rules match this key on this dimension."
+Each index map value is a `mask_t` representing "which rules match this key on this dimension."
 
 ### Filtering = AND reduction
 
@@ -98,7 +100,7 @@ Candidates are narrowed by bitwise-AND across each dimension:
 After index and feature pre-filtering, the remaining set bits in the candidates bitmap are the potential rule matches. `pick_best_rule` does the following:
 
 ```
-  for group 0..15:
+  for group 0..RULE_GROUPS-1:
     word = candidates.bits[group]
     if word == 0: skip
 

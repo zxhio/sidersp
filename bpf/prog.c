@@ -3,40 +3,56 @@
 #include <linux/if_ether.h>
 #include <linux/in.h>
 #include <linux/ip.h>
-#include <linux/ipv6.h>
 #include <linux/tcp.h>
 #include <linux/udp.h>
-#include <linux/icmp.h>
-#include <linux/icmpv6.h>
 
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_endian.h>
 
 #include "maps.h"
 
-#ifndef IPPROTO_ICMP
-#define IPPROTO_ICMP 1
-#endif
 #ifndef IPPROTO_TCP
 #define IPPROTO_TCP 6
 #endif
 #ifndef IPPROTO_UDP
 #define IPPROTO_UDP 17
 #endif
+
+#if 0
+/*
+ * Deferred protocol / payload support kept for later re-enable.
+ *
+ * Current XDP build stays on the minimal fast path:
+ * Ethernet/VLAN + IPv4 + TCP/UDP + shallow conditions.
+ *
+ * Re-enable in this order to keep verifier pressure manageable:
+ * 1. ARP
+ * 2. ICMP
+ * 3. IPv6
+ * 4. HTTP payload features
+ */
+#include <linux/ipv6.h>
+#include <linux/icmp.h>
+#include <linux/icmpv6.h>
+
+#ifndef IPPROTO_ICMP
+#define IPPROTO_ICMP 1
+#endif
 #ifndef IPPROTO_ICMPV6
 #define IPPROTO_ICMPV6 58
 #endif
-
-struct vlan_hdr {
-    __be16 tci;
-    __be16 encapsulated_proto;
-};
 
 struct arp_eth_ipv4 {
     __u8 sha[ETH_ALEN];
     __u8 sip[4];
     __u8 tha[ETH_ALEN];
     __u8 dip[4];
+};
+#endif
+
+struct vlan_hdr {
+    __be16 tci;
+    __be16 encapsulated_proto;
 };
 
 static __always_inline void stat_inc(__u32 idx)
@@ -47,6 +63,8 @@ static __always_inline void stat_inc(__u32 idx)
         (*val)++;
 }
 
+#if 0
+/* Deferred HTTP payload feature helpers. */
 static __always_inline int payload_prefix_eq(const struct pkt_ctx *ctx, void *data_end,
                                              const char *lit, __u32 lit_len)
 {
@@ -58,7 +76,6 @@ static __always_inline int payload_prefix_eq(const struct pkt_ctx *ctx, void *da
     if ((const void *)(p + lit_len) > data_end)
         return 0;
 
-#pragma clang loop unroll(full)
     for (i = 0; i < 8; i++) {
         if (i >= lit_len)
             break;
@@ -77,7 +94,6 @@ static __always_inline int payload_eq_at(const char *p, void *data_end, __u32 of
     if ((const void *)(p + off + lit_len) > data_end)
         return 0;
 
-#pragma clang loop unroll(full)
     for (i = 0; i < 8; i++) {
         if (i >= lit_len)
             break;
@@ -103,6 +119,7 @@ static __always_inline int payload_contains_http11(const struct pkt_ctx *ctx, vo
     if (ctx->payload_len < max_scan + 8)
         max_scan = ctx->payload_len - 8;
 
+#pragma clang loop unroll(disable)
     for (off = 0; off < 24; off++) {
         if (off > max_scan)
             break;
@@ -112,8 +129,9 @@ static __always_inline int payload_contains_http11(const struct pkt_ctx *ctx, vo
 
     return 0;
 }
+#endif
 
-static __always_inline __u32 detect_conditions(const struct pkt_ctx *ctx, void *data_end)
+static __u32 detect_conditions(const struct pkt_ctx *ctx)
 {
     __u32 pkt_conds = 0;
 
@@ -126,6 +144,8 @@ static __always_inline __u32 detect_conditions(const struct pkt_ctx *ctx, void *
     if (ctx->tcp_flags & TCP_FLAG_SYN)
         pkt_conds |= COND_TCP_SYN;
 
+#if 0
+    /* Deferred HTTP payload-derived conditions. */
     if (payload_prefix_eq(ctx, data_end, "GET ", 4) ||
         payload_prefix_eq(ctx, data_end, "POST ", 5) ||
         payload_prefix_eq(ctx, data_end, "HEAD ", 5))
@@ -133,25 +153,26 @@ static __always_inline __u32 detect_conditions(const struct pkt_ctx *ctx, void *
 
     if (payload_contains_http11(ctx, data_end))
         pkt_conds |= COND_HTTP_11;
+#endif
 
     return pkt_conds;
 }
 
-static __always_inline void apply_u16_index(void *map, __u16 key, mask1024_t *candidates)
+static __always_inline void apply_u16_index(void *map, __u16 key, mask_t *candidates)
 {
-    const mask1024_t *m = bpf_map_lookup_elem(map, &key);
+    const mask_t *m = bpf_map_lookup_elem(map, &key);
 
     if (m)
-        mask1024_and(candidates, m);
+        mask_and(candidates, m);
 }
 
-static __always_inline int apply_ipv4_lpm_index(void *map, __be32 addr, mask1024_t *candidates)
+static __always_inline int apply_ipv4_lpm_index(void *map, __be32 addr, mask_t *candidates)
 {
     struct ipv4_lpm_key key = {
         .prefixlen = 32,
         .addr = addr,
     };
-    const mask1024_t *m = bpf_map_lookup_elem(map, &key);
+    const mask_t *m = bpf_map_lookup_elem(map, &key);
 
     /*
      * This relies on the LPM trie value being a cumulative candidate mask
@@ -162,11 +183,11 @@ static __always_inline int apply_ipv4_lpm_index(void *map, __be32 addr, mask1024
     if (!m)
         return 0;
 
-    mask1024_and(candidates, m);
+    mask_and(candidates, m);
     return 1;
 }
 
-static __always_inline void apply_feature_prefilter(__u32 pkt_conds, mask1024_t *candidates)
+static void apply_feature_prefilter(__u32 pkt_conds, mask_t *candidates)
 {
     const __u32 feature_bits[] = {
         COND_HTTP_METHOD,
@@ -175,17 +196,16 @@ static __always_inline void apply_feature_prefilter(__u32 pkt_conds, mask1024_t 
     };
     __u32 i;
 
-#pragma clang loop unroll(full)
     for (i = 0; i < 3; i++) {
         __u32 key = feature_bits[i];
-        const mask1024_t *m;
+        const mask_t *m;
 
         if (!(pkt_conds & key))
             continue;
 
         m = bpf_map_lookup_elem(&feature_index_map, &key);
         if (m)
-            mask1024_and(candidates, m);
+            mask_and(candidates, m);
     }
 }
 
@@ -194,21 +214,19 @@ static __always_inline int rule_matches(const struct rule_meta *rule, __u32 pkt_
     return (pkt_conds & rule->required_mask) == rule->required_mask;
 }
 
-static __always_inline int pick_best_rule(const mask1024_t *candidates, __u32 pkt_conds,
-                                          struct rule_meta *best_rule)
+static int pick_best_rule(const mask_t *candidates, __u32 pkt_conds,
+                          struct rule_meta *best_rule)
 {
     __u32 group;
     __u32 bit;
     int found = 0;
 
-#pragma clang loop unroll(full)
     for (group = 0; group < RULE_GROUPS; group++) {
         __u64 word = candidates->bits[group];
 
         if (!word)
             continue;
 
-#pragma clang loop unroll(full)
         for (bit = 0; bit < RULES_PER_GROUP; bit++) {
             __u32 slot;
             const struct rule_meta *rule;
@@ -258,24 +276,7 @@ static __always_inline void emit_event(const struct pkt_ctx *ctx, const struct r
     bpf_ringbuf_submit(evt, 0);
 }
 
-static __always_inline parse_err_t parse_icmp(struct pkt_ctx *ctx, void *data, void *data_end)
-{
-    struct icmphdr *icmp = data;
-    void *payload;
-
-    if ((void *)(icmp + 1) > data_end)
-        return PARSE_ERR_TRANSPORT_SHORT;
-
-    payload = icmp + 1;
-    if (payload > data_end)
-        return PARSE_ERR_TRANSPORT_SHORT;
-
-    ctx->payload = payload;
-    ctx->payload_len = (__u16)((long)data_end - (long)payload);
-    return PARSE_OK;
-}
-
-static __always_inline parse_err_t parse_udp(struct pkt_ctx *ctx, void *data, void *data_end)
+static parse_err_t parse_udp(struct pkt_ctx *ctx, void *data, void *data_end)
 {
     struct udphdr *udp = data;
     void *payload;
@@ -295,7 +296,27 @@ static __always_inline parse_err_t parse_udp(struct pkt_ctx *ctx, void *data, vo
     return PARSE_OK;
 }
 
-static __always_inline parse_err_t parse_tcp(struct pkt_ctx *ctx, void *data, void *data_end)
+#if 0
+/* Deferred ICMP parser support. */
+static __always_inline parse_err_t parse_icmp(struct pkt_ctx *ctx, void *data, void *data_end)
+{
+    struct icmphdr *icmp = data;
+    void *payload;
+
+    if ((void *)(icmp + 1) > data_end)
+        return PARSE_ERR_TRANSPORT_SHORT;
+
+    payload = icmp + 1;
+    if (payload > data_end)
+        return PARSE_ERR_TRANSPORT_SHORT;
+
+    ctx->payload = payload;
+    ctx->payload_len = (__u16)((long)data_end - (long)payload);
+    return PARSE_OK;
+}
+#endif
+
+static parse_err_t parse_tcp(struct pkt_ctx *ctx, void *data, void *data_end)
 {
     struct tcphdr *tcp = data;
     __u32 doff_len;
@@ -328,8 +349,8 @@ static __always_inline parse_err_t parse_tcp(struct pkt_ctx *ctx, void *data, vo
     return PARSE_OK;
 }
 
-static __always_inline parse_err_t parse_ip_l4(struct pkt_ctx *ctx, void *l4,
-                                               void *data_end, __u8 ip_proto)
+static parse_err_t parse_ip_l4(struct pkt_ctx *ctx, void *l4,
+                               void *data_end, __u8 ip_proto)
 {
     ctx->ip_proto = ip_proto;
 
@@ -338,15 +359,17 @@ static __always_inline parse_err_t parse_ip_l4(struct pkt_ctx *ctx, void *l4,
         return parse_tcp(ctx, l4, data_end);
     case IPPROTO_UDP:
         return parse_udp(ctx, l4, data_end);
+#if 0
     case IPPROTO_ICMP:
     case IPPROTO_ICMPV6:
         return parse_icmp(ctx, l4, data_end);
+#endif
     default:
         return PARSE_ERR_UNSUPPORTED_IP_PROTO;
     }
 }
 
-static __always_inline parse_err_t parse_ipv4(struct pkt_ctx *ctx, void *data, void *data_end)
+static parse_err_t parse_ipv4(struct pkt_ctx *ctx, void *data, void *data_end)
 {
     struct iphdr *ip = data;
     __u32 ihl_len;
@@ -369,6 +392,8 @@ static __always_inline parse_err_t parse_ipv4(struct pkt_ctx *ctx, void *data, v
     return parse_ip_l4(ctx, l4, data_end, ip->protocol);
 }
 
+#if 0
+/* Deferred IPv6 / ARP parser support. */
 static __always_inline parse_err_t parse_ipv6(struct pkt_ctx *ctx, void *data, void *data_end)
 {
     struct ipv6hdr *ip6 = data;
@@ -409,8 +434,9 @@ static __always_inline parse_err_t parse_arp(struct pkt_ctx *ctx, void *data, vo
     __builtin_memcpy(&ctx->daddr, arp4->dip, sizeof(ctx->daddr));
     return PARSE_OK;
 }
+#endif
 
-static __always_inline parse_err_t parse_vlan(struct pkt_ctx *ctx, void *data, void *data_end)
+static parse_err_t parse_vlan(struct pkt_ctx *ctx, void *data, void *data_end)
 {
     struct vlan_hdr *vh = data;
     __u16 encap;
@@ -428,16 +454,18 @@ static __always_inline parse_err_t parse_vlan(struct pkt_ctx *ctx, void *data, v
     switch (encap) {
     case ETH_P_IP:
         return parse_ipv4(ctx, vh + 1, data_end);
+#if 0
     case ETH_P_IPV6:
         return parse_ipv6(ctx, vh + 1, data_end);
     case ETH_P_ARP:
         return parse_arp(ctx, vh + 1, data_end);
+#endif
     default:
         return PARSE_ERR_UNSUPPORTED_ETH_PROTO;
     }
 }
 
-static __always_inline parse_err_t parse_packet(struct pkt_ctx *ctx, void *data, void *data_end)
+static parse_err_t parse_packet(struct pkt_ctx *ctx, void *data, void *data_end)
 {
     struct ethhdr *eth = data;
     __u16 proto;
@@ -463,10 +491,12 @@ static __always_inline parse_err_t parse_packet(struct pkt_ctx *ctx, void *data,
         return parse_vlan(ctx, eth + 1, data_end);
     case ETH_P_IP:
         return parse_ipv4(ctx, eth + 1, data_end);
+#if 0
     case ETH_P_IPV6:
         return parse_ipv6(ctx, eth + 1, data_end);
     case ETH_P_ARP:
         return parse_arp(ctx, eth + 1, data_end);
+#endif
     default:
         return PARSE_ERR_UNSUPPORTED_ETH_PROTO;
     }
@@ -480,7 +510,7 @@ int xdp_sidersp(struct xdp_md *xdp)
     struct pkt_ctx ctx;
     struct global_cfg *cfg;
     struct rule_meta best_rule = {};
-    mask1024_t candidates;
+    mask_t candidates;
     __u32 pkt_conds = 0;
     __u32 zero = 0;
     parse_err_t err;
@@ -497,7 +527,7 @@ int xdp_sidersp(struct xdp_md *xdp)
     if (!cfg)
         return XDP_PASS;
 
-    mask1024_copy(&candidates, &cfg->all_enabled_rules);
+    mask_copy(&candidates, &cfg->all_enabled_rules);
 
     if (ctx.vlan_id != VLAN_ID_NONE)
         apply_u16_index(&vlan_index_map, ctx.vlan_id, &candidates);
@@ -513,15 +543,15 @@ int xdp_sidersp(struct xdp_md *xdp)
             pkt_conds |= COND_DST_PREFIX;
     }
 
-    if (mask1024_is_zero(&candidates))
+    if (mask_is_zero(&candidates))
         return XDP_PASS;
 
     stat_inc(STAT_RULE_CANDIDATES);
 
-    pkt_conds |= detect_conditions(&ctx, data_end);
+    pkt_conds |= detect_conditions(&ctx);
     apply_feature_prefilter(pkt_conds, &candidates);
 
-    if (mask1024_is_zero(&candidates))
+    if (mask_is_zero(&candidates))
         return XDP_PASS;
     if (!pick_best_rule(&candidates, pkt_conds, &best_rule))
         return XDP_PASS;

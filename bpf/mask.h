@@ -1,18 +1,20 @@
 /*
- * mask1024_t — 1024-bit candidate bitmap for rule matching
+ * mask_t — fixed-size bitmap backed by an array of __u64 words.
+ * Each bit represents a rule slot; a set bit indicates the rule
+ * at that slot is a candidate.
  *
- *   bits[0]     bits[1]          bits[15]
+ *   bits[0]     bits[1]           bits[N-1]
  *   ┌──────────┬──────────┬···┬──────────┐
- *   │ 64 bits  │ 64 bits  │   │ 64 bits  │  = 1024 bits total
+ *   │ 64 bits  │ 64 bits  │   │ 64 bits  │
  *   └──────────┴──────────┴···┴──────────┘
- *   bit N = 1  →  rule at slot N is a candidate
+ *   bit K = 1  →  rule at slot K is a candidate
  *
- *   Layout:  slot = group * RULES_PER_GROUP + bit
- *            group = slot / 64   (0..15)
- *            bit   = slot % 64   (0..63)
+ *   Layout:  slot = group * 64 + bit
+ *            group ∈ [0, N)    where N = RULE_GROUPS
+ *            bit   ∈ [0, 63)
  */
-#ifndef SIDERSP_BPF_MASK1024_H
-#define SIDERSP_BPF_MASK1024_H
+#ifndef SIDERSP_BPF_MASK_H
+#define SIDERSP_BPF_MASK_H
 
 #include <linux/types.h>
 
@@ -20,42 +22,39 @@
 #define __always_inline inline __attribute__((always_inline))
 #endif
 
-#define RULE_GROUPS 16
+#define RULE_GROUPS 4
 #define RULES_PER_GROUP 64
 #define MAX_RULE_SLOTS (RULE_GROUPS * RULES_PER_GROUP)
 
 typedef struct {
     __u64 bits[RULE_GROUPS];
-} mask1024_t;
+} mask_t;
 
-static __always_inline void mask1024_zero(mask1024_t *m)
+static __always_inline void mask_zero(mask_t *m)
 {
     __u32 i;
 
-#pragma clang loop unroll(full)
     for (i = 0; i < RULE_GROUPS; i++)
         m->bits[i] = 0;
 }
 
-static __always_inline void mask1024_copy(mask1024_t *dst, const mask1024_t *src)
+static __always_inline void mask_copy(mask_t *dst, const mask_t *src)
 {
     __builtin_memcpy(dst, src, sizeof(*dst));
 }
 
-static __always_inline void mask1024_and(mask1024_t *dst, const mask1024_t *src)
+static __always_inline void mask_and(mask_t *dst, const mask_t *src)
 {
     __u32 i;
 
-#pragma clang loop unroll(full)
     for (i = 0; i < RULE_GROUPS; i++)
         dst->bits[i] &= src->bits[i];
 }
 
-static __always_inline int mask1024_is_zero(const mask1024_t *m)
+static __always_inline int mask_is_zero(const mask_t *m)
 {
     __u32 i;
 
-#pragma clang loop unroll(full)
     for (i = 0; i < RULE_GROUPS; i++) {
         if (m->bits[i])
             return 0;
@@ -64,7 +63,7 @@ static __always_inline int mask1024_is_zero(const mask1024_t *m)
     return 1;
 }
 
-static __always_inline void mask1024_set(mask1024_t *m, __u32 slot)
+static __always_inline void mask_set(mask_t *m, __u32 slot)
 {
     __u32 group;
     __u32 bit;
@@ -77,7 +76,7 @@ static __always_inline void mask1024_set(mask1024_t *m, __u32 slot)
     m->bits[group] |= (1ULL << bit);
 }
 
-static __always_inline int mask1024_test(const mask1024_t *m, __u32 slot)
+static __always_inline int mask_test(const mask_t *m, __u32 slot)
 {
     __u32 group;
     __u32 bit;

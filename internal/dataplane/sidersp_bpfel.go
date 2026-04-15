@@ -15,7 +15,7 @@ import (
 
 type siderspGlobalCfg struct {
 	_               structs.HostLayout
-	AllEnabledRules siderspMask1024T
+	AllEnabledRules siderspMaskT
 }
 
 type siderspIpv4LpmKey struct {
@@ -24,9 +24,9 @@ type siderspIpv4LpmKey struct {
 	Addr      uint32
 }
 
-type siderspMask1024T struct {
+type siderspMaskT struct {
 	_    structs.HostLayout
-	Bits [16]uint64
+	Bits [4]uint64
 }
 
 type siderspRuleMeta struct {
