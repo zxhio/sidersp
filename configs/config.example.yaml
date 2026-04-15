@@ -1,10 +1,10 @@
 # Minimal local config for the first control-plane skeleton.
-platform:
-  name: sidersp
-  mode: local
-
 controlplane:
   rules_path: configs/rules.example.json
+
+dataplane:
+  interface: eth0
+  attach_mode: generic
 
 console:
   listen_addr: 127.0.0.1:8080
