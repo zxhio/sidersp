@@ -3,10 +3,11 @@ package main
 import (
 	"context"
 	"flag"
-	"log"
 	"os"
 	"os/signal"
 	"syscall"
+
+	"github.com/sirupsen/logrus"
 
 	"sidersp/internal/config"
 	"sidersp/internal/controlplane"
@@ -26,13 +27,13 @@ func main() {
 
 	go func() {
 		sig := <-sigCh
-		log.Printf("sidersp stopping signal=%s", sig)
+		logrus.WithField("signal", sig.String()).Info("Stopped service")
 		cancel()
 	}()
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
-		log.Fatalf("load config %s: %v", *configPath, err)
+		logrus.WithError(err).WithField("config_path", *configPath).Fatal("Fail to load config")
 	}
 
 	dp, err := dataplane.Open(dataplane.Options{
@@ -40,17 +41,20 @@ func main() {
 		AttachMode: cfg.Dataplane.AttachMode,
 	})
 	if err != nil {
-		log.Fatalf("open dataplane: %v", err)
+		logrus.WithError(err).Fatal("Fail to open dataplane")
 	}
 	defer func() {
 		if err := dp.Close(); err != nil {
-			log.Printf("close dataplane: %v", err)
+			logrus.WithError(err).WithField("interface", cfg.Dataplane.Interface).Error("Fail to close dataplane")
 		}
 	}()
 
-	cp := controlplane.NewRuntime(cfg, dp, log.Default())
-	log.Printf("sidersp starting config=%s iface=%s", *configPath, cfg.Dataplane.Interface)
+	cp := controlplane.NewRuntime(cfg, dp)
+	logrus.WithFields(logrus.Fields{
+		"config_path": *configPath,
+		"interface":   cfg.Dataplane.Interface,
+	}).Info("Started service")
 	if err := cp.Run(ctx); err != nil {
-		log.Fatalf("run controlplane: %v", err)
+		logrus.WithError(err).Fatal("Fail to run controlplane")
 	}
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"log"
 	"net"
 	"net/netip"
 	"slices"
@@ -14,6 +13,7 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
+	"github.com/sirupsen/logrus"
 
 	"sidersp/internal/controlplane"
 )
@@ -44,7 +44,6 @@ type Runtime struct {
 	xdpLink link.Link
 	iface   string
 	opts    Options
-	logger  *log.Logger
 }
 
 type ruleEvent struct {
@@ -77,10 +76,9 @@ func Open(opts Options) (*Runtime, error) {
 	}
 
 	return &Runtime{
-		objs:   objs,
-		iface:  opts.Interface,
-		opts:   opts,
-		logger: log.Default(),
+		objs:  objs,
+		iface: opts.Interface,
+		opts:  opts,
 	}, nil
 }
 
@@ -95,7 +93,7 @@ func (r *Runtime) Close() error {
 	return r.objs.Close()
 }
 
-func (r *Runtime) RunEventStream(ctx context.Context, logger *log.Logger) error {
+func (r *Runtime) RunEventStream(ctx context.Context) error {
 	reader, err := ringbuf.NewReader(r.objs.EventRingbuf)
 	if err != nil {
 		return fmt.Errorf("open event ringbuf: %w", err)
@@ -115,35 +113,28 @@ func (r *Runtime) RunEventStream(ctx context.Context, logger *log.Logger) error 
 				if ctx.Err() != nil || err == ringbuf.ErrClosed {
 					return
 				}
-				if logger != nil {
-					logger.Printf("dataplane event stream error: %v", err)
-				}
+				logrus.WithError(err).Error("Fail to read dataplane event")
 				return
 			}
 
 			evt, err := decodeRuleEvent(record.RawSample)
 			if err != nil {
-				if logger != nil {
-					logger.Printf("dataplane event decode error: %v", err)
-				}
+				logrus.WithError(err).Error("Fail to decode dataplane event")
 				continue
 			}
 
-			if logger != nil {
-				logger.Printf(
-					"rule matched rule_id=%d action=%s sip=%s dip=%s sport=%d dport=%d proto=%d tcp_flags=%d pkt_conds=%s payload_len=%d",
-					evt.RuleID,
-					actionName(evt.Action),
-					ipv4String(evt.SIP),
-					ipv4String(evt.DIP),
-					evt.SPort,
-					evt.DPort,
-					evt.IPProto,
-					evt.TCPFlags,
-					conditionNames(evt.PktConds),
-					evt.PayloadLen,
-				)
-			}
+			logrus.WithFields(logrus.Fields{
+				"rule_id":     evt.RuleID,
+				"action":      actionName(evt.Action),
+				"sip":         ipv4String(evt.SIP),
+				"dip":         ipv4String(evt.DIP),
+				"sport":       evt.SPort,
+				"dport":       evt.DPort,
+				"proto":       evt.IPProto,
+				"tcp_flags":   evt.TCPFlags,
+				"pkt_conds":   conditionNames(evt.PktConds),
+				"payload_len": evt.PayloadLen,
+			}).Info("Matched rule")
 		}
 	}()
 
@@ -539,40 +530,12 @@ func writeGlobalConfig(m *ebpf.Map, cfg siderspGlobalCfg) error {
 }
 
 func (r *Runtime) logSnapshot(snapshot mapSnapshot) {
-	if r.logger == nil {
-		return
-	}
-
-	r.logger.Printf(
-		"dataplane all_enabled_rules slots=%s bits=%s",
-		formatMaskSlots(snapshot.globalCfg.AllEnabledRules),
-		formatMaskBits(snapshot.globalCfg.AllEnabledRules),
-	)
-	r.logger.Printf(
-		"dataplane vlan_optional_rules slots=%s bits=%s",
-		formatMaskSlots(snapshot.globalCfg.VlanOptionalRules),
-		formatMaskBits(snapshot.globalCfg.VlanOptionalRules),
-	)
-	r.logger.Printf(
-		"dataplane src_port_optional_rules slots=%s bits=%s",
-		formatMaskSlots(snapshot.globalCfg.SrcPortOptionalRules),
-		formatMaskBits(snapshot.globalCfg.SrcPortOptionalRules),
-	)
-	r.logger.Printf(
-		"dataplane dst_port_optional_rules slots=%s bits=%s",
-		formatMaskSlots(snapshot.globalCfg.DstPortOptionalRules),
-		formatMaskBits(snapshot.globalCfg.DstPortOptionalRules),
-	)
-	r.logger.Printf(
-		"dataplane src_prefix_optional_rules slots=%s bits=%s",
-		formatMaskSlots(snapshot.globalCfg.SrcPrefixOptionalRules),
-		formatMaskBits(snapshot.globalCfg.SrcPrefixOptionalRules),
-	)
-	r.logger.Printf(
-		"dataplane dst_prefix_optional_rules slots=%s bits=%s",
-		formatMaskSlots(snapshot.globalCfg.DstPrefixOptionalRules),
-		formatMaskBits(snapshot.globalCfg.DstPrefixOptionalRules),
-	)
+	r.logMask("all_enabled_rules", snapshot.globalCfg.AllEnabledRules)
+	r.logMask("vlan_optional_rules", snapshot.globalCfg.VlanOptionalRules)
+	r.logMask("src_port_optional_rules", snapshot.globalCfg.SrcPortOptionalRules)
+	r.logMask("dst_port_optional_rules", snapshot.globalCfg.DstPortOptionalRules)
+	r.logMask("src_prefix_optional_rules", snapshot.globalCfg.SrcPrefixOptionalRules)
+	r.logMask("dst_prefix_optional_rules", snapshot.globalCfg.DstPrefixOptionalRules)
 
 	slots := make([]uint32, 0, len(snapshot.ruleIndex))
 	for slot := range snapshot.ruleIndex {
@@ -582,15 +545,14 @@ func (r *Runtime) logSnapshot(snapshot mapSnapshot) {
 
 	for _, slot := range slots {
 		meta := snapshot.ruleIndex[slot]
-		r.logger.Printf(
-			"dataplane rule_index put slot=%d rule_id=%d priority=%d enabled=%d action=%s required_mask=%s",
-			slot,
-			meta.RuleId,
-			meta.Priority,
-			meta.Enabled,
-			actionName(meta.Action),
-			conditionNames(meta.RequiredMask),
-		)
+		logrus.WithFields(logrus.Fields{
+			"slot":          slot,
+			"rule_id":       meta.RuleId,
+			"priority":      meta.Priority,
+			"enabled":       meta.Enabled,
+			"action":        actionName(meta.Action),
+			"required_mask": conditionNames(meta.RequiredMask),
+		}).Info("Updated dataplane rule index")
 	}
 
 	r.logU16MaskIndex("vlan_index", snapshot.vlanIndex)
@@ -598,7 +560,7 @@ func (r *Runtime) logSnapshot(snapshot mapSnapshot) {
 	r.logU16MaskIndex("dst_port_index", snapshot.dstPortIndex)
 	r.logPrefixMaskIndex("src_prefix_index", snapshot.srcPrefixIndex)
 	r.logPrefixMaskIndex("dst_prefix_index", snapshot.dstPrefixIndex)
-	r.logger.Printf("dataplane feature_index put entries=[]")
+	logrus.WithField("index", "feature_index").Info("Updated dataplane index")
 }
 
 func (r *Runtime) logU16MaskIndex(name string, index map[uint16]siderspMaskT) {
@@ -609,19 +571,21 @@ func (r *Runtime) logU16MaskIndex(name string, index map[uint16]siderspMaskT) {
 	slices.Sort(keys)
 
 	if len(keys) == 0 {
-		r.logger.Printf("dataplane %s put entries=[]", name)
+		logrus.WithFields(logrus.Fields{
+			"index":   name,
+			"entries": "[]",
+		}).Info("Updated dataplane index")
 		return
 	}
 
 	for _, key := range keys {
 		mask := index[uint16(key)]
-		r.logger.Printf(
-			"dataplane %s put key=%d slots=%s bits=%s",
-			name,
-			key,
-			formatMaskSlots(mask),
-			formatMaskBits(mask),
-		)
+		logrus.WithFields(logrus.Fields{
+			"index": name,
+			"key":   key,
+			"slots": formatMaskSlots(mask),
+			"bits":  formatMaskBits(mask),
+		}).Info("Updated dataplane index")
 	}
 }
 
@@ -644,20 +608,30 @@ func (r *Runtime) logPrefixMaskIndex(name string, index map[siderspIpv4LpmKey]si
 	})
 
 	if len(keys) == 0 {
-		r.logger.Printf("dataplane %s put entries=[]", name)
+		logrus.WithFields(logrus.Fields{
+			"index":   name,
+			"entries": "[]",
+		}).Info("Updated dataplane index")
 		return
 	}
 
 	for _, key := range keys {
 		mask := index[key]
-		r.logger.Printf(
-			"dataplane %s put prefix=%s slots=%s bits=%s",
-			name,
-			formatLPMKey(key),
-			formatMaskSlots(mask),
-			formatMaskBits(mask),
-		)
+		logrus.WithFields(logrus.Fields{
+			"index":  name,
+			"prefix": formatLPMKey(key),
+			"slots":  formatMaskSlots(mask),
+			"bits":   formatMaskBits(mask),
+		}).Info("Updated dataplane index")
 	}
+}
+
+func (r *Runtime) logMask(name string, mask siderspMaskT) {
+	logrus.WithFields(logrus.Fields{
+		"mask":  name,
+		"slots": formatMaskSlots(mask),
+		"bits":  formatMaskBits(mask),
+	}).Info("Updated dataplane mask")
 }
 
 func formatMaskSlots(mask siderspMaskT) string {

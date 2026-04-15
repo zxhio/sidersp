@@ -3,7 +3,8 @@ package controlplane
 import (
 	"context"
 	"fmt"
-	"log"
+
+	"github.com/sirupsen/logrus"
 
 	"sidersp/internal/config"
 )
@@ -13,20 +14,18 @@ type RuleSyncer interface {
 }
 
 type EventStreamer interface {
-	RunEventStream(context.Context, *log.Logger) error
+	RunEventStream(context.Context) error
 }
 
 type Runtime struct {
 	cfg    config.Config
 	syncer RuleSyncer
-	logger *log.Logger
 }
 
-func NewRuntime(cfg config.Config, syncer RuleSyncer, logger *log.Logger) *Runtime {
+func NewRuntime(cfg config.Config, syncer RuleSyncer) *Runtime {
 	return &Runtime{
 		cfg:    cfg,
 		syncer: syncer,
-		logger: logger,
 	}
 }
 
@@ -40,10 +39,10 @@ func (r *Runtime) bootstrap() (RuleSet, error) {
 		return RuleSet{}, fmt.Errorf("sync rules to dataplane: %w", err)
 	}
 
-	if r.logger != nil {
-		r.logger.Printf("controlplane bootstrapped rules=%d rules_path=%s",
-			len(rules.Rules), r.cfg.ControlPlane.RulesPath)
-	}
+	logrus.WithFields(logrus.Fields{
+		"rules":      len(rules.Rules),
+		"rules_path": r.cfg.ControlPlane.RulesPath,
+	}).Info("Bootstrapped controlplane")
 
 	return rules, nil
 }
@@ -58,12 +57,10 @@ func (r *Runtime) Run(ctx context.Context) error {
 		return err
 	}
 
-	if r.logger != nil {
-		r.logger.Printf("controlplane runtime running rules=%d", len(rules.Rules))
-	}
+	logrus.WithField("rules", len(rules.Rules)).Info("Started controlplane runtime")
 
 	if streamer, ok := r.syncer.(EventStreamer); ok {
-		if err := streamer.RunEventStream(ctx, r.logger); err != nil {
+		if err := streamer.RunEventStream(ctx); err != nil {
 			return fmt.Errorf("start event stream: %w", err)
 		}
 	}
