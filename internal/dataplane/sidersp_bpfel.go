@@ -14,8 +14,13 @@ import (
 )
 
 type siderspGlobalCfg struct {
-	_               structs.HostLayout
-	AllEnabledRules siderspMaskT
+	_                      structs.HostLayout
+	AllEnabledRules        siderspMaskT
+	VlanOptionalRules      siderspMaskT
+	SrcPortOptionalRules   siderspMaskT
+	DstPortOptionalRules   siderspMaskT
+	SrcPrefixOptionalRules siderspMaskT
+	DstPrefixOptionalRules siderspMaskT
 }
 
 type siderspIpv4LpmKey struct {

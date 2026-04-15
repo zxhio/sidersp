@@ -109,6 +109,11 @@ struct rule_meta {
 
 struct global_cfg {
     mask_t all_enabled_rules;
+    mask_t vlan_optional_rules;
+    mask_t src_port_optional_rules;
+    mask_t dst_port_optional_rules;
+    mask_t src_prefix_optional_rules;
+    mask_t dst_prefix_optional_rules;
 };
 
 struct ipv4_lpm_key {
@@ -129,7 +134,7 @@ struct rule_event {
     __u8 tcp_flags;
     __u8 ip_proto;
     __u16 payload_len;
-};
+} __attribute__((packed));
 
 enum stat_idx {
     STAT_RX_PACKETS = 0,

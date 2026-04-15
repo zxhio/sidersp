@@ -158,12 +158,15 @@ static __u32 detect_conditions(const struct pkt_ctx *ctx)
     return pkt_conds;
 }
 
-static __always_inline void apply_u16_index(void *map, __u16 key, mask_t *candidates)
+static __always_inline int apply_u16_index(void *map, __u16 key, mask_t *candidates)
 {
     const mask_t *m = bpf_map_lookup_elem(map, &key);
 
-    if (m)
-        mask_and(candidates, m);
+    if (!m)
+        return 0;
+
+    mask_and(candidates, m);
+    return 1;
 }
 
 static __always_inline int apply_ipv4_lpm_index(void *map, __be32 addr, mask_t *candidates)
@@ -530,17 +533,25 @@ int xdp_sidersp(struct xdp_md *xdp)
     mask_copy(&candidates, &cfg->all_enabled_rules);
 
     if (ctx.vlan_id != VLAN_ID_NONE)
-        apply_u16_index(&vlan_index_map, ctx.vlan_id, &candidates);
+        if (!apply_u16_index(&vlan_index_map, ctx.vlan_id, &candidates))
+            mask_and(&candidates, &cfg->vlan_optional_rules);
     if (ctx.sport != 0)
-        apply_u16_index(&src_port_index_map, ctx.sport, &candidates);
+        if (!apply_u16_index(&src_port_index_map, ctx.sport, &candidates))
+            mask_and(&candidates, &cfg->src_port_optional_rules);
     if (ctx.dport != 0)
-        apply_u16_index(&dst_port_index_map, ctx.dport, &candidates);
+        if (!apply_u16_index(&dst_port_index_map, ctx.dport, &candidates))
+            mask_and(&candidates, &cfg->dst_port_optional_rules);
 
     if (ctx.ip_version == 4) {
         if (apply_ipv4_lpm_index(&src_prefix_lpm_map, ctx.saddr, &candidates))
             pkt_conds |= COND_SRC_PREFIX;
+        else
+            mask_and(&candidates, &cfg->src_prefix_optional_rules);
+
         if (apply_ipv4_lpm_index(&dst_prefix_lpm_map, ctx.daddr, &candidates))
             pkt_conds |= COND_DST_PREFIX;
+        else
+            mask_and(&candidates, &cfg->dst_prefix_optional_rules);
     }
 
     if (mask_is_zero(&candidates))
