@@ -11,16 +11,19 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"sidersp/internal/controlplane"
+	"sidersp/internal/rule"
 )
 
 type RuleService interface {
 	Status() controlplane.Status
-	ListRules() []Rule
-	GetRule(id int) (Rule, error)
-	CreateRule(item Rule) (Rule, error)
-	UpdateRule(id int, item Rule) (Rule, error)
+	Stats(window string) (controlplane.Stats, error)
+	StatsWindows() []string
+	ListRules() []rule.Rule
+	GetRule(id int) (rule.Rule, error)
+	CreateRule(item rule.Rule) (rule.Rule, error)
+	UpdateRule(id int, item rule.Rule) (rule.Rule, error)
 	DeleteRule(id int) error
-	SetRuleEnabled(id int, enabled bool) (Rule, error)
+	SetRuleEnabled(id int, enabled bool) (rule.Rule, error)
 }
 
 type Server struct {
@@ -73,6 +76,8 @@ func (s *Server) newRouter() *gin.Engine {
 	handler := Handler{service: s.service}
 	v1 := router.Group("/api/v1")
 	v1.GET("/status", handler.getStatus)
+	v1.GET("/stats", handler.getStats)
+	v1.GET("/stats/windows", handler.listStatsWindows)
 	v1.GET("/rules", handler.listRules)
 	v1.POST("/rules", handler.createRule)
 	v1.GET("/rules/:id", handler.getRule)

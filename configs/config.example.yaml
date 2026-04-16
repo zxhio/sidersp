@@ -8,3 +8,17 @@ dataplane:
 
 console:
   listen_addr: 127.0.0.1:8080
+  stats_history:
+    windows:
+      - name: 10min
+        window: 10m
+        step: 10s
+        limit: 60
+      - name: 1d
+        window: 24h
+        step: 5m
+        limit: 288
+      - name: 30d
+        window: 720h
+        step: 1h
+        limit: 720

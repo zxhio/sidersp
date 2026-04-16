@@ -16,6 +16,7 @@ import (
 	"github.com/cilium/ebpf/rlimit"
 	"github.com/sirupsen/logrus"
 
+	"sidersp/internal/model"
 	"sidersp/internal/rule"
 )
 
@@ -176,6 +177,21 @@ func (r *Runtime) readKernelStats() (kernelStats, error) {
 		RuleCandidates: ruleCandidates,
 		MatchedRules:   matchedRules,
 		RingbufDropped: ringbufDropped,
+	}, nil
+}
+
+func (r *Runtime) ReadStats() (model.DataplaneStats, error) {
+	stats, err := r.readKernelStats()
+	if err != nil {
+		return model.DataplaneStats{}, err
+	}
+
+	return model.DataplaneStats{
+		RXPackets:      stats.RXPackets,
+		ParseFailed:    stats.ParseFailed,
+		RuleCandidates: stats.RuleCandidates,
+		MatchedRules:   stats.MatchedRules,
+		RingbufDropped: stats.RingbufDropped,
 	}, nil
 }
 
@@ -568,22 +584,22 @@ func (r *Runtime) resetMaps() error {
 		}
 	}
 
-	if err := clearMap(r.objs.VlanIndexMap); err != nil {
+	if err := clearU16Map(r.objs.VlanIndexMap); err != nil {
 		return fmt.Errorf("reset vlan_index_map: %w", err)
 	}
-	if err := clearMap(r.objs.SrcPortIndexMap); err != nil {
+	if err := clearU16Map(r.objs.SrcPortIndexMap); err != nil {
 		return fmt.Errorf("reset src_port_index_map: %w", err)
 	}
-	if err := clearMap(r.objs.DstPortIndexMap); err != nil {
+	if err := clearU16Map(r.objs.DstPortIndexMap); err != nil {
 		return fmt.Errorf("reset dst_port_index_map: %w", err)
 	}
-	if err := clearMap(r.objs.FeatureIndexMap); err != nil {
+	if err := clearU32Map(r.objs.FeatureIndexMap); err != nil {
 		return fmt.Errorf("reset feature_index_map: %w", err)
 	}
-	if err := clearMap(r.objs.SrcPrefixLpmMap); err != nil {
+	if err := clearPrefixMap(r.objs.SrcPrefixLpmMap); err != nil {
 		return fmt.Errorf("reset src_prefix_lpm_map: %w", err)
 	}
-	if err := clearMap(r.objs.DstPrefixLpmMap); err != nil {
+	if err := clearPrefixMap(r.objs.DstPrefixLpmMap); err != nil {
 		return fmt.Errorf("reset dst_prefix_lpm_map: %w", err)
 	}
 	if err := writeGlobalConfig(r.objs.GlobalCfgMap, siderspGlobalCfg{}); err != nil {
@@ -593,11 +609,49 @@ func (r *Runtime) resetMaps() error {
 	return nil
 }
 
-func clearMap(m *ebpf.Map) error {
-	var key any
-	var value any
+func clearU16Map(m *ebpf.Map) error {
+	var key uint16
+	var value siderspMaskT
 	iter := m.Iterate()
-	var keys []any
+	var keys []uint16
+	for iter.Next(&key, &value) {
+		keys = append(keys, key)
+	}
+	if err := iter.Err(); err != nil {
+		return err
+	}
+	for _, key := range keys {
+		if err := m.Delete(key); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func clearU32Map(m *ebpf.Map) error {
+	var key uint32
+	var value siderspMaskT
+	iter := m.Iterate()
+	var keys []uint32
+	for iter.Next(&key, &value) {
+		keys = append(keys, key)
+	}
+	if err := iter.Err(); err != nil {
+		return err
+	}
+	for _, key := range keys {
+		if err := m.Delete(key); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func clearPrefixMap(m *ebpf.Map) error {
+	var key siderspIpv4LpmKey
+	var value siderspMaskT
+	iter := m.Iterate()
+	var keys []siderspIpv4LpmKey
 	for iter.Next(&key, &value) {
 		keys = append(keys, key)
 	}

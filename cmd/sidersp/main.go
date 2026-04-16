@@ -51,7 +51,7 @@ func main() {
 		}
 	}()
 
-	cp := controlplane.NewRuntime(cfg, dp, dp)
+	cp := controlplane.NewRuntime(cfg, dp, dp, dp)
 	consoleServer := console.NewServer(cfg.Console.ListenAddr, cp)
 	logrus.WithFields(logrus.Fields{
 		"config_path": *configPath,

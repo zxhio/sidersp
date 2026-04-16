@@ -1,41 +1,25 @@
 package console
 
-import (
-	"sidersp/internal/controlplane"
-	"sidersp/internal/rule"
-)
-
-type Rule = rule.Rule
-
-type RuleMatch = rule.RuleMatch
-
-type RuleResponse = rule.RuleResponse
-
-type CreateRuleRequest struct {
-	ID       int          `json:"id"`
-	Name     string       `json:"name"`
-	Enabled  bool         `json:"enabled"`
-	Priority int          `json:"priority"`
-	Match    RuleMatch    `json:"match"`
-	Response RuleResponse `json:"response"`
+type RuleMatch struct {
+	VLANs       []int    `json:"vlans"`
+	SrcPrefixes []string `json:"src_prefixes"`
+	DstPrefixes []string `json:"dst_prefixes"`
+	SrcPorts    []int    `json:"src_ports"`
+	DstPorts    []int    `json:"dst_ports"`
+	Features    []string `json:"features"`
 }
 
-type UpdateRuleRequest struct {
-	ID       int          `json:"id"`
-	Name     string       `json:"name"`
-	Enabled  bool         `json:"enabled"`
-	Priority int          `json:"priority"`
-	Match    RuleMatch    `json:"match"`
-	Response RuleResponse `json:"response"`
+type RuleAction struct {
+	Action string `json:"action"`
 }
 
-type RuleResponseBody struct {
-	ID       int          `json:"id"`
-	Name     string       `json:"name"`
-	Enabled  bool         `json:"enabled"`
-	Priority int          `json:"priority"`
-	Match    RuleMatch    `json:"match"`
-	Response RuleResponse `json:"response"`
+type RuleBody struct {
+	ID       int        `json:"id"`
+	Name     string     `json:"name"`
+	Enabled  bool       `json:"enabled"`
+	Priority int        `json:"priority"`
+	Match    RuleMatch  `json:"match"`
+	Response RuleAction `json:"response"`
 }
 
 type StatusResponse struct {
@@ -46,75 +30,31 @@ type StatusResponse struct {
 	Enabled    int    `json:"enabled_rules"`
 }
 
-type apiError struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
+type StatsResponse struct {
+	TotalRules     int                    `json:"total_rules"`
+	EnabledRules   int                    `json:"enabled_rules"`
+	RXPackets      uint64                 `json:"rx_packets"`
+	ParseFailed    uint64                 `json:"parse_failed"`
+	RuleCandidates uint64                 `json:"rule_candidates"`
+	MatchedRules   uint64                 `json:"matched_rules"`
+	RingbufDropped uint64                 `json:"ringbuf_dropped"`
+	Histories      []StatsHistoryResponse `json:"histories"`
 }
 
-type errorEnvelope struct {
-	Error apiError `json:"error"`
+type StatsHistoryResponse struct {
+	Name   string               `json:"name"`
+	Window string               `json:"window"`
+	Step   string               `json:"step"`
+	Points []StatsPointResponse `json:"points"`
 }
 
-type dataEnvelope struct {
-	Data any `json:"data"`
+type StatsPointResponse struct {
+	Timestamp      string `json:"timestamp"`
+	TotalRules     int    `json:"total_rules"`
+	EnabledRules   int    `json:"enabled_rules"`
+	RXPackets      uint64 `json:"rx_packets"`
+	ParseFailed    uint64 `json:"parse_failed"`
+	RuleCandidates uint64 `json:"rule_candidates"`
+	MatchedRules   uint64 `json:"matched_rules"`
+	RingbufDropped uint64 `json:"ringbuf_dropped"`
 }
-
-type listEnvelope struct {
-	Data     any `json:"data"`
-	Total    int `json:"total"`
-	Page     int `json:"page"`
-	PageSize int `json:"page_size"`
-}
-
-func newRuleResponse(item Rule) RuleResponseBody {
-	return RuleResponseBody{
-		ID:       item.ID,
-		Name:     item.Name,
-		Enabled:  item.Enabled,
-		Priority: item.Priority,
-		Match:    item.Match,
-		Response: item.Response,
-	}
-}
-
-func newRulesResponse(items []Rule) []RuleResponseBody {
-	out := make([]RuleResponseBody, 0, len(items))
-	for _, item := range items {
-		out = append(out, newRuleResponse(item))
-	}
-	return out
-}
-
-func (r CreateRuleRequest) toRule() Rule {
-	return Rule{
-		ID:       r.ID,
-		Name:     r.Name,
-		Enabled:  r.Enabled,
-		Priority: r.Priority,
-		Match:    r.Match,
-		Response: r.Response,
-	}
-}
-
-func (r UpdateRuleRequest) toRule() Rule {
-	return Rule{
-		ID:       r.ID,
-		Name:     r.Name,
-		Enabled:  r.Enabled,
-		Priority: r.Priority,
-		Match:    r.Match,
-		Response: r.Response,
-	}
-}
-
-func newStatusResponse(item Status) StatusResponse {
-	return StatusResponse{
-		RulesPath:  item.RulesPath,
-		ListenAddr: item.ListenAddr,
-		Interface:  item.Interface,
-		TotalRules: item.TotalRules,
-		Enabled:    item.Enabled,
-	}
-}
-
-type Status = controlplane.Status

@@ -13,13 +13,31 @@ import (
 )
 
 type stubService struct {
-	status controlplane.Status
-	rules  []rule.Rule
+	status     controlplane.Status
+	stats      controlplane.Stats
+	windows    []string
+	statsByKey map[string]controlplane.Stats
+	lastWindow string
+	rules      []rule.Rule
 }
 
 func (s *stubService) Status() controlplane.Status { return s.status }
-func (s *stubService) ListRules() []Rule           { return append([]Rule(nil), s.rules...) }
-func (s *stubService) GetRule(id int) (Rule, error) {
+func (s *stubService) Stats(window string) (controlplane.Stats, error) {
+	s.lastWindow = window
+	if s.statsByKey != nil {
+		item, ok := s.statsByKey[window]
+		if !ok {
+			return controlplane.Stats{}, controlplane.ErrStatsWindowNotFound
+		}
+		return item, nil
+	}
+	return s.stats, nil
+}
+func (s *stubService) StatsWindows() []string {
+	return append([]string(nil), s.windows...)
+}
+func (s *stubService) ListRules() []rule.Rule { return append([]rule.Rule(nil), s.rules...) }
+func (s *stubService) GetRule(id int) (rule.Rule, error) {
 	for _, item := range s.rules {
 		if item.ID == id {
 			return item, nil
@@ -27,21 +45,21 @@ func (s *stubService) GetRule(id int) (Rule, error) {
 	}
 	return rule.Rule{}, controlplane.ErrRuleNotFound
 }
-func (s *stubService) CreateRule(item Rule) (Rule, error) {
+func (s *stubService) CreateRule(item rule.Rule) (rule.Rule, error) {
 	if err := validateStubRule(item); err != nil {
-		return Rule{}, err
+		return rule.Rule{}, err
 	}
 	for _, existing := range s.rules {
 		if existing.ID == item.ID {
-			return Rule{}, controlplane.ErrRuleConflict
+			return rule.Rule{}, controlplane.ErrRuleConflict
 		}
 	}
 	s.rules = append(s.rules, item)
 	return item, nil
 }
-func (s *stubService) UpdateRule(id int, item Rule) (Rule, error) {
+func (s *stubService) UpdateRule(id int, item rule.Rule) (rule.Rule, error) {
 	if err := validateStubRule(item); err != nil {
-		return Rule{}, err
+		return rule.Rule{}, err
 	}
 	for idx := range s.rules {
 		if s.rules[idx].ID == id {
@@ -49,7 +67,7 @@ func (s *stubService) UpdateRule(id int, item Rule) (Rule, error) {
 			return item, nil
 		}
 	}
-	return Rule{}, controlplane.ErrRuleNotFound
+	return rule.Rule{}, controlplane.ErrRuleNotFound
 }
 func (s *stubService) DeleteRule(id int) error {
 	for idx := range s.rules {
@@ -60,7 +78,7 @@ func (s *stubService) DeleteRule(id int) error {
 	}
 	return controlplane.ErrRuleNotFound
 }
-func (s *stubService) SetRuleEnabled(id int, enabled bool) (Rule, error) {
+func (s *stubService) SetRuleEnabled(id int, enabled bool) (rule.Rule, error) {
 	for idx := range s.rules {
 		if s.rules[idx].ID == id {
 			s.rules[idx].Enabled = enabled
@@ -70,7 +88,7 @@ func (s *stubService) SetRuleEnabled(id int, enabled bool) (Rule, error) {
 	return rule.Rule{}, controlplane.ErrRuleNotFound
 }
 
-func validateStubRule(item Rule) error {
+func validateStubRule(item rule.Rule) error {
 	switch {
 	case item.ID <= 0:
 		return controlplane.ErrRuleValidation
@@ -116,6 +134,114 @@ func TestListRules(t *testing.T) {
 	}
 	if len(body.Data) != 1 || body.Data[0].ID != 1 {
 		t.Fatalf("data = %+v, want first rule only", body.Data)
+	}
+}
+
+func TestGetStats(t *testing.T) {
+	t.Parallel()
+
+	service := &stubService{
+		statsByKey: map[string]controlplane.Stats{
+			"1d": {
+				TotalRules:     2,
+				EnabledRules:   1,
+				RXPackets:      100,
+				ParseFailed:    3,
+				RuleCandidates: 20,
+				MatchedRules:   8,
+				RingbufDropped: 1,
+				Histories: []controlplane.StatsHistorySeries{
+					{
+						Name:   "10min",
+						Window: "10m",
+						Step:   "10s",
+						Points: []controlplane.StatsPoint{
+							{
+								TotalRules:     2,
+								EnabledRules:   1,
+								RXPackets:      90,
+								ParseFailed:    2,
+								RuleCandidates: 18,
+								MatchedRules:   7,
+								RingbufDropped: 1,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	server := NewServer("127.0.0.1:0", service)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/stats?window=1d", nil)
+	rec := httptest.NewRecorder()
+	server.newRouter().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var body struct {
+		Data controlplane.Stats `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if body.Data.RXPackets != 100 || body.Data.EnabledRules != 1 {
+		t.Fatalf("stats = %+v, want rx_packets=100 enabled_rules=1", body.Data)
+	}
+	if service.lastWindow != "1d" {
+		t.Fatalf("window = %q, want 1d", service.lastWindow)
+	}
+	if len(body.Data.Histories) != 1 {
+		t.Fatalf("histories len = %d, want 1", len(body.Data.Histories))
+	}
+}
+
+func TestGetStatsInvalidWindow(t *testing.T) {
+	t.Parallel()
+
+	server := NewServer("127.0.0.1:0", &stubService{
+		statsByKey: map[string]controlplane.Stats{
+			"10min": {},
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/stats?window=bad", nil)
+	rec := httptest.NewRecorder()
+	server.newRouter().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
+func TestListStatsWindows(t *testing.T) {
+	t.Parallel()
+
+	server := NewServer("127.0.0.1:0", &stubService{
+		windows: []string{"10min", "1d"},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/stats/windows", nil)
+	rec := httptest.NewRecorder()
+	server.newRouter().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var body struct {
+		Data []string `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(body.Data) != 2 {
+		t.Fatalf("windows len = %d, want 2", len(body.Data))
+	}
+	if body.Data[0] != "10min" || body.Data[1] != "1d" {
+		t.Fatalf("windows = %+v, want [10min 1d]", body.Data)
 	}
 }
 

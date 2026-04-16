@@ -5,15 +5,18 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/sirupsen/logrus"
 
 	"sidersp/internal/config"
+	"sidersp/internal/model"
 	"sidersp/internal/rule"
 )
 
 var ErrRuleNotFound = fmt.Errorf("rule not found")
 var ErrRuleConflict = fmt.Errorf("rule conflict")
+var ErrStatsWindowNotFound = fmt.Errorf("stats window not found")
 
 type RuleSyncer interface {
 	ReplaceRules(rule.RuleSet) error
@@ -23,25 +26,49 @@ type EventStreamer interface {
 	RunEventStream(context.Context) error
 }
 
-type Runtime struct {
-	cfg      config.Config
-	syncer   RuleSyncer
-	streamer EventStreamer
-	mu       sync.RWMutex
-	rules    rule.RuleSet
+type StatsReader interface {
+	ReadStats() (model.DataplaneStats, error)
 }
 
-func NewRuntime(cfg config.Config, syncer RuleSyncer, streamer EventStreamer) *Runtime {
+type Runtime struct {
+	cfg              config.Config
+	syncer           RuleSyncer
+	streamer         EventStreamer
+	stats            StatsReader
+	statsPlan        []config.ParsedStatsHistoryWindow
+	statsCollectStep time.Duration
+	statsKeepWindow  time.Duration
+	statsKeepLimit   int
+	mu               sync.RWMutex
+	rules            rule.RuleSet
+	history          []StatsPoint
+}
+
+func NewRuntime(cfg config.Config, syncer RuleSyncer, streamer EventStreamer, statsReader StatsReader) *Runtime {
 	if syncer == nil {
 		panic("controlplane: syncer is required")
 	}
 	if streamer == nil {
 		panic("controlplane: streamer is required")
 	}
+	if statsReader == nil {
+		panic("controlplane: stats reader is required")
+	}
+	statsPlan, err := cfg.Console.ParsedStatsHistoryWindows()
+	if err != nil {
+		panic(fmt.Sprintf("controlplane: invalid stats history config: %v", err))
+	}
+	collectStep, keepWindow, keepLimit := buildStatsRetention(statsPlan)
+
 	return &Runtime{
-		cfg:      cfg,
-		syncer:   syncer,
-		streamer: streamer,
+		cfg:              cfg,
+		syncer:           syncer,
+		streamer:         streamer,
+		stats:            statsReader,
+		statsPlan:        statsPlan,
+		statsCollectStep: collectStep,
+		statsKeepWindow:  keepWindow,
+		statsKeepLimit:   keepLimit,
 	}
 }
 
@@ -79,11 +106,11 @@ func (r *Runtime) Run(ctx context.Context) error {
 
 	logrus.WithField("rules", len(rules.Rules)).Info("Started controlplane runtime")
 
+	go r.runStatsCollector(ctx)
+
 	if err := r.streamer.RunEventStream(ctx); err != nil {
 		return fmt.Errorf("start event stream: %w", err)
 	}
-
-	<-ctx.Done()
 	return nil
 }
 
@@ -92,6 +119,43 @@ func (r *Runtime) Status() Status {
 	defer r.mu.RUnlock()
 
 	return newStatus(r.cfg, r.rules)
+}
+
+func (r *Runtime) Stats(window string) (Stats, error) {
+	dpStats, err := r.stats.ReadStats()
+	if err != nil {
+		return Stats{}, fmt.Errorf("read dataplane stats: %w", err)
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	current := newStats(r.rules, dpStats)
+	history, err := r.buildStatsHistory(time.Now().UTC(), current, window)
+	if err != nil {
+		return Stats{}, err
+	}
+	current.Histories = history
+
+	return current, nil
+}
+
+type Status struct {
+	RulesPath  string `json:"rules_path"`
+	ListenAddr string `json:"listen_addr"`
+	Interface  string `json:"interface"`
+	TotalRules int    `json:"total_rules"`
+	Enabled    int    `json:"enabled_rules"`
+}
+
+func newStatus(cfg config.Config, rules rule.RuleSet) Status {
+	return Status{
+		RulesPath:  cfg.ControlPlane.RulesPath,
+		ListenAddr: cfg.Console.ListenAddr,
+		Interface:  cfg.Dataplane.Interface,
+		TotalRules: len(rules.Rules),
+		Enabled:    len(enabledRuleSet(rules).Rules),
+	}
 }
 
 func (r *Runtime) ListRules() []rule.Rule {
@@ -124,7 +188,14 @@ func (r *Runtime) SetRuleEnabled(id int, enabled bool) (rule.Rule, error) {
 			continue
 		}
 
+		if next.Rules[idx].Enabled == enabled {
+			return cloneRule(next.Rules[idx]), nil
+		}
+
 		next.Rules[idx].Enabled = enabled
+		if err := r.persistRules(next); err != nil {
+			return rule.Rule{}, err
+		}
 		if err := r.syncRules(next); err != nil {
 			return rule.Rule{}, err
 		}
@@ -251,24 +322,6 @@ func (r *Runtime) findRuleLocked(id int) (rule.Rule, error) {
 		}
 	}
 	return rule.Rule{}, ErrRuleNotFound
-}
-
-type Status struct {
-	RulesPath  string `json:"rules_path"`
-	ListenAddr string `json:"listen_addr"`
-	Interface  string `json:"interface"`
-	TotalRules int    `json:"total_rules"`
-	Enabled    int    `json:"enabled_rules"`
-}
-
-func newStatus(cfg config.Config, rules rule.RuleSet) Status {
-	return Status{
-		RulesPath:  cfg.ControlPlane.RulesPath,
-		ListenAddr: cfg.Console.ListenAddr,
-		Interface:  cfg.Dataplane.Interface,
-		TotalRules: len(rules.Rules),
-		Enabled:    len(enabledRuleSet(rules).Rules),
-	}
 }
 
 func cloneRuleSet(set rule.RuleSet) rule.RuleSet {
