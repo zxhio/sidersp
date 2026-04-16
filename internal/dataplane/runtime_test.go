@@ -7,43 +7,43 @@ import (
 
 	"github.com/cilium/ebpf/link"
 
-	"sidersp/internal/controlplane"
+	"sidersp/internal/rule"
 )
 
 func TestBuildSnapshotBuildsKernelIndexes(t *testing.T) {
 	t.Parallel()
 
-	set := controlplane.RuleSet{
-		Rules: []controlplane.Rule{
+	set := rule.RuleSet{
+		Rules: []rule.Rule{
 			{
 				ID:       1001,
 				Name:     "wildcard",
 				Enabled:  true,
 				Priority: 100,
-				Response: controlplane.RuleResponse{Action: "RST"},
+				Response: rule.RuleResponse{Action: "RST"},
 			},
 			{
 				ID:       1002,
 				Name:     "http-80",
 				Enabled:  true,
 				Priority: 200,
-				Match: controlplane.RuleMatch{
+				Match: rule.RuleMatch{
 					DstPorts:    []int{80},
 					SrcPrefixes: []string{"10.0.0.0/8"},
 					Features:    []string{"TCP_SYN"},
 				},
-				Response: controlplane.RuleResponse{Action: "RST"},
+				Response: rule.RuleResponse{Action: "RST"},
 			},
 			{
 				ID:       1003,
 				Name:     "http-80-specific",
 				Enabled:  true,
 				Priority: 300,
-				Match: controlplane.RuleMatch{
+				Match: rule.RuleMatch{
 					DstPorts:    []int{80},
 					SrcPrefixes: []string{"10.1.0.0/16"},
 				},
-				Response: controlplane.RuleResponse{Action: "RST"},
+				Response: rule.RuleResponse{Action: "RST"},
 			},
 		},
 	}

@@ -49,7 +49,7 @@ func main() {
 		}
 	}()
 
-	cp := controlplane.NewRuntime(cfg, dp)
+	cp := controlplane.NewRuntime(cfg, dp, dp)
 	logrus.WithFields(logrus.Fields{
 		"config_path": *configPath,
 		"interface":   cfg.Dataplane.Interface,

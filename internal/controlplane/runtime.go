@@ -7,10 +7,11 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"sidersp/internal/config"
+	"sidersp/internal/rule"
 )
 
 type RuleSyncer interface {
-	ReplaceRules(RuleSet) error
+	ReplaceRules(rule.RuleSet) error
 }
 
 type EventStreamer interface {
@@ -18,25 +19,27 @@ type EventStreamer interface {
 }
 
 type Runtime struct {
-	cfg    config.Config
-	syncer RuleSyncer
+	cfg      config.Config
+	syncer   RuleSyncer
+	streamer EventStreamer
 }
 
-func NewRuntime(cfg config.Config, syncer RuleSyncer) *Runtime {
+func NewRuntime(cfg config.Config, syncer RuleSyncer, streamer EventStreamer) *Runtime {
 	return &Runtime{
-		cfg:    cfg,
-		syncer: syncer,
+		cfg:      cfg,
+		syncer:   syncer,
+		streamer: streamer,
 	}
 }
 
-func (r *Runtime) bootstrap() (RuleSet, error) {
+func (r *Runtime) bootstrap() (rule.RuleSet, error) {
 	rules, err := LoadRules(r.cfg.ControlPlane.RulesPath)
 	if err != nil {
-		return RuleSet{}, fmt.Errorf("load rules: %w", err)
+		return rule.RuleSet{}, fmt.Errorf("load rules: %w", err)
 	}
 
 	if err := r.syncer.ReplaceRules(rules); err != nil {
-		return RuleSet{}, fmt.Errorf("sync rules to dataplane: %w", err)
+		return rule.RuleSet{}, fmt.Errorf("sync rules to dataplane: %w", err)
 	}
 
 	logrus.WithFields(logrus.Fields{
@@ -59,8 +62,8 @@ func (r *Runtime) Run(ctx context.Context) error {
 
 	logrus.WithField("rules", len(rules.Rules)).Info("Started controlplane runtime")
 
-	if streamer, ok := r.syncer.(EventStreamer); ok {
-		if err := streamer.RunEventStream(ctx); err != nil {
+	if r.streamer != nil {
+		if err := r.streamer.RunEventStream(ctx); err != nil {
 			return fmt.Errorf("start event stream: %w", err)
 		}
 	}

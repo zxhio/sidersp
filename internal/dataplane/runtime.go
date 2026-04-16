@@ -15,7 +15,7 @@ import (
 	"github.com/cilium/ebpf/rlimit"
 	"github.com/sirupsen/logrus"
 
-	"sidersp/internal/controlplane"
+	"sidersp/internal/rule"
 )
 
 const (
@@ -100,13 +100,12 @@ func (r *Runtime) RunEventStream(ctx context.Context) error {
 	}
 
 	go func() {
+		<-ctx.Done()
+		_ = reader.Close()
+	}()
+
+	go func() {
 		defer reader.Close()
-
-		go func() {
-			<-ctx.Done()
-			_ = reader.Close()
-		}()
-
 		for {
 			record, err := reader.Read()
 			if err != nil {
@@ -141,7 +140,7 @@ func (r *Runtime) RunEventStream(ctx context.Context) error {
 	return nil
 }
 
-func (r *Runtime) ReplaceRules(set controlplane.RuleSet) error {
+func (r *Runtime) ReplaceRules(set rule.RuleSet) error {
 	snapshot, err := buildSnapshot(set)
 	if err != nil {
 		return err
@@ -174,6 +173,9 @@ func (r *Runtime) ReplaceRules(set controlplane.RuleSet) error {
 	if err := writeGlobalConfig(r.objs.GlobalCfgMap, snapshot.globalCfg); err != nil {
 		return err
 	}
+	if err := writeFeatureIndex(r.objs.FeatureIndexMap, snapshot.featureIndex); err != nil {
+		return err
+	}
 	if err := r.attachOnce(); err != nil {
 		return err
 	}
@@ -183,7 +185,7 @@ func (r *Runtime) ReplaceRules(set controlplane.RuleSet) error {
 
 type compiledRule struct {
 	slot           uint32
-	rule           controlplane.Rule
+	rule           rule.Rule
 	parsedPrefixes parsedRulePrefixes
 	conditionMask  uint32
 	action         uint32
@@ -202,9 +204,10 @@ type mapSnapshot struct {
 	dstPortIndex   map[uint16]siderspMaskT
 	srcPrefixIndex map[siderspIpv4LpmKey]siderspMaskT
 	dstPrefixIndex map[siderspIpv4LpmKey]siderspMaskT
+	featureIndex   map[uint32]siderspMaskT
 }
 
-func buildSnapshot(set controlplane.RuleSet) (mapSnapshot, error) {
+func buildSnapshot(set rule.RuleSet) (mapSnapshot, error) {
 	if len(set.Rules) > maxRuleSlots {
 		return mapSnapshot{}, fmt.Errorf("enabled rules %d exceed max slots %d", len(set.Rules), maxRuleSlots)
 	}
@@ -214,26 +217,26 @@ func buildSnapshot(set controlplane.RuleSet) (mapSnapshot, error) {
 	ruleIndex := make(map[uint32]siderspRuleMeta, len(set.Rules))
 	parsedPrefixCache := make(map[string]netip.Prefix)
 
-	for idx, rule := range set.Rules {
+	for idx, r := range set.Rules {
 		slot := uint32(idx)
-		conditionMask, err := buildRequiredMask(rule)
+		conditionMask, err := buildRequiredMask(r)
 		if err != nil {
 			return mapSnapshot{}, fmt.Errorf("rule %d: %w", idx, err)
 		}
 
-		parsedPrefixes, err := parseRulePrefixes(rule, parsedPrefixCache)
+		parsedPrefixes, err := parseRulePrefixes(r, parsedPrefixCache)
 		if err != nil {
 			return mapSnapshot{}, fmt.Errorf("rule %d: %w", idx, err)
 		}
 
-		action, err := encodeAction(rule.Response.Action)
+		action, err := encodeAction(r.Response.Action)
 		if err != nil {
 			return mapSnapshot{}, fmt.Errorf("rule %d: %w", idx, err)
 		}
 
 		entry := compiledRule{
 			slot:           slot,
-			rule:           rule,
+			rule:           r,
 			parsedPrefixes: parsedPrefixes,
 			conditionMask:  conditionMask,
 			action:         action,
@@ -241,25 +244,25 @@ func buildSnapshot(set controlplane.RuleSet) (mapSnapshot, error) {
 		compiled = append(compiled, entry)
 
 		setMaskBit(&global.AllEnabledRules, slot)
-		if len(rule.Match.VLANs) == 0 {
+		if len(r.Match.VLANs) == 0 {
 			setMaskBit(&global.VlanOptionalRules, slot)
 		}
-		if len(rule.Match.SrcPorts) == 0 {
+		if len(r.Match.SrcPorts) == 0 {
 			setMaskBit(&global.SrcPortOptionalRules, slot)
 		}
-		if len(rule.Match.DstPorts) == 0 {
+		if len(r.Match.DstPorts) == 0 {
 			setMaskBit(&global.DstPortOptionalRules, slot)
 		}
-		if len(rule.Match.SrcPrefixes) == 0 {
+		if len(r.Match.SrcPrefixes) == 0 {
 			setMaskBit(&global.SrcPrefixOptionalRules, slot)
 		}
-		if len(rule.Match.DstPrefixes) == 0 {
+		if len(r.Match.DstPrefixes) == 0 {
 			setMaskBit(&global.DstPrefixOptionalRules, slot)
 		}
 
 		ruleIndex[slot] = siderspRuleMeta{
-			RuleId:       uint32(rule.ID),
-			Priority:     uint32(rule.Priority),
+			RuleId:       uint32(r.ID),
+			Priority:     uint32(r.Priority),
 			Enabled:      1,
 			RequiredMask: conditionMask,
 			Action:       action,
@@ -269,15 +272,16 @@ func buildSnapshot(set controlplane.RuleSet) (mapSnapshot, error) {
 	return mapSnapshot{
 		globalCfg:      global,
 		ruleIndex:      ruleIndex,
-		vlanIndex:      buildU16Index(compiled, func(rule controlplane.Rule) []int { return rule.Match.VLANs }),
-		srcPortIndex:   buildU16Index(compiled, func(rule controlplane.Rule) []int { return rule.Match.SrcPorts }),
-		dstPortIndex:   buildU16Index(compiled, func(rule controlplane.Rule) []int { return rule.Match.DstPorts }),
+		vlanIndex:      buildU16Index(compiled, func(r rule.Rule) []int { return r.Match.VLANs }),
+		srcPortIndex:   buildU16Index(compiled, func(r rule.Rule) []int { return r.Match.SrcPorts }),
+		dstPortIndex:   buildU16Index(compiled, func(r rule.Rule) []int { return r.Match.DstPorts }),
 		srcPrefixIndex: buildPrefixIndex(compiled, func(rule compiledRule) []netip.Prefix { return rule.parsedPrefixes.src }),
 		dstPrefixIndex: buildPrefixIndex(compiled, func(rule compiledRule) []netip.Prefix { return rule.parsedPrefixes.dst }),
+		featureIndex:   buildFeatureIndex(compiled),
 	}, nil
 }
 
-func buildRequiredMask(rule controlplane.Rule) (uint32, error) {
+func buildRequiredMask(rule rule.Rule) (uint32, error) {
 	var mask uint32
 
 	if len(rule.Match.VLANs) > 0 {
@@ -316,7 +320,7 @@ func encodeAction(action string) (uint32, error) {
 	}
 }
 
-func buildU16Index(rules []compiledRule, selector func(controlplane.Rule) []int) map[uint16]siderspMaskT {
+func buildU16Index(rules []compiledRule, selector func(rule.Rule) []int) map[uint16]siderspMaskT {
 	keys := make(map[uint16]struct{})
 	for _, rule := range rules {
 		for _, value := range selector(rule.rule) {
@@ -380,13 +384,27 @@ func buildPrefixIndex(rules []compiledRule, selector func(compiledRule) []netip.
 	return index
 }
 
-func parseRulePrefixes(rule controlplane.Rule, cache map[string]netip.Prefix) (parsedRulePrefixes, error) {
-	src, err := parsePrefixes(rule.Match.SrcPrefixes, cache)
+func buildFeatureIndex(rules []compiledRule) map[uint32]siderspMaskT {
+	index := make(map[uint32]siderspMaskT)
+	for _, r := range rules {
+		for _, bit := range []uint32{condHTTPMethod, condHTTP11, condTCPSYN} {
+			if r.conditionMask&bit != 0 {
+				mask := index[bit]
+				setMaskBit(&mask, r.slot)
+				index[bit] = mask
+			}
+		}
+	}
+	return index
+}
+
+func parseRulePrefixes(r rule.Rule, cache map[string]netip.Prefix) (parsedRulePrefixes, error) {
+	src, err := parsePrefixes(r.Match.SrcPrefixes, cache)
 	if err != nil {
 		return parsedRulePrefixes{}, fmt.Errorf("parse src prefixes: %w", err)
 	}
 
-	dst, err := parsePrefixes(rule.Match.DstPrefixes, cache)
+	dst, err := parsePrefixes(r.Match.DstPrefixes, cache)
 	if err != nil {
 		return parsedRulePrefixes{}, fmt.Errorf("parse dst prefixes: %w", err)
 	}
@@ -529,6 +547,15 @@ func writeGlobalConfig(m *ebpf.Map, cfg siderspGlobalCfg) error {
 	return nil
 }
 
+func writeFeatureIndex(m *ebpf.Map, values map[uint32]siderspMaskT) error {
+	for key, value := range values {
+		if err := m.Put(key, value); err != nil {
+			return fmt.Errorf("write %s key %d: %w", m.String(), key, err)
+		}
+	}
+	return nil
+}
+
 func (r *Runtime) logSnapshot(snapshot mapSnapshot) {
 	r.logMask("all_enabled_rules", snapshot.globalCfg.AllEnabledRules)
 	r.logMask("vlan_optional_rules", snapshot.globalCfg.VlanOptionalRules)
@@ -560,7 +587,7 @@ func (r *Runtime) logSnapshot(snapshot mapSnapshot) {
 	r.logU16MaskIndex("dst_port_index", snapshot.dstPortIndex)
 	r.logPrefixMaskIndex("src_prefix_index", snapshot.srcPrefixIndex)
 	r.logPrefixMaskIndex("dst_prefix_index", snapshot.dstPrefixIndex)
-	logrus.WithField("index", "feature_index").Info("Updated dataplane index")
+	r.logFeatureIndex("feature_index", snapshot.featureIndex)
 }
 
 func (r *Runtime) logU16MaskIndex(name string, index map[uint16]siderspMaskT) {
@@ -626,6 +653,32 @@ func (r *Runtime) logPrefixMaskIndex(name string, index map[siderspIpv4LpmKey]si
 	}
 }
 
+func (r *Runtime) logFeatureIndex(name string, index map[uint32]siderspMaskT) {
+	if len(index) == 0 {
+		logrus.WithFields(logrus.Fields{
+			"index":   name,
+			"entries": "[]",
+		}).Info("Updated dataplane index")
+		return
+	}
+
+	keys := make([]uint32, 0, len(index))
+	for key := range index {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+
+	for _, key := range keys {
+		mask := index[key]
+		logrus.WithFields(logrus.Fields{
+			"index": name,
+			"cond":  conditionNames(key),
+			"slots": formatMaskSlots(mask),
+			"bits":  formatMaskBits(mask),
+		}).Info("Updated dataplane index")
+	}
+}
+
 func (r *Runtime) logMask(name string, mask siderspMaskT) {
 	logrus.WithFields(logrus.Fields{
 		"mask":  name,
@@ -668,6 +721,9 @@ func formatLPMKey(key siderspIpv4LpmKey) string {
 	return fmt.Sprintf("%s/%d", netip.AddrFrom4(addr).String(), key.Prefixlen)
 }
 
+// attachOnce attaches the XDP program to the interface on the first call.
+// Deferred until after ReplaceRules populates the maps so the XDP program
+// never reads partially-initialized state.
 func (r *Runtime) attachOnce() error {
 	if r.xdpLink != nil {
 		return nil

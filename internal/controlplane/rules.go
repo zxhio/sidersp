@@ -9,79 +9,55 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"sidersp/internal/rule"
 )
 
 var allowedActions = map[string]struct{}{
 	"RST": {},
 }
 
-type RuleSet struct {
-	Rules []Rule `json:"rules" yaml:"rules"`
-}
-
-type Rule struct {
-	ID       int          `json:"id" yaml:"id"`
-	Name     string       `json:"name" yaml:"name"`
-	Enabled  bool         `json:"enabled" yaml:"enabled"`
-	Priority int          `json:"priority" yaml:"priority"`
-	Match    RuleMatch    `json:"match" yaml:"match"`
-	Response RuleResponse `json:"response" yaml:"response"`
-}
-
-type RuleMatch struct {
-	VLANs       []int    `json:"vlans" yaml:"vlans"`
-	SrcPrefixes []string `json:"src_prefixes" yaml:"src_prefixes"`
-	DstPrefixes []string `json:"dst_prefixes" yaml:"dst_prefixes"`
-	SrcPorts    []int    `json:"src_ports" yaml:"src_ports"`
-	DstPorts    []int    `json:"dst_ports" yaml:"dst_ports"`
-	Features    []string `json:"features" yaml:"features"`
-}
-
-type RuleResponse struct {
-	Action string `json:"action" yaml:"action"`
-}
-
-func LoadRules(path string) (RuleSet, error) {
+func LoadRules(path string) (rule.RuleSet, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return RuleSet{}, fmt.Errorf("read rules file: %w", err)
+		return rule.RuleSet{}, fmt.Errorf("read rules file: %w", err)
 	}
 
-	var set RuleSet
+	var set rule.RuleSet
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&set); err != nil {
-		return RuleSet{}, fmt.Errorf("decode rules file: %w", err)
+		return rule.RuleSet{}, fmt.Errorf("decode rules file: %w", err)
 	}
 
-	if err := set.Normalize(); err != nil {
-		return RuleSet{}, err
+	if err := normalizeRuleSet(&set); err != nil {
+		return rule.RuleSet{}, err
 	}
 
 	return set, nil
 }
 
-func (s *RuleSet) Normalize() error {
-	normalized := make([]Rule, 0, len(s.Rules))
+func normalizeRuleSet(s *rule.RuleSet) error {
+	normalized := make([]rule.Rule, 0, len(s.Rules))
 	for i := range s.Rules {
 		if !s.Rules[i].Enabled {
 			continue
 		}
-		if err := s.Rules[i].normalize(); err != nil {
+		if err := normalizeRule(&s.Rules[i]); err != nil {
 			return fmt.Errorf("rule %d: %w", i, err)
 		}
 		normalized = append(normalized, s.Rules[i])
 	}
 	s.Rules = normalized
 
-	slices.SortStableFunc(s.Rules, func(a, b Rule) int {
+	slices.SortStableFunc(s.Rules, func(a, b rule.Rule) int {
 		return a.Priority - b.Priority
 	})
 
 	return nil
 }
 
-func (r *Rule) normalize() error {
+func normalizeRule(r *rule.Rule) error {
 	switch {
 	case r.ID == 0:
 		return fmt.Errorf("id is required")
