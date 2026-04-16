@@ -1,71 +1,71 @@
 ---
 name: setup-go-repo
-description: Initialize the minimal Go repository skeleton for the bypass analysis and active response platform.
+description: Define a clean Go repository layout, with clear structure for code, docs, tests, API, and deployment assets.
 ---
 
 ## When to use this
 
-Use when bootstrapping the repository or reorganizing the project structure.
+Use when bootstrapping a Go repository or adjusting its directory structure.
 
 ## Goal
 
-Create the minimal Go project skeleton that matches AGENTS.md and leaves clear places for later module work.
+Keep the repository structure simple, predictable, and easy to extend.
 
 ## Scope
 
-This skill is only for repository setup.
+This skill only defines repository layout and directory responsibilities.
 
 ## Do
 
-- Initialize the Go module
-- Create the base directories used by the project
-- Add the minimal program entry
-- Add basic config and sample rules files
-- Add a minimal Makefile
-- Keep the repository layout aligned with AGENTS.md
+- Separate code, docs, tests, configs, and deployment assets
+- Keep executable entrypoints distinct from library code
+- Prefer a small number of clear directories
+- Keep names stable and responsibility-oriented
 
 ## Do not
 
-- Do not implement XDP logic
-- Do not implement Web UI
-- Do not implement database support
-- Do not add unnecessary frameworks
-- Do not change module boundaries
+- Do not put business implementation guidance in this skill
+- Do not create placeholder directories without a real owner
+- Do not mix deployment files into Go package directories
+- Do not centralize all tests into one folder
 
-## Expected structure
+## Recommended layout
 
-Create or preserve these top-level areas:
+Use these top-level directories when needed:
 
 - `cmd/`
 - `internal/`
+- `pkg/`
+- `api/`
 - `configs/`
 - `docs/`
 - `scripts/`
+- `deploy/`
+- `build/`
 - `test/`
 
-Keep module code separated under `internal/`:
+## Directory guidance
 
-- `dataplane/`
-- `controlplane/`
-- `analysis/`
-- `response/`
-- `console/`
-- `config/`
-- `model/`
-- `util/`
+- `cmd/`: one directory per executable, such as `cmd/server/` or `cmd/agent/`
+- `internal/`: main application code that should not be imported from outside the repo
+- `pkg/`: reusable packages only when they are intentionally public and stable
+- `api/`: HTTP or RPC interface definitions, OpenAPI specs, protobuf, JSON schema, or generated contract files
+- `configs/`: sample configs, local configs, and environment-specific config templates
+- `docs/`: architecture, module boundaries, operations notes, and design records
+- `scripts/`: developer and CI helper scripts
+- `deploy/`: Kubernetes manifests, Helm charts, systemd units, Compose files, or Terraform for delivery
+- `build/`: packaging assets such as Dockerfiles, image build context, release packaging, or build metadata
+- `test/`: integration tests, end-to-end tests, fixtures, test data, and cross-module harnesses
 
-## Minimal outputs
+## Test layout
 
-- `go.mod`
-- `cmd/.../main.go`
-- `configs/config.yaml`
-- `configs/rules.json`
-- `Makefile`
+- Keep unit tests next to the code they verify
+- Use `test/` only for tests or assets that span packages or require external setup
+- Do not move normal package `_test.go` files into `test/`
 
 ## Done when
 
-- The repository builds
-- The directory layout is clear
-- The minimal entry can run
-- Config and rules sample files exist
-- No unrelated functionality is introduced
+- A new file has an obvious home
+- API files, tests, and deployment assets are easy to find
+- Code and operational assets are not mixed together
+- The structure can grow without immediate reorganization
