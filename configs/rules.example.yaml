@@ -1,0 +1,90 @@
+rules:
+  - id: 1001
+    name: observe_tcp_syn_80
+    enabled: true
+    priority: 100
+    match:
+      dst_ports: [80]
+      features: [TCP_SYN]
+    response:
+      action: RST
+
+  - id: 1002
+    name: observe_tcp_syn_5555
+    enabled: true
+    priority: 110
+    match:
+      dst_ports: [5555]
+      features: [TCP_SYN]
+    response:
+      action: RST
+
+  - id: 1003
+    name: observe_tcp_syn_src_prefix
+    enabled: true
+    priority: 120
+    match:
+      src_prefixes: [10.1.0.0/16]
+      features: [TCP_SYN]
+    response:
+      action: RST
+
+  - id: 1004
+    name: observe_tcp_syn_dst_prefix_host
+    enabled: true
+    priority: 130
+    match:
+      dst_prefixes: [192.168.1.69/32]
+      features: [TCP_SYN]
+    response:
+      action: RST
+
+  - id: 1005
+    name: observe_tcp_syn_dst_prefix_subnet
+    enabled: true
+    priority: 140
+    match:
+      dst_prefixes: [192.168.1.0/24]
+      features: [TCP_SYN]
+    response:
+      action: RST
+
+  - id: 1006
+    name: observe_tcp_syn_src_port_12345
+    enabled: true
+    priority: 150
+    match:
+      src_ports: [12345]
+      features: [TCP_SYN]
+    response:
+      action: RST
+
+  - id: 1007
+    name: observe_tcp_syn_src_prefix_to_80
+    enabled: true
+    priority: 160
+    match:
+      src_prefixes: [10.1.0.0/16]
+      dst_ports: [80]
+      features: [TCP_SYN]
+    response:
+      action: RST
+
+  - id: 1008
+    name: observe_tcp_syn_vlan_100
+    enabled: true
+    priority: 170
+    match:
+      vlans: [100]
+      features: [TCP_SYN]
+    response:
+      action: RST
+
+  - id: 1009
+    name: observe_tcp_syn_any
+    enabled: true
+    priority: 200
+    match:
+      features: [TCP_SYN]
+    response:
+      action: RST

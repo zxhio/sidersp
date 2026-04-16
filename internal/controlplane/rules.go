@@ -2,12 +2,13 @@ package controlplane
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"net/netip"
 	"os"
 	"slices"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 var allowedActions = map[string]struct{}{
@@ -15,29 +16,29 @@ var allowedActions = map[string]struct{}{
 }
 
 type RuleSet struct {
-	Rules []Rule `json:"rules"`
+	Rules []Rule `json:"rules" yaml:"rules"`
 }
 
 type Rule struct {
-	ID       int          `json:"id"`
-	Name     string       `json:"name"`
-	Enabled  bool         `json:"enabled"`
-	Priority int          `json:"priority"`
-	Match    RuleMatch    `json:"match"`
-	Response RuleResponse `json:"response"`
+	ID       int          `json:"id" yaml:"id"`
+	Name     string       `json:"name" yaml:"name"`
+	Enabled  bool         `json:"enabled" yaml:"enabled"`
+	Priority int          `json:"priority" yaml:"priority"`
+	Match    RuleMatch    `json:"match" yaml:"match"`
+	Response RuleResponse `json:"response" yaml:"response"`
 }
 
 type RuleMatch struct {
-	VLANs       []int    `json:"vlans"`
-	SrcPrefixes []string `json:"src_prefixes"`
-	DstPrefixes []string `json:"dst_prefixes"`
-	SrcPorts    []int    `json:"src_ports"`
-	DstPorts    []int    `json:"dst_ports"`
-	Features    []string `json:"features"`
+	VLANs       []int    `json:"vlans" yaml:"vlans"`
+	SrcPrefixes []string `json:"src_prefixes" yaml:"src_prefixes"`
+	DstPrefixes []string `json:"dst_prefixes" yaml:"dst_prefixes"`
+	SrcPorts    []int    `json:"src_ports" yaml:"src_ports"`
+	DstPorts    []int    `json:"dst_ports" yaml:"dst_ports"`
+	Features    []string `json:"features" yaml:"features"`
 }
 
 type RuleResponse struct {
-	Action string `json:"action"`
+	Action string `json:"action" yaml:"action"`
 }
 
 func LoadRules(path string) (RuleSet, error) {
@@ -47,8 +48,8 @@ func LoadRules(path string) (RuleSet, error) {
 	}
 
 	var set RuleSet
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
 	if err := decoder.Decode(&set); err != nil {
 		return RuleSet{}, fmt.Errorf("decode rules file: %w", err)
 	}

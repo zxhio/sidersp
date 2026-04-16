@@ -1,6 +1,6 @@
 # Minimal local config for the first control-plane skeleton.
 controlplane:
-  rules_path: configs/rules.example.json
+  rules_path: configs/rules.example.yaml
 
 dataplane:
   interface: eth0

@@ -10,61 +10,47 @@ import (
 func TestLoadRules(t *testing.T) {
 	t.Parallel()
 
-	path := writeRulesFile(t, `{
-  "rules": [
-    {
-      "id": 1003,
-      "name": "disabled",
-      "enabled": false,
-      "priority": 50,
-      "match": {
-        "vlans": [300],
-        "src_prefixes": ["10.10.0.0/16"],
-        "dst_prefixes": ["192.168.3.0/24"],
-        "src_ports": [34567],
-        "dst_ports": [443],
-        "features": ["HTTP_11"]
-      },
-      "response": {
-        "action": "RST"
-      }
-    },
-    {
-      "id": 1002,
-      "name": "later",
-      "enabled": true,
-      "priority": 200,
-      "match": {
-        "vlans": [200],
-        "src_prefixes": ["10.0.0.1/8"],
-        "dst_prefixes": ["192.168.1.0/24"],
-        "src_ports": [12345],
-        "dst_ports": [8080],
-        "features": [" TCP_SYN ", "HTTP_11"]
-      },
-      "response": {
-        "action": "rst"
-      }
-    },
-    {
-      "id": 1001,
-      "name": "first",
-      "enabled": true,
-      "priority": 100,
-      "match": {
-        "vlans": [100],
-        "src_prefixes": ["10.0.0.0/8"],
-        "dst_prefixes": ["192.168.2.0/24"],
-        "src_ports": [23456],
-        "dst_ports": [80],
-        "features": ["HTTP_METHOD"]
-      },
-      "response": {
-        "action": "RST"
-      }
-    }
-  ]
-}`)
+	path := writeRulesFile(t, `rules:
+  - id: 1003
+    name: disabled
+    enabled: false
+    priority: 50
+    match:
+      vlans: [300]
+      src_prefixes: ["10.10.0.0/16"]
+      dst_prefixes: ["192.168.3.0/24"]
+      src_ports: [34567]
+      dst_ports: [443]
+      features: [HTTP_11]
+    response:
+      action: RST
+  - id: 1002
+    name: later
+    enabled: true
+    priority: 200
+    match:
+      vlans: [200]
+      src_prefixes: ["10.0.0.1/8"]
+      dst_prefixes: ["192.168.1.0/24"]
+      src_ports: [12345]
+      dst_ports: [8080]
+      features: [" TCP_SYN ", HTTP_11]
+    response:
+      action: rst
+  - id: 1001
+    name: first
+    enabled: true
+    priority: 100
+    match:
+      vlans: [100]
+      src_prefixes: ["10.0.0.0/8"]
+      dst_prefixes: ["192.168.2.0/24"]
+      src_ports: [23456]
+      dst_ports: [80]
+      features: [HTTP_METHOD]
+    response:
+      action: RST
+`)
 
 	set, err := LoadRules(path)
 	if err != nil {
@@ -95,27 +81,21 @@ func TestLoadRules(t *testing.T) {
 func TestLoadRulesValidationError(t *testing.T) {
 	t.Parallel()
 
-	path := writeRulesFile(t, `{
-  "rules": [
-    {
-      "id": 1001,
-      "name": "bad",
-      "enabled": true,
-      "priority": 100,
-      "match": {
-        "vlans": [100],
-        "src_prefixes": ["10.0.0.0/33"],
-        "dst_prefixes": ["192.168.1.0/24"],
-        "src_ports": [12345],
-        "dst_ports": [70000],
-        "features": ["TCP_SYN"]
-      },
-      "response": {
-        "action": "DROP"
-      }
-    }
-  ]
-}`)
+	path := writeRulesFile(t, `rules:
+  - id: 1001
+    name: bad
+    enabled: true
+    priority: 100
+    match:
+      vlans: [100]
+      src_prefixes: ["10.0.0.0/33"]
+      dst_prefixes: ["192.168.1.0/24"]
+      src_ports: [12345]
+      dst_ports: [70000]
+      features: [TCP_SYN]
+    response:
+      action: DROP
+`)
 
 	_, err := LoadRules(path)
 	if err == nil {
@@ -130,27 +110,21 @@ func TestLoadRulesValidationError(t *testing.T) {
 func TestLoadRulesRejectsInvalidVLAN(t *testing.T) {
 	t.Parallel()
 
-	path := writeRulesFile(t, `{
-  "rules": [
-    {
-      "id": 1001,
-      "name": "bad-vlan",
-      "enabled": true,
-      "priority": 100,
-      "match": {
-        "vlans": [4096],
-        "src_prefixes": ["10.0.0.0/8"],
-        "dst_prefixes": ["192.168.1.0/24"],
-        "src_ports": [12345],
-        "dst_ports": [80],
-        "features": ["TCP_SYN"]
-      },
-      "response": {
-        "action": "RST"
-      }
-    }
-  ]
-}`)
+	path := writeRulesFile(t, `rules:
+  - id: 1001
+    name: bad-vlan
+    enabled: true
+    priority: 100
+    match:
+      vlans: [4096]
+      src_prefixes: ["10.0.0.0/8"]
+      dst_prefixes: ["192.168.1.0/24"]
+      src_ports: [12345]
+      dst_ports: [80]
+      features: [TCP_SYN]
+    response:
+      action: RST
+`)
 
 	_, err := LoadRules(path)
 	if err == nil {
@@ -165,27 +139,21 @@ func TestLoadRulesRejectsInvalidVLAN(t *testing.T) {
 func TestLoadRulesRejectsEmptyAction(t *testing.T) {
 	t.Parallel()
 
-	path := writeRulesFile(t, `{
-  "rules": [
-    {
-      "id": 1001,
-      "name": "missing-action",
-      "enabled": true,
-      "priority": 100,
-      "match": {
-        "vlans": [100],
-        "src_prefixes": ["10.0.0.0/8"],
-        "dst_prefixes": ["192.168.1.0/24"],
-        "src_ports": [12345],
-        "dst_ports": [80],
-        "features": ["TCP_SYN"]
-      },
-      "response": {
-        "action": "   "
-      }
-    }
-  ]
-}`)
+	path := writeRulesFile(t, `rules:
+  - id: 1001
+    name: missing-action
+    enabled: true
+    priority: 100
+    match:
+      vlans: [100]
+      src_prefixes: ["10.0.0.0/8"]
+      dst_prefixes: ["192.168.1.0/24"]
+      src_ports: [12345]
+      dst_ports: [80]
+      features: [TCP_SYN]
+    response:
+      action: "   "
+`)
 
 	_, err := LoadRules(path)
 	if err == nil {
@@ -200,22 +168,16 @@ func TestLoadRulesRejectsEmptyAction(t *testing.T) {
 func TestLoadRulesRejectsIPv6Prefix(t *testing.T) {
 	t.Parallel()
 
-	path := writeRulesFile(t, `{
-  "rules": [
-    {
-      "id": 1001,
-      "name": "ipv6-prefix",
-      "enabled": true,
-      "priority": 100,
-      "match": {
-        "src_prefixes": ["2001:db8::/32"]
-      },
-      "response": {
-        "action": "RST"
-      }
-    }
-  ]
-}`)
+	path := writeRulesFile(t, `rules:
+  - id: 1001
+    name: ipv6-prefix
+    enabled: true
+    priority: 100
+    match:
+      src_prefixes: ["2001:db8::/32"]
+    response:
+      action: RST
+`)
 
 	_, err := LoadRules(path)
 	if err == nil {
@@ -230,7 +192,7 @@ func TestLoadRulesRejectsIPv6Prefix(t *testing.T) {
 func writeRulesFile(t *testing.T, contents string) string {
 	t.Helper()
 
-	path := filepath.Join(t.TempDir(), "rules.json")
+	path := filepath.Join(t.TempDir(), "rules.yaml")
 	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
 		t.Fatalf("write rules file: %v", err)
 	}

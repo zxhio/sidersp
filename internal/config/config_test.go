@@ -11,7 +11,7 @@ func TestLoad(t *testing.T) {
 	t.Parallel()
 
 	path := writeConfigFile(t, `controlplane:
-  rules_path: configs/rules.example.json
+  rules_path: configs/rules.example.yaml
 
 dataplane:
   interface: eth0
@@ -26,8 +26,8 @@ console:
 		t.Fatalf("Load() error = %v", err)
 	}
 
-	if cfg.ControlPlane.RulesPath != "configs/rules.example.json" {
-		t.Fatalf("ControlPlane.RulesPath = %q, want %q", cfg.ControlPlane.RulesPath, "configs/rules.example.json")
+	if cfg.ControlPlane.RulesPath != "configs/rules.example.yaml" {
+		t.Fatalf("ControlPlane.RulesPath = %q, want %q", cfg.ControlPlane.RulesPath, "configs/rules.example.yaml")
 	}
 
 	if cfg.Dataplane.Interface != "eth0" {
@@ -39,7 +39,7 @@ func TestLoadRejectsUnknownKey(t *testing.T) {
 	t.Parallel()
 
 	path := writeConfigFile(t, `controlplane:
-  rules_path: configs/rules.example.json
+  rules_path: configs/rules.example.yaml
   extra: nope
 
 dataplane:
@@ -86,7 +86,7 @@ func TestLoadRejectsMissingDataplaneInterface(t *testing.T) {
 	t.Parallel()
 
 	path := writeConfigFile(t, `controlplane:
-  rules_path: configs/rules.example.json
+  rules_path: configs/rules.example.yaml
 
 dataplane:
   interface:
