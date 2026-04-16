@@ -1,13 +1,11 @@
 ---
-name: go-rest-api
-description: Use when adding or changing RESTful HTTP API endpoints. Follow resource-oriented routing, unified JSON envelope, and standard status codes.
+name: rest-api
+description: Use when designing or changing RESTful HTTP APIs. Follow resource-oriented routing, unified JSON envelope, pagination, and standard status codes.
 ---
 
-# Go REST API
+# REST API
 
-Use this skill when adding or changing RESTful HTTP API endpoints.
-
-Implemented with **github.com/gin-gonic/gin**. Inject dependencies via handler struct fields.
+Use this skill when designing or changing RESTful HTTP APIs.
 
 ## Routing
 
@@ -57,7 +55,7 @@ Collection with pagination:
 
 Use query parameters `page` (1-based) and `page_size` (default 100) for collection endpoints.
 
-Error — top-level `error` object with `code` and `message`:
+Error:
 
 ```json
 {"error": {"code": "VALIDATION_FAILED", "message": "name is required"}}
@@ -67,12 +65,10 @@ Return `total`, `page`, `page_size` only for collection endpoints. Omit them for
 
 ## Status Codes
 
-| Code | Usage |
-|------|-------|
-| 200  | Success (GET, PUT, PATCH) |
-| 201  | Resource created (POST) |
-| 204  | Success with no body (DELETE) |
-| 400  | Invalid request body or params |
-| 404  | Resource not found |
-| 409  | Conflict (duplicate resource) |
-| 500  | Internal error |
+- `200` success for `GET`, `PUT`, `PATCH`
+- `201` resource created
+- `204` success with no body
+- `400` invalid request body or params
+- `404` resource not found
+- `409` conflict
+- `500` internal error
