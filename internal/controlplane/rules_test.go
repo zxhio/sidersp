@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"sidersp/internal/rule"
 )
 
 func TestLoadRules(t *testing.T) {
@@ -57,24 +59,28 @@ func TestLoadRules(t *testing.T) {
 		t.Fatalf("LoadRules() error = %v", err)
 	}
 
-	if len(set.Rules) != 2 {
-		t.Fatalf("len(Rules) = %d, want 2 enabled rules", len(set.Rules))
+	if len(set.Rules) != 3 {
+		t.Fatalf("len(Rules) = %d, want %d", len(set.Rules), 3)
 	}
 
-	if set.Rules[0].ID != 1001 {
-		t.Fatalf("first rule id = %d, want 1001", set.Rules[0].ID)
+	if set.Rules[0].ID != 1003 {
+		t.Fatalf("first rule id = %d, want %d", set.Rules[0].ID, 1003)
 	}
 
-	if got := set.Rules[1].Match.SrcPrefixes[0]; got != "10.0.0.0/8" {
+	if got := set.Rules[2].Match.SrcPrefixes[0]; got != "10.0.0.0/8" {
 		t.Fatalf("normalized src prefix = %q, want %q", got, "10.0.0.0/8")
 	}
 
-	if got := set.Rules[1].Response.Action; got != "RST" {
+	if got := set.Rules[2].Response.Action; got != "RST" {
 		t.Fatalf("normalized action = %q, want %q", got, "RST")
 	}
 
-	if got := set.Rules[1].Match.Features[0]; got != "TCP_SYN" {
+	if got := set.Rules[2].Match.Features[0]; got != "TCP_SYN" {
 		t.Fatalf("normalized feature = %q, want %q", got, "TCP_SYN")
+	}
+
+	if set.Rules[0].Enabled {
+		t.Fatal("first rule enabled = true, want false")
 	}
 }
 
@@ -186,6 +192,73 @@ func TestLoadRulesRejectsIPv6Prefix(t *testing.T) {
 
 	if !strings.Contains(err.Error(), "only IPv4 CIDRs are supported") {
 		t.Fatalf("LoadRules() error = %q, want IPv4-only validation error", err)
+	}
+}
+
+func TestSaveRulesNormalizesAndSorts(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "rules.yaml")
+	err := SaveRules(path, rule.RuleSet{
+		Rules: []rule.Rule{
+			{
+				ID:       2,
+				Name:     "later",
+				Enabled:  true,
+				Priority: 20,
+				Match:    rule.RuleMatch{Features: []string{" HTTP_11 "}},
+				Response: rule.RuleResponse{Action: "rst"},
+			},
+			{
+				ID:       1,
+				Name:     "first",
+				Enabled:  true,
+				Priority: 10,
+				Response: rule.RuleResponse{Action: "RST"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("SaveRules() error = %v", err)
+	}
+
+	set, err := LoadRules(path)
+	if err != nil {
+		t.Fatalf("LoadRules() error = %v", err)
+	}
+	if set.Rules[0].ID != 1 {
+		t.Fatalf("first rule id = %d, want 1", set.Rules[0].ID)
+	}
+	if got := set.Rules[1].Response.Action; got != "RST" {
+		t.Fatalf("action = %q, want RST", got)
+	}
+}
+
+func TestLoadRulesRejectsDuplicateID(t *testing.T) {
+	t.Parallel()
+
+	path := writeRulesFile(t, `rules:
+  - id: 1001
+    name: first
+    enabled: true
+    priority: 100
+    response:
+      action: RST
+  - id: 1001
+    name: duplicate
+    enabled: true
+    priority: 200
+    response:
+      action: RST
+`)
+
+	_, err := LoadRules(path)
+	if err == nil {
+		t.Fatal("LoadRules() error = nil, want duplicate id error")
+	}
+
+	if !strings.Contains(err.Error(), "duplicate id 1001") {
+		t.Fatalf("LoadRules() error = %q, want duplicate id error", err)
 	}
 }
 

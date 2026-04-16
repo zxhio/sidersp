@@ -2,9 +2,11 @@ package controlplane
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"net/netip"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -16,6 +18,8 @@ import (
 var allowedActions = map[string]struct{}{
 	"RST": {},
 }
+
+var ErrRuleValidation = errors.New("rule validation failed")
 
 func LoadRules(path string) (rule.RuleSet, error) {
 	data, err := os.ReadFile(path)
@@ -37,24 +41,59 @@ func LoadRules(path string) (rule.RuleSet, error) {
 	return set, nil
 }
 
-func normalizeRuleSet(s *rule.RuleSet) error {
-	normalized := make([]rule.Rule, 0, len(s.Rules))
-	for i := range s.Rules {
-		if !s.Rules[i].Enabled {
-			continue
-		}
-		if err := normalizeRule(&s.Rules[i]); err != nil {
-			return fmt.Errorf("rule %d: %w", i, err)
-		}
-		normalized = append(normalized, s.Rules[i])
+func SaveRules(path string, set rule.RuleSet) error {
+	next := cloneRuleSet(set)
+	if err := normalizeRuleSet(&next); err != nil {
+		return err
 	}
-	s.Rules = normalized
+
+	data, err := yaml.Marshal(next)
+	if err != nil {
+		return fmt.Errorf("encode rules file: %w", err)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create rules directory: %w", err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return fmt.Errorf("write rules file: %w", err)
+	}
+
+	return nil
+}
+
+func normalizeRuleSet(s *rule.RuleSet) error {
+	seenIDs := make(map[int]struct{}, len(s.Rules))
+	for i := range s.Rules {
+		if err := normalizeRule(&s.Rules[i]); err != nil {
+			return fmt.Errorf("%w: rule %d: %v", ErrRuleValidation, i, err)
+		}
+		if _, ok := seenIDs[s.Rules[i].ID]; ok {
+			return fmt.Errorf("%w: duplicate id %d", ErrRuleValidation, s.Rules[i].ID)
+		}
+		seenIDs[s.Rules[i].ID] = struct{}{}
+	}
 
 	slices.SortStableFunc(s.Rules, func(a, b rule.Rule) int {
 		return a.Priority - b.Priority
 	})
 
 	return nil
+}
+
+func enabledRuleSet(set rule.RuleSet) rule.RuleSet {
+	enabled := rule.RuleSet{
+		Rules: make([]rule.Rule, 0, len(set.Rules)),
+	}
+
+	for _, item := range set.Rules {
+		if !item.Enabled {
+			continue
+		}
+		enabled.Rules = append(enabled.Rules, item)
+	}
+
+	return enabled
 }
 
 func normalizeRule(r *rule.Rule) error {

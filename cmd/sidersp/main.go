@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -10,6 +11,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"sidersp/internal/config"
+	"sidersp/internal/console"
 	"sidersp/internal/controlplane"
 	"sidersp/internal/dataplane"
 )
@@ -50,11 +52,31 @@ func main() {
 	}()
 
 	cp := controlplane.NewRuntime(cfg, dp, dp)
+	consoleServer := console.NewServer(cfg.Console.ListenAddr, cp)
 	logrus.WithFields(logrus.Fields{
 		"config_path": *configPath,
 		"interface":   cfg.Dataplane.Interface,
 	}).Info("Started service")
-	if err := cp.Run(ctx); err != nil {
-		logrus.WithError(err).Fatal("Fail to run controlplane")
+
+	errCh := make(chan error, 2)
+
+	go func() {
+		if err := cp.Run(ctx); err != nil {
+			errCh <- fmt.Errorf("run controlplane: %w", err)
+			cancel()
+		}
+	}()
+
+	go func() {
+		if err := consoleServer.Run(ctx); err != nil {
+			errCh <- fmt.Errorf("run console: %w", err)
+			cancel()
+		}
+	}()
+
+	select {
+	case err := <-errCh:
+		logrus.WithError(err).Fatal("Fail to run service")
+	case <-ctx.Done():
 	}
 }
