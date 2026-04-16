@@ -104,40 +104,43 @@ func (r *Runtime) RunEventStream(ctx context.Context) error {
 		_ = reader.Close()
 	}()
 
-	go func() {
-		defer reader.Close()
-		for {
-			record, err := reader.Read()
-			if err != nil {
-				if ctx.Err() != nil || err == ringbuf.ErrClosed {
-					return
-				}
-				logrus.WithError(err).Error("Fail to read dataplane event")
-				return
-			}
-
-			evt, err := decodeRuleEvent(record.RawSample)
-			if err != nil {
-				logrus.WithError(err).Error("Fail to decode dataplane event")
-				continue
-			}
-
-			logrus.WithFields(logrus.Fields{
-				"rule_id":     evt.RuleID,
-				"action":      actionName(evt.Action),
-				"sip":         ipv4String(evt.SIP),
-				"dip":         ipv4String(evt.DIP),
-				"sport":       evt.SPort,
-				"dport":       evt.DPort,
-				"proto":       evt.IPProto,
-				"tcp_flags":   evt.TCPFlags,
-				"pkt_conds":   conditionNames(evt.PktConds),
-				"payload_len": evt.PayloadLen,
-			}).Info("Matched rule")
-		}
-	}()
+	go r.streamEvents(ctx, reader)
 
 	return nil
+}
+
+func (r *Runtime) streamEvents(ctx context.Context, reader *ringbuf.Reader) {
+	defer reader.Close()
+
+	for {
+		record, err := reader.Read()
+		if err != nil {
+			if ctx.Err() != nil || err == ringbuf.ErrClosed {
+				return
+			}
+			logrus.WithError(err).Error("Fail to read dataplane event")
+			return
+		}
+
+		evt, err := decodeRuleEvent(record.RawSample)
+		if err != nil {
+			logrus.WithError(err).Error("Fail to decode dataplane event")
+			continue
+		}
+
+		logrus.WithFields(logrus.Fields{
+			"rule_id":     evt.RuleID,
+			"action":      actionName(evt.Action),
+			"sip":         ipv4String(evt.SIP),
+			"dip":         ipv4String(evt.DIP),
+			"sport":       evt.SPort,
+			"dport":       evt.DPort,
+			"proto":       evt.IPProto,
+			"tcp_flags":   evt.TCPFlags,
+			"pkt_conds":   conditionNames(evt.PktConds),
+			"payload_len": evt.PayloadLen,
+		}).Info("Matched rule")
+	}
 }
 
 func (r *Runtime) ReplaceRules(set rule.RuleSet) error {

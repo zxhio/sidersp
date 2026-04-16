@@ -25,6 +25,12 @@ type Runtime struct {
 }
 
 func NewRuntime(cfg config.Config, syncer RuleSyncer, streamer EventStreamer) *Runtime {
+	if syncer == nil {
+		panic("controlplane: syncer is required")
+	}
+	if streamer == nil {
+		panic("controlplane: streamer is required")
+	}
 	return &Runtime{
 		cfg:      cfg,
 		syncer:   syncer,
@@ -62,12 +68,8 @@ func (r *Runtime) Run(ctx context.Context) error {
 
 	logrus.WithField("rules", len(rules.Rules)).Info("Started controlplane runtime")
 
-	if r.streamer != nil {
-		if err := r.streamer.RunEventStream(ctx); err != nil {
-			return fmt.Errorf("start event stream: %w", err)
-		}
+	if err := r.streamer.RunEventStream(ctx); err != nil {
+		return fmt.Errorf("start event stream: %w", err)
 	}
-
-	<-ctx.Done()
 	return nil
 }
