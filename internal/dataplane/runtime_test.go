@@ -222,3 +222,43 @@ func TestFormatLPMKey(t *testing.T) {
 		t.Fatalf("formatLPMKey() = %q, want %q", got, want)
 	}
 }
+
+func TestSumPerCPUCounters(t *testing.T) {
+	t.Parallel()
+
+	got := sumPerCPUCounters([]uint64{3, 5, 7})
+	if got != 15 {
+		t.Fatalf("sumPerCPUCounters() = %d, want %d", got, 15)
+	}
+}
+
+func TestKernelStatsFields(t *testing.T) {
+	t.Parallel()
+
+	fields := kernelStats{
+		RXPackets:      10,
+		ParseFailed:    2,
+		RuleCandidates: 8,
+		MatchedRules:   4,
+		RingbufDropped: 1,
+	}.fields()
+
+	if got := fields["rx"]; got != uint64(10) {
+		t.Fatalf("rx = %v, want %d", got, 10)
+	}
+	if got := fields["parse"]; got != uint64(2) {
+		t.Fatalf("parse = %v, want %d", got, 2)
+	}
+	if got := fields["cand"]; got != uint64(8) {
+		t.Fatalf("cand = %v, want %d", got, 8)
+	}
+	if got := fields["match"]; got != uint64(4) {
+		t.Fatalf("match = %v, want %d", got, 4)
+	}
+	if got := fields["drop"]; got != uint64(1) {
+		t.Fatalf("drop = %v, want %d", got, 1)
+	}
+	if len(fields) != 5 {
+		t.Fatalf("len(fields) = %d, want %d", len(fields), 5)
+	}
+}

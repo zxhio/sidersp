@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
@@ -19,7 +20,8 @@ import (
 )
 
 const (
-	maxRuleSlots = 256
+	maxRuleSlots     = 256
+	statsLogInterval = 10 * time.Second
 
 	condVLAN       = 1 << 0
 	condSrcPrefix  = 1 << 1
@@ -31,6 +33,14 @@ const (
 	condTCPSYN     = 1 << 7
 
 	actionRST = 1
+)
+
+const (
+	statRXPackets uint32 = iota
+	statParseFailed
+	statRuleCandidates
+	statMatchedRules
+	statRingbufDropped
 )
 
 var featureFlags = map[string]uint32{
@@ -63,6 +73,14 @@ type ruleEvent struct {
 type Options struct {
 	Interface  string
 	AttachMode string
+}
+
+type kernelStats struct {
+	RXPackets      uint64
+	ParseFailed    uint64
+	RuleCandidates uint64
+	MatchedRules   uint64
+	RingbufDropped uint64
 }
 
 func Open(opts Options) (*Runtime, error) {
@@ -104,9 +122,88 @@ func (r *Runtime) RunEventStream(ctx context.Context) error {
 		_ = reader.Close()
 	}()
 
-	go r.streamEvents(ctx, reader)
+	go r.logKernelStats(ctx, statsLogInterval)
+	r.streamEvents(ctx, reader)
 
 	return nil
+}
+
+func (r *Runtime) logKernelStats(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			stats, err := r.readKernelStats()
+			if err != nil {
+				logrus.WithError(err).Warn("Fail to read kernel stats")
+				continue
+			}
+
+			logrus.WithFields(stats.fields()).Info("Reported kernel stats")
+		}
+	}
+}
+
+func (r *Runtime) readKernelStats() (kernelStats, error) {
+	rxPackets, err := readPerCPUCounter(r.objs.StatsMap, statRXPackets)
+	if err != nil {
+		return kernelStats{}, fmt.Errorf("lookup rx_packets: %w", err)
+	}
+	parseFailed, err := readPerCPUCounter(r.objs.StatsMap, statParseFailed)
+	if err != nil {
+		return kernelStats{}, fmt.Errorf("lookup parse_failed: %w", err)
+	}
+	ruleCandidates, err := readPerCPUCounter(r.objs.StatsMap, statRuleCandidates)
+	if err != nil {
+		return kernelStats{}, fmt.Errorf("lookup rule_candidates: %w", err)
+	}
+	matchedRules, err := readPerCPUCounter(r.objs.StatsMap, statMatchedRules)
+	if err != nil {
+		return kernelStats{}, fmt.Errorf("lookup matched_rules: %w", err)
+	}
+	ringbufDropped, err := readPerCPUCounter(r.objs.StatsMap, statRingbufDropped)
+	if err != nil {
+		return kernelStats{}, fmt.Errorf("lookup ringbuf_dropped: %w", err)
+	}
+
+	return kernelStats{
+		RXPackets:      rxPackets,
+		ParseFailed:    parseFailed,
+		RuleCandidates: ruleCandidates,
+		MatchedRules:   matchedRules,
+		RingbufDropped: ringbufDropped,
+	}, nil
+}
+
+func (s kernelStats) fields() logrus.Fields {
+	return logrus.Fields{
+		"rx":    s.RXPackets,
+		"parse": s.ParseFailed,
+		"cand":  s.RuleCandidates,
+		"match": s.MatchedRules,
+		"drop":  s.RingbufDropped,
+	}
+}
+
+func readPerCPUCounter(m *ebpf.Map, idx uint32) (uint64, error) {
+	var values []uint64
+	if err := m.Lookup(idx, &values); err != nil {
+		return 0, err
+	}
+
+	return sumPerCPUCounters(values), nil
+}
+
+func sumPerCPUCounters(values []uint64) uint64 {
+	var total uint64
+	for _, value := range values {
+		total += value
+	}
+	return total
 }
 
 func (r *Runtime) streamEvents(ctx context.Context, reader *ringbuf.Reader) {
