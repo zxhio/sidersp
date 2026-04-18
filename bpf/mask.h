@@ -22,7 +22,7 @@
 #define __always_inline inline __attribute__((always_inline))
 #endif
 
-#define RULE_GROUPS 4
+#define RULE_GROUPS 16
 #define RULES_PER_GROUP 64
 #define MAX_RULE_SLOTS (RULE_GROUPS * RULES_PER_GROUP)
 
@@ -34,6 +34,7 @@ static __always_inline void mask_zero(mask_t *m)
 {
     __u32 i;
 
+    #pragma clang loop unroll(disable)
     for (i = 0; i < RULE_GROUPS; i++)
         m->bits[i] = 0;
 }
@@ -47,6 +48,7 @@ static __always_inline void mask_and(mask_t *dst, const mask_t *src)
 {
     __u32 i;
 
+    #pragma clang loop unroll(disable)
     for (i = 0; i < RULE_GROUPS; i++)
         dst->bits[i] &= src->bits[i];
 }
@@ -55,6 +57,7 @@ static __always_inline int mask_is_zero(const mask_t *m)
 {
     __u32 i;
 
+    #pragma clang loop unroll(disable)
     for (i = 0; i < RULE_GROUPS; i++) {
         if (m->bits[i])
             return 0;

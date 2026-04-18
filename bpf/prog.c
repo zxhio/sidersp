@@ -190,28 +190,6 @@ static __always_inline int apply_ipv4_lpm_index(void *map, __be32 addr, mask_t *
     return 1;
 }
 
-static void apply_feature_prefilter(__u32 pkt_conds, mask_t *candidates)
-{
-    const __u32 feature_bits[] = {
-        COND_HTTP_METHOD,
-        COND_HTTP_11,
-        COND_TCP_SYN,
-    };
-    __u32 i;
-
-    for (i = 0; i < 3; i++) {
-        __u32 key = feature_bits[i];
-        const mask_t *m;
-
-        if (!(pkt_conds & key))
-            continue;
-
-        m = bpf_map_lookup_elem(&feature_index_map, &key);
-        if (m)
-            mask_and(candidates, m);
-    }
-}
-
 static __always_inline int rule_matches(const struct rule_meta *rule, __u32 pkt_conds)
 {
     return (pkt_conds & rule->required_mask) == rule->required_mask;
@@ -221,15 +199,16 @@ static int pick_best_rule(const mask_t *candidates, __u32 pkt_conds,
                           struct rule_meta *best_rule)
 {
     __u32 group;
-    __u32 bit;
-    int found = 0;
 
+    #pragma clang loop unroll(disable)
     for (group = 0; group < RULE_GROUPS; group++) {
         __u64 word = candidates->bits[group];
+        __u32 bit;
 
         if (!word)
             continue;
 
+        #pragma clang loop unroll(disable)
         for (bit = 0; bit < RULES_PER_GROUP; bit++) {
             __u32 slot;
             const struct rule_meta *rule;
@@ -243,15 +222,13 @@ static int pick_best_rule(const mask_t *candidates, __u32 pkt_conds,
                 continue;
             if (!rule_matches(rule, pkt_conds))
                 continue;
-
-            if (!found || rule->priority < best_rule->priority) {
-                *best_rule = *rule;
-                found = 1;
-            }
+            /* First match = best priority (control plane pre-sorted). */
+            *best_rule = *rule;
+            return 1;
         }
     }
 
-    return found;
+    return 0;
 }
 
 static __always_inline void emit_event(const struct pkt_ctx *ctx, const struct rule_meta *rule,
@@ -532,27 +509,22 @@ int xdp_sidersp(struct xdp_md *xdp)
 
     mask_copy(&candidates, &cfg->all_enabled_rules);
 
-    if (ctx.vlan_id != VLAN_ID_NONE)
-        if (!apply_u16_index(&vlan_index_map, ctx.vlan_id, &candidates))
-            mask_and(&candidates, &cfg->vlan_optional_rules);
-    if (ctx.sport != 0)
-        if (!apply_u16_index(&src_port_index_map, ctx.sport, &candidates))
-            mask_and(&candidates, &cfg->src_port_optional_rules);
-    if (ctx.dport != 0)
-        if (!apply_u16_index(&dst_port_index_map, ctx.dport, &candidates))
-            mask_and(&candidates, &cfg->dst_port_optional_rules);
+    if (!apply_u16_index(&vlan_index_map, ctx.vlan_id, &candidates))
+        mask_and(&candidates, &cfg->vlan_optional_rules);
+    if (!apply_u16_index(&src_port_index_map, ctx.sport, &candidates))
+        mask_and(&candidates, &cfg->src_port_optional_rules);
+    if (!apply_u16_index(&dst_port_index_map, ctx.dport, &candidates))
+        mask_and(&candidates, &cfg->dst_port_optional_rules);
 
-    if (ctx.ip_version == 4) {
-        if (apply_ipv4_lpm_index(&src_prefix_lpm_map, ctx.saddr, &candidates))
-            pkt_conds |= COND_SRC_PREFIX;
-        else
-            mask_and(&candidates, &cfg->src_prefix_optional_rules);
+    if (apply_ipv4_lpm_index(&src_prefix_lpm_map, ctx.saddr, &candidates))
+        pkt_conds |= COND_SRC_PREFIX;
+    else
+        mask_and(&candidates, &cfg->src_prefix_optional_rules);
 
-        if (apply_ipv4_lpm_index(&dst_prefix_lpm_map, ctx.daddr, &candidates))
-            pkt_conds |= COND_DST_PREFIX;
-        else
-            mask_and(&candidates, &cfg->dst_prefix_optional_rules);
-    }
+    if (apply_ipv4_lpm_index(&dst_prefix_lpm_map, ctx.daddr, &candidates))
+        pkt_conds |= COND_DST_PREFIX;
+    else
+        mask_and(&candidates, &cfg->dst_prefix_optional_rules);
 
     if (mask_is_zero(&candidates))
         return XDP_PASS;
@@ -560,10 +532,7 @@ int xdp_sidersp(struct xdp_md *xdp)
     stat_inc(STAT_RULE_CANDIDATES);
 
     pkt_conds |= detect_conditions(&ctx);
-    apply_feature_prefilter(pkt_conds, &candidates);
 
-    if (mask_is_zero(&candidates))
-        return XDP_PASS;
     if (!pick_best_rule(&candidates, pkt_conds, &best_rule))
         return XDP_PASS;
 

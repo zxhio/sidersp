@@ -25,6 +25,8 @@ Packet In
 │     │ sip     ──► src_prefix_lpm_map[LPM]    AND │           │
 │     │ dip     ──► dst_prefix_lpm_map[LPM]    AND │           │
 │     └────────────────────────────────────────────┘           │
+│     All lookups are unconditional (no field!=0 guard).       │
+│     Miss → AND with <field>_optional_rules mask.             │
 │                         │                                    │
 │              candidates == 0 ? ── YES ──► XDP_PASS           │
 │                         │ NO                                 │
@@ -34,22 +36,14 @@ Packet In
 │     SRC_PREFIX / DST_PREFIX                                  │
 │                         │                                    │
 │                         ▼                                    │
-│  4. Feature pre-filter                                       │
-│     candidates &= feature_index_map[each detected bit]       │
-│                         │                                    │
-│              candidates == 0 ? ── YES ──► XDP_PASS           │
-│                         │ NO                                 │
-│                         ▼                                    │
-│  5. pick_best_rule(candidates, pkt_conds)                    │
-│     scan all set bits in candidates bitmap                   │
-│     → lookup rule_meta per slot                              │
-│     → verify required_mask                                   │
-│     → keep smallest priority                                 │
+│  4. pick_best_rule(candidates, pkt_conds)                    │
+│     Rules are pre-sorted by priority in slot order.          │
+│     First matching rule = highest priority → return early.   │
 │                         │                                    │
 │              no match found ? ── YES ──► XDP_PASS            │
 │                         │ found                              │
 │                         ▼                                    │
-│  6. emit_event() via BPF_RINGBUF                             │
+│  5. emit_event() via BPF_RINGBUF                             │
 │                                                              │
 └──────────────────────┬───────────────────────────────────────┘
                        │
@@ -87,6 +81,17 @@ Candidates are narrowed by bitwise-AND across each dimension:
   AND port:     │1 0 0 0 0 0 0 0│  ← only slot 0 survives
 ```
 
+### Unconditional index lookup
+
+All u16 and LPM lookups are performed unconditionally — no `if (field != 0)` guard.
+The control plane pre-populates a sentinel entry in each u16 index:
+****
+- VLAN: key `0xFFFF` (VLAN_ID_NONE) → optional_rules mask
+- sport / dport: key `0` → optional_rules mask
+
+When the packet's field equals the sentinel value, the lookup returns the optional_rules mask,
+effectively filtering out rules that require this field.
+
 ### Final match check
 
 ```
@@ -95,9 +100,10 @@ Candidates are narrowed by bitwise-AND across each dimension:
 
 `pkt_conds` holds the condition bits detected from the packet. `required_mask` holds all conditions a rule demands. A packet must satisfy **every** condition the rule requires to be considered a match.
 
-### pick_best_rule
+### pick_best_rule (first-match-early-exit)
 
-After index and feature pre-filtering, the remaining set bits in the candidates bitmap are the potential rule matches. `pick_best_rule` does the following:
+The control plane pre-sorts rules by ascending `(priority, ID)` before assigning slots.
+This guarantees that slot order reflects priority order.
 
 ```
   for group 0..RULE_GROUPS-1:
@@ -113,15 +119,12 @@ After index and feature pre-filtering, the remaining set bits in the candidates 
       if !rule->enabled: skip
       if (pkt_conds & rule->required_mask) != rule->required_mask: skip
 
-      if rule->priority < best_rule->priority:
-        best_rule = rule
+      best_rule = rule
+      return 1    ← first match = highest priority, exit immediately
 ```
 
-- Scan all set bits in the candidates bitmap; each set bit corresponds to a rule slot.
-- Look up `rule_meta` from `rule_index_map` for each slot.
-- Skip disabled rules.
-- Verify `required_mask` — this catches combinations that the index alone cannot express.
-- Among all verified rules, keep the one with the smallest priority value.
+No priority comparison, no `found` flag, no conditional copy. The first matching rule
+is guaranteed to be the best because slots are arranged in priority order.
 
 ### LPM Trie (prefix matching)
 
