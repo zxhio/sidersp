@@ -2,7 +2,7 @@
  * BPF Maps — inverted index + rule storage + event output.
  *
  *   ┌──────────────────────────────────────────────────────────┐
- *   │  rule_index_map       ARRAY<u32, rule_meta>    [256]     │
+ *   │  rule_index_map       ARRAY<u32, rule_meta>    [1024]    │
  *   │    slot → rule metadata (id, priority, required_mask)    │
  *   ├──────────────────────────────────────────────────────────┤
  *   │  global_cfg_map       ARRAY<u32, global_cfg>    [1]      │
@@ -16,9 +16,6 @@
  *   │  src_prefix_lpm_map   LPM_TRIE<lpm_key, mask_t>          │
  *   │  dst_prefix_lpm_map   LPM_TRIE<lpm_key, mask_t>          │
  *   │    longest-prefix match → cumulative candidate bitmap    │
- *   ├──────────────────────────────────────────────────────────┤
- *   │  feature_index_map    HASH<u32, mask_t>        [32]      │
- *   │    COND_* bit → bitmap of rules requiring this feature   │
  *   ├──────────────────────────────────────────────────────────┤
  *   │  event_ringbuf        RINGBUF    [16 MB]                 │
  *   ├──────────────────────────────────────────────────────────┤
@@ -67,13 +64,6 @@ struct {
     __type(key, __u16);
     __type(value, mask_t);
 } vlan_index_map SEC(".maps");
-
-struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 32);
-    __type(key, __u32);
-    __type(value, mask_t);
-} feature_index_map SEC(".maps");
 
 struct {
     __uint(type, BPF_MAP_TYPE_LPM_TRIE);

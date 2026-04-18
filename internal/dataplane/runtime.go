@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	maxRuleSlots     = 256
+	maxRuleSlots     = 1024
 	statsLogInterval = 10 * time.Second
 
 	condVLAN       = 1 << 0
@@ -289,9 +289,6 @@ func (r *Runtime) ReplaceRules(set rule.RuleSet) error {
 	if err := writeGlobalConfig(r.objs.GlobalCfgMap, snapshot.globalCfg); err != nil {
 		return err
 	}
-	if err := writeFeatureIndex(r.objs.FeatureIndexMap, snapshot.featureIndex); err != nil {
-		return err
-	}
 	if err := r.attachOnce(); err != nil {
 		return err
 	}
@@ -320,7 +317,6 @@ type mapSnapshot struct {
 	dstPortIndex   map[uint16]siderspMaskT
 	srcPrefixIndex map[siderspIpv4LpmKey]siderspMaskT
 	dstPrefixIndex map[siderspIpv4LpmKey]siderspMaskT
-	featureIndex   map[uint32]siderspMaskT
 }
 
 func buildSnapshot(set rule.RuleSet) (mapSnapshot, error) {
@@ -332,6 +328,16 @@ func buildSnapshot(set rule.RuleSet) (mapSnapshot, error) {
 	global := siderspGlobalCfg{}
 	ruleIndex := make(map[uint32]siderspRuleMeta, len(set.Rules))
 	parsedPrefixCache := make(map[string]netip.Prefix)
+
+	// Sort rules by ascending priority number (highest priority = lowest number).
+	// This ensures slot order reflects priority, enabling first-match-early-exit
+	// in the BPF data plane.
+	slices.SortFunc(set.Rules, func(a, b rule.Rule) int {
+		if a.Priority != b.Priority {
+			return a.Priority - b.Priority
+		}
+		return a.ID - b.ID
+	})
 
 	for idx, r := range set.Rules {
 		slot := uint32(idx)
@@ -388,12 +394,11 @@ func buildSnapshot(set rule.RuleSet) (mapSnapshot, error) {
 	return mapSnapshot{
 		globalCfg:      global,
 		ruleIndex:      ruleIndex,
-		vlanIndex:      buildU16Index(compiled, func(r rule.Rule) []int { return r.Match.VLANs }),
-		srcPortIndex:   buildU16Index(compiled, func(r rule.Rule) []int { return r.Match.SrcPorts }),
-		dstPortIndex:   buildU16Index(compiled, func(r rule.Rule) []int { return r.Match.DstPorts }),
+		vlanIndex:      buildU16Index(compiled, 0xffff, func(r rule.Rule) []int { return r.Match.VLANs }),
+		srcPortIndex:   buildU16Index(compiled, 0, func(r rule.Rule) []int { return r.Match.SrcPorts }),
+		dstPortIndex:   buildU16Index(compiled, 0, func(r rule.Rule) []int { return r.Match.DstPorts }),
 		srcPrefixIndex: buildPrefixIndex(compiled, func(rule compiledRule) []netip.Prefix { return rule.parsedPrefixes.src }),
 		dstPrefixIndex: buildPrefixIndex(compiled, func(rule compiledRule) []netip.Prefix { return rule.parsedPrefixes.dst }),
-		featureIndex:   buildFeatureIndex(compiled),
 	}, nil
 }
 
@@ -436,13 +441,19 @@ func encodeAction(action string) (uint32, error) {
 	}
 }
 
-func buildU16Index(rules []compiledRule, selector func(rule.Rule) []int) map[uint16]siderspMaskT {
+func buildU16Index(rules []compiledRule, sentinel uint16, selector func(rule.Rule) []int) map[uint16]siderspMaskT {
 	keys := make(map[uint16]struct{})
 	for _, rule := range rules {
 		for _, value := range selector(rule.rule) {
 			keys[uint16(value)] = struct{}{}
 		}
 	}
+
+	// Ensure the sentinel entry exists so the BPF side can always do a lookup
+	// without checking whether the field is present.  When the packet's field
+	// equals the sentinel value (0 for ports, VLAN_ID_NONE for VLAN), this
+	// entry maps to the optional-rules mask.
+	keys[sentinel] = struct{}{}
 
 	index := make(map[uint16]siderspMaskT, len(keys))
 	for key := range keys {
@@ -497,20 +508,6 @@ func buildPrefixIndex(rules []compiledRule, selector func(compiledRule) []netip.
 		index[makeLPMKey(prefix)] = mask
 	}
 
-	return index
-}
-
-func buildFeatureIndex(rules []compiledRule) map[uint32]siderspMaskT {
-	index := make(map[uint32]siderspMaskT)
-	for _, r := range rules {
-		for _, bit := range []uint32{condHTTPMethod, condHTTP11, condTCPSYN} {
-			if r.conditionMask&bit != 0 {
-				mask := index[bit]
-				setMaskBit(&mask, r.slot)
-				index[bit] = mask
-			}
-		}
-	}
 	return index
 }
 
@@ -592,9 +589,6 @@ func (r *Runtime) resetMaps() error {
 	}
 	if err := clearU16Map(r.objs.DstPortIndexMap); err != nil {
 		return fmt.Errorf("reset dst_port_index_map: %w", err)
-	}
-	if err := clearU32Map(r.objs.FeatureIndexMap); err != nil {
-		return fmt.Errorf("reset feature_index_map: %w", err)
 	}
 	if err := clearPrefixMap(r.objs.SrcPrefixLpmMap); err != nil {
 		return fmt.Errorf("reset src_prefix_lpm_map: %w", err)
@@ -701,15 +695,6 @@ func writeGlobalConfig(m *ebpf.Map, cfg siderspGlobalCfg) error {
 	return nil
 }
 
-func writeFeatureIndex(m *ebpf.Map, values map[uint32]siderspMaskT) error {
-	for key, value := range values {
-		if err := m.Put(key, value); err != nil {
-			return fmt.Errorf("write %s key %d: %w", m.String(), key, err)
-		}
-	}
-	return nil
-}
-
 func (r *Runtime) logSnapshot(snapshot mapSnapshot) {
 	r.logMask("all_enabled_rules", snapshot.globalCfg.AllEnabledRules)
 	r.logMask("vlan_optional_rules", snapshot.globalCfg.VlanOptionalRules)
@@ -741,7 +726,6 @@ func (r *Runtime) logSnapshot(snapshot mapSnapshot) {
 	r.logU16MaskIndex("dst_port_index", snapshot.dstPortIndex)
 	r.logPrefixMaskIndex("src_prefix_index", snapshot.srcPrefixIndex)
 	r.logPrefixMaskIndex("dst_prefix_index", snapshot.dstPrefixIndex)
-	r.logFeatureIndex("feature_index", snapshot.featureIndex)
 }
 
 func (r *Runtime) logU16MaskIndex(name string, index map[uint16]siderspMaskT) {
@@ -803,32 +787,6 @@ func (r *Runtime) logPrefixMaskIndex(name string, index map[siderspIpv4LpmKey]si
 			"prefix": formatLPMKey(key),
 			"slots":  formatMaskSlots(mask),
 			"bits":   formatMaskBits(mask),
-		}).Info("Updated dataplane index")
-	}
-}
-
-func (r *Runtime) logFeatureIndex(name string, index map[uint32]siderspMaskT) {
-	if len(index) == 0 {
-		logrus.WithFields(logrus.Fields{
-			"index":   name,
-			"entries": "[]",
-		}).Info("Updated dataplane index")
-		return
-	}
-
-	keys := make([]uint32, 0, len(index))
-	for key := range index {
-		keys = append(keys, key)
-	}
-	slices.Sort(keys)
-
-	for _, key := range keys {
-		mask := index[key]
-		logrus.WithFields(logrus.Fields{
-			"index": name,
-			"cond":  conditionNames(key),
-			"slots": formatMaskSlots(mask),
-			"bits":  formatMaskBits(mask),
 		}).Info("Updated dataplane index")
 	}
 }

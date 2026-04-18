@@ -31,7 +31,7 @@ type siderspIpv4LpmKey struct {
 
 type siderspMaskT struct {
 	_    structs.HostLayout
-	Bits [4]uint64
+	Bits [16]uint64
 }
 
 type siderspRuleMeta struct {
@@ -95,7 +95,6 @@ type siderspMapSpecs struct {
 	DstPortIndexMap *ebpf.MapSpec `ebpf:"dst_port_index_map"`
 	DstPrefixLpmMap *ebpf.MapSpec `ebpf:"dst_prefix_lpm_map"`
 	EventRingbuf    *ebpf.MapSpec `ebpf:"event_ringbuf"`
-	FeatureIndexMap *ebpf.MapSpec `ebpf:"feature_index_map"`
 	GlobalCfgMap    *ebpf.MapSpec `ebpf:"global_cfg_map"`
 	RuleIndexMap    *ebpf.MapSpec `ebpf:"rule_index_map"`
 	SrcPortIndexMap *ebpf.MapSpec `ebpf:"src_port_index_map"`
@@ -133,7 +132,6 @@ type siderspMaps struct {
 	DstPortIndexMap *ebpf.Map `ebpf:"dst_port_index_map"`
 	DstPrefixLpmMap *ebpf.Map `ebpf:"dst_prefix_lpm_map"`
 	EventRingbuf    *ebpf.Map `ebpf:"event_ringbuf"`
-	FeatureIndexMap *ebpf.Map `ebpf:"feature_index_map"`
 	GlobalCfgMap    *ebpf.Map `ebpf:"global_cfg_map"`
 	RuleIndexMap    *ebpf.Map `ebpf:"rule_index_map"`
 	SrcPortIndexMap *ebpf.Map `ebpf:"src_port_index_map"`
@@ -147,7 +145,6 @@ func (m *siderspMaps) Close() error {
 		m.DstPortIndexMap,
 		m.DstPrefixLpmMap,
 		m.EventRingbuf,
-		m.FeatureIndexMap,
 		m.GlobalCfgMap,
 		m.RuleIndexMap,
 		m.SrcPortIndexMap,
