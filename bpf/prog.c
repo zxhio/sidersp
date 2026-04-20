@@ -3,6 +3,7 @@
 #include <linux/if_ether.h>
 #include <linux/in.h>
 #include <linux/ip.h>
+#include <linux/icmp.h>
 #include <linux/tcp.h>
 #include <linux/udp.h>
 
@@ -17,29 +18,8 @@
 #ifndef IPPROTO_UDP
 #define IPPROTO_UDP 17
 #endif
-
-#if 0
-/*
- * Deferred protocol / payload support kept for later re-enable.
- *
- * Current XDP build stays on the minimal fast path:
- * Ethernet/VLAN + IPv4 + TCP/UDP + shallow conditions.
- *
- * Re-enable in this order to keep verifier pressure manageable:
- * 1. ARP
- * 2. ICMP
- * 3. IPv6
- * 4. HTTP payload features
- */
-#include <linux/ipv6.h>
-#include <linux/icmp.h>
-#include <linux/icmpv6.h>
-
 #ifndef IPPROTO_ICMP
 #define IPPROTO_ICMP 1
-#endif
-#ifndef IPPROTO_ICMPV6
-#define IPPROTO_ICMPV6 58
 #endif
 
 struct arp_eth_ipv4 {
@@ -48,6 +28,24 @@ struct arp_eth_ipv4 {
     __u8 tha[ETH_ALEN];
     __u8 dip[4];
 };
+
+#if 0
+/*
+ * Deferred protocol / payload support kept for later re-enable.
+ *
+ * Current XDP build stays on the minimal fast path:
+ * Ethernet/VLAN + IPv4 + TCP/UDP/ICMP + shallow conditions.
+ *
+ * Re-enable in this order to keep verifier pressure manageable:
+ * 1. IPv6
+ * 2. HTTP payload features
+ */
+#include <linux/ipv6.h>
+#include <linux/icmpv6.h>
+
+#ifndef IPPROTO_ICMPV6
+#define IPPROTO_ICMPV6 58
+#endif
 #endif
 
 struct vlan_hdr {
@@ -278,8 +276,7 @@ static parse_err_t parse_udp(struct pkt_ctx *ctx, void *data, void *data_end, __
     return PARSE_OK;
 }
 
-#if 0
-/* Deferred ICMP parser support. */
+/* ICMP parser support. */
 static __always_inline parse_err_t parse_icmp(struct pkt_ctx *ctx, void *data, void *data_end, __u32 l4_len)
 {
     struct icmphdr *icmp = data;
@@ -295,7 +292,6 @@ static __always_inline parse_err_t parse_icmp(struct pkt_ctx *ctx, void *data, v
     ctx->payload_len = (__u16)(l4_len - sizeof(*icmp));
     return PARSE_OK;
 }
-#endif
 
 static parse_err_t parse_tcp(struct pkt_ctx *ctx, void *data, void *data_end, __u32 l4_len)
 {
@@ -337,9 +333,9 @@ static parse_err_t parse_ip_l4(struct pkt_ctx *ctx, void *l4,
         return parse_tcp(ctx, l4, data_end, l4_len);
     case IPPROTO_UDP:
         return parse_udp(ctx, l4, data_end, l4_len);
-#if 0
     case IPPROTO_ICMP:
         return parse_icmp(ctx, l4, data_end, l4_len);
+#if 0
     case IPPROTO_ICMPV6:
         return parse_icmp(ctx, l4, data_end, l4_len);
 #endif
@@ -372,7 +368,7 @@ static parse_err_t parse_ipv4(struct pkt_ctx *ctx, void *data, void *data_end)
 }
 
 #if 0
-/* Deferred IPv6 / ARP parser support. */
+/* Deferred IPv6 parser support. */
 static __always_inline parse_err_t parse_ipv6(struct pkt_ctx *ctx, void *data, void *data_end)
 {
     struct ipv6hdr *ip6 = data;
@@ -395,7 +391,9 @@ static __always_inline parse_err_t parse_ipv6(struct pkt_ctx *ctx, void *data, v
     l4 = ip6 + 1;
     return parse_ip_l4(ctx, l4, data_end, ip6->nexthdr, payload_len);
 }
+#endif
 
+/* ARP parser support. */
 static __always_inline parse_err_t parse_arp(struct pkt_ctx *ctx, void *data, void *data_end)
 {
     struct arphdr *arp = data;
@@ -420,7 +418,6 @@ static __always_inline parse_err_t parse_arp(struct pkt_ctx *ctx, void *data, vo
     __builtin_memcpy(&ctx->daddr, arp4->dip, sizeof(ctx->daddr));
     return PARSE_OK;
 }
-#endif
 
 static parse_err_t parse_vlan(struct pkt_ctx *ctx, void *data, void *data_end)
 {
@@ -443,9 +440,9 @@ static parse_err_t parse_vlan(struct pkt_ctx *ctx, void *data, void *data_end)
 #if 0
     case ETH_P_IPV6:
         return parse_ipv6(ctx, vh + 1, data_end);
+#endif
     case ETH_P_ARP:
         return parse_arp(ctx, vh + 1, data_end);
-#endif
     default:
         return PARSE_ERR_UNSUPPORTED_ETH_PROTO;
     }
@@ -480,9 +477,9 @@ static parse_err_t parse_packet(struct pkt_ctx *ctx, void *data, void *data_end)
 #if 0
     case ETH_P_IPV6:
         return parse_ipv6(ctx, eth + 1, data_end);
+#endif
     case ETH_P_ARP:
         return parse_arp(ctx, eth + 1, data_end);
-#endif
     default:
         return PARSE_ERR_UNSUPPORTED_ETH_PROTO;
     }

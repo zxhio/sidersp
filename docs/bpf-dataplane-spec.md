@@ -13,17 +13,18 @@ incremented depends on the parse result.
 |-----------|----------|:------------:|---------|
 | IPv4 (0x0800) | TCP | no | Full parse: ports, flags, payload |
 | IPv4 (0x0800) | UDP | no | Full parse: ports, payload |
-| IPv4 (0x0800) | Other (ICMP, etc.) | **yes** | `PARSE_ERR_UNSUPPORTED_IP_PROTO` |
-| 802.1Q → IPv4 | TCP/UDP | no | Single VLAN tag only |
+| IPv4 (0x0800) | ICMP | no | Header and payload length parse only |
+| IPv4 (0x0800) | Other | **yes** | `PARSE_ERR_UNSUPPORTED_IP_PROTO` |
+| 802.1Q → IPv4 | TCP/UDP/ICMP | no | Single VLAN tag only |
+| ARP (0x0806) | IPv4 over Ethernet | no | Sender/target IPv4 addresses parsed |
 | 802.1Q → 802.1Q (0x8100) | — | **yes** | `PARSE_ERR_BAD_VLAN` (inner EtherType 0x8100 = double-tagged) |
 | 802.1AD (0x88a8) | — | **yes** | `PARSE_ERR_UNSUPPORTED_ETH_PROTO` (not recognized as VLAN) |
 | IPv6 (0x86DD) | Any | **yes** | `PARSE_ERR_UNSUPPORTED_ETH_PROTO` |
-| ARP (0x0806) | — | **yes** | `PARSE_ERR_UNSUPPORTED_ETH_PROTO` |
 | Other | — | **yes** | `PARSE_ERR_UNSUPPORTED_ETH_PROTO` |
 
 Truncated or malformed headers (short Ethernet, short IPv4, unsupported IPv4
-options, invalid IHL, short TCP, invalid TCP data offset, short UDP) also
-increment `parse_failed`.
+options, invalid IHL, short TCP, invalid TCP data offset, short UDP, short or
+invalid ARP) also increment `parse_failed`.
 
 ### Packet Requirements for Matching (no parse_failed)
 
@@ -37,7 +38,7 @@ increment `parse_failed`.
   at `ip + ihl`, which may produce incorrect ports/flags or a `parse_failed`.
 - For TCP: data offset >= 5, sufficient bytes
 - For UDP: >= 8 bytes UDP header
-- IP protocol must be TCP (6) or UDP (17)
+- IP protocol must be TCP (6), UDP (17), or ICMP (1)
 
 ## 2. XDP Return Values
 

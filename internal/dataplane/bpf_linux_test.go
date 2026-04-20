@@ -185,14 +185,29 @@ func buildVLANTCPPkt(srcIP, dstIP netip.Addr, srcPort, dstPort uint16, vlan uint
 
 // ---- Malformed / special packet constructors (raw bytes) ----
 
-// buildARPPkt creates an ARP Ethernet frame.
+// buildARPPkt creates a valid Ethernet + ARP IPv4 frame.
 func buildARPPkt() []byte {
-	eth := &layers.Ethernet{SrcMAC: macSrc, DstMAC: macDst, EthernetType: layers.EthernetTypeARP}
-	buf := gopacket.NewSerializeBuffer()
-	if err := gopacket.SerializeLayers(buf, gopacket.SerializeOptions{FixLengths: true}, eth); err != nil {
-		panic(err)
-	}
-	return buf.Bytes()
+	pkt := make([]byte, 14+28)
+	copy(pkt[0:6], macDst)
+	copy(pkt[6:12], macSrc)
+	pkt[12], pkt[13] = 0x08, 0x06 // ARP
+	binary.BigEndian.PutUint16(pkt[14:16], 1)
+	binary.BigEndian.PutUint16(pkt[16:18], 0x0800)
+	pkt[18], pkt[19] = 6, 4
+	binary.BigEndian.PutUint16(pkt[20:22], 1)
+	copy(pkt[22:28], macSrc)
+	copy(pkt[28:32], ip("192.168.1.1").AsSlice())
+	copy(pkt[32:38], macDst)
+	copy(pkt[38:42], ip("192.168.2.2").AsSlice())
+	return pkt
+}
+
+func buildTruncatedARPPkt() []byte {
+	pkt := make([]byte, 14+8)
+	copy(pkt[0:6], macDst)
+	copy(pkt[6:12], macSrc)
+	pkt[12], pkt[13] = 0x08, 0x06
+	return pkt
 }
 
 // buildIPv6Pkt creates a minimal Ethernet + IPv6 packet.
@@ -216,7 +231,6 @@ func buildUnknownEthertypePkt() []byte {
 }
 
 // buildICMPIPPkt creates Ethernet + IPv4 + ICMP.
-// BPF returns PARSE_ERR_UNSUPPORTED_IP_PROTO (protocol not TCP/UDP).
 func buildICMPIPPkt(srcIP, dstIP netip.Addr) []byte {
 	eth := &layers.Ethernet{SrcMAC: macSrc, DstMAC: macDst, EthernetType: layers.EthernetTypeIPv4}
 	ip4 := &layers.IPv4{
@@ -233,6 +247,15 @@ func buildICMPIPPkt(srcIP, dstIP netip.Addr) []byte {
 		panic(err)
 	}
 	return buf.Bytes()
+}
+
+func buildTruncatedICMPPkt() []byte {
+	pkt := make([]byte, 14+20+4)
+	pkt[12], pkt[13] = 0x08, 0x00
+	pkt[14] = 0x45
+	binary.BigEndian.PutUint16(pkt[16:18], 20+4)
+	pkt[23] = 1 // ICMP
+	return pkt
 }
 
 // buildTruncatedEthPkt returns < 14 bytes (incomplete Ethernet header).
@@ -467,19 +490,19 @@ func TestBPFParserPassAndParseFailures(t *testing.T) {
 		{"tcp_syn_ok", buildEthernetPkt(ip("192.168.1.1"), ip("192.168.2.2"), 12345, 9999, "tcp_syn"), false},
 		{"tcp_ack_ok", buildEthernetPkt(ip("192.168.1.1"), ip("192.168.2.2"), 12345, 9999, "tcp_ack"), false},
 		{"udp_ok", buildEthernetPkt(ip("192.168.1.1"), ip("192.168.2.2"), 12345, 9999, "udp"), false},
+		{"icmp_ok", buildICMPIPPkt(ip("192.168.1.1"), ip("192.168.2.2")), false},
+		{"arp_ok", buildARPPkt(), false},
 		{"vlan_tcp_ok", buildVLANTCPPkt(ip("192.168.1.1"), ip("192.168.2.2"), 12345, 9999, 100), false},
 
 		// --- Unsupported ethertype → PARSE_ERR_UNSUPPORTED_ETH_PROTO ---
-		{"arp_fail", buildARPPkt(), true},
 		{"ipv6_fail", buildIPv6Pkt(), true},
 		{"unknown_ethertype_fail", buildUnknownEthertypePkt(), true},
 
-		// --- Unsupported IP protocol → PARSE_ERR_UNSUPPORTED_IP_PROTO ---
-		{"icmp_fail", buildICMPIPPkt(ip("192.168.1.1"), ip("192.168.2.2")), true},
-
 		// --- Truncated / malformed ---
 		{"truncated_eth", buildTruncatedEthPkt(), true},
+		{"truncated_arp", buildTruncatedARPPkt(), true},
 		{"truncated_ip", buildTruncatedIPPkt(), true},
+		{"truncated_icmp", buildTruncatedICMPPkt(), true},
 		{"invalid_ihl", buildInvalidIHLPkt(), true},
 		{"ipv4_options_unsupported", buildIPv4OptionsPkt(), true},
 		{"truncated_tcp", buildTruncatedTCPPkt(), true},
