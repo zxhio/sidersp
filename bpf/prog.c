@@ -256,23 +256,25 @@ static __always_inline void emit_event(const struct pkt_ctx *ctx, const struct r
     bpf_ringbuf_submit(evt, 0);
 }
 
-static parse_err_t parse_udp(struct pkt_ctx *ctx, void *data, void *data_end)
+static parse_err_t parse_udp(struct pkt_ctx *ctx, void *data, void *data_end, __u32 l4_len)
 {
     struct udphdr *udp = data;
+    __u32 udp_len;
     void *payload;
 
     if ((void *)(udp + 1) > data_end)
+        return PARSE_ERR_TRANSPORT_SHORT;
+
+    udp_len = bpf_ntohs(udp->len);
+    if (udp_len < sizeof(*udp) || udp_len > l4_len)
         return PARSE_ERR_TRANSPORT_SHORT;
 
     ctx->sport = bpf_ntohs(udp->source);
     ctx->dport = bpf_ntohs(udp->dest);
 
     payload = udp + 1;
-    if (payload > data_end)
-        return PARSE_ERR_TRANSPORT_SHORT;
-
     ctx->payload = payload;
-    ctx->payload_len = (__u16)((long)data_end - (long)payload);
+    ctx->payload_len = (__u16)(udp_len - sizeof(*udp));
     return PARSE_OK;
 }
 
@@ -296,7 +298,7 @@ static __always_inline parse_err_t parse_icmp(struct pkt_ctx *ctx, void *data, v
 }
 #endif
 
-static parse_err_t parse_tcp(struct pkt_ctx *ctx, void *data, void *data_end)
+static parse_err_t parse_tcp(struct pkt_ctx *ctx, void *data, void *data_end, __u32 l4_len)
 {
     struct tcphdr *tcp = data;
     __u32 doff_len;
@@ -306,7 +308,7 @@ static parse_err_t parse_tcp(struct pkt_ctx *ctx, void *data, void *data_end)
         return PARSE_ERR_TRANSPORT_SHORT;
 
     doff_len = tcp->doff * 4;
-    if (doff_len < sizeof(*tcp))
+    if (doff_len < sizeof(*tcp) || doff_len > l4_len)
         return PARSE_ERR_TRANSPORT_SHORT;
     if ((void *)tcp + doff_len > data_end)
         return PARSE_ERR_TRANSPORT_SHORT;
@@ -321,24 +323,21 @@ static parse_err_t parse_tcp(struct pkt_ctx *ctx, void *data, void *data_end)
         (tcp->psh ? TCP_FLAG_PSH : 0);
 
     payload = (void *)tcp + doff_len;
-    if (payload > data_end)
-        return PARSE_ERR_TRANSPORT_SHORT;
-
     ctx->payload = payload;
-    ctx->payload_len = (__u16)((long)data_end - (long)payload);
+    ctx->payload_len = (__u16)(l4_len - doff_len);
     return PARSE_OK;
 }
 
 static parse_err_t parse_ip_l4(struct pkt_ctx *ctx, void *l4,
-                               void *data_end, __u8 ip_proto)
+                               void *data_end, __u8 ip_proto, __u32 l4_len)
 {
     ctx->ip_proto = ip_proto;
 
     switch (ip_proto) {
     case IPPROTO_TCP:
-        return parse_tcp(ctx, l4, data_end);
+        return parse_tcp(ctx, l4, data_end, l4_len);
     case IPPROTO_UDP:
-        return parse_udp(ctx, l4, data_end);
+        return parse_udp(ctx, l4, data_end, l4_len);
 #if 0
     case IPPROTO_ICMP:
     case IPPROTO_ICMPV6:
@@ -353,13 +352,17 @@ static parse_err_t parse_ipv4(struct pkt_ctx *ctx, void *data, void *data_end)
 {
     struct iphdr *ip = data;
     __u32 ihl_len;
+    __u32 total_len;
+    __u32 captured_len;
     void *l4;
 
     if ((void *)(ip + 1) > data_end)
         return PARSE_ERR_NETWORK_SHORT;
 
     ihl_len = ip->ihl * 4;
-    if (ihl_len < sizeof(*ip))
+    total_len = bpf_ntohs(ip->tot_len);
+    captured_len = (__u32)((long)data_end - (long)data);
+    if (ihl_len < sizeof(*ip) || ihl_len > 60 || total_len < ihl_len || total_len > captured_len)
         return PARSE_ERR_BAD_IPV4;
     if ((void *)ip + ihl_len > data_end)
         return PARSE_ERR_BAD_IPV4;
@@ -369,7 +372,7 @@ static parse_err_t parse_ipv4(struct pkt_ctx *ctx, void *data, void *data_end)
     ctx->daddr = ip->daddr;
 
     l4 = (void *)ip + ihl_len;
-    return parse_ip_l4(ctx, l4, data_end, ip->protocol);
+    return parse_ip_l4(ctx, l4, data_end, ip->protocol, total_len - ihl_len);
 }
 
 #if 0

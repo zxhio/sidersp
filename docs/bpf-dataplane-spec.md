@@ -119,7 +119,7 @@ fails, `ringbuf_dropped` is incremented instead and no event is delivered.
 | 30 | 2 | dport | Destination port, **host byte order** (bpf_ntohs) |
 | 32 | 1 | tcp_flags | TCP flags: SYN=0x02, ACK=0x10, RST=0x04, FIN=0x01, PSH=0x08 |
 | 33 | 1 | ip_proto | IP protocol: 6=TCP, 17=UDP |
-| 34 | 2 | payload_len | Captured bytes after transport header (`data_end - payload`); may include Ethernet padding/trailing bytes |
+| 34 | 2 | payload_len | L4 payload bytes after transport header, bounded by IPv4 `total_length`; Ethernet padding/trailing bytes are excluded |
 
 ### Guarantees
 
