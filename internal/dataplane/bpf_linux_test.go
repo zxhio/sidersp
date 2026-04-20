@@ -15,6 +15,8 @@ import (
 	"github.com/cilium/ebpf/rlimit"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"sidersp/internal/rule"
 )
@@ -183,45 +185,70 @@ func buildVLANTCPPkt(srcIP, dstIP netip.Addr, srcPort, dstPort uint16, vlan uint
 	return buf.Bytes()
 }
 
-// ---- Malformed / special packet constructors (raw bytes) ----
+// ---- Malformed / special packet constructors ----
 
-// buildARPPkt creates a valid Ethernet + ARP IPv4 frame.
+const (
+	ethHeaderLen  = 14
+	ipv4HeaderLen = 20
+	arpIPv4Len    = 28
+
+	ipv4TotalLenOffset = ethHeaderLen + 2
+)
+
+func clonePacket(pkt []byte) []byte { return append([]byte(nil), pkt...) }
+
+func truncatePacket(pkt []byte, size int) []byte {
+	out := clonePacket(pkt)
+	return out[:size]
+}
+
+func withTrailingPadding(pkt []byte, padLen int) []byte {
+	out := clonePacket(pkt)
+	return append(out, make([]byte, padLen)...)
+}
+
+func setIPv4TotalLen(pkt []byte, totalLen uint16) []byte {
+	out := clonePacket(pkt)
+	binary.BigEndian.PutUint16(out[ipv4TotalLenOffset:ipv4TotalLenOffset+2], totalLen)
+	return out
+}
+
+func setIPv4IHL(pkt []byte, ihl uint8) []byte {
+	out := clonePacket(pkt)
+	out[ethHeaderLen] = (out[ethHeaderLen] & 0xf0) | (ihl & 0x0f)
+	return out
+}
+
 func buildARPPkt() []byte {
-	pkt := make([]byte, 14+28)
-	copy(pkt[0:6], macDst)
-	copy(pkt[6:12], macSrc)
-	pkt[12], pkt[13] = 0x08, 0x06 // ARP
-	binary.BigEndian.PutUint16(pkt[14:16], 1)
-	binary.BigEndian.PutUint16(pkt[16:18], 0x0800)
-	pkt[18], pkt[19] = 6, 4
-	binary.BigEndian.PutUint16(pkt[20:22], 1)
-	copy(pkt[22:28], macSrc)
-	copy(pkt[28:32], ip("192.168.1.1").AsSlice())
-	copy(pkt[32:38], macDst)
-	copy(pkt[38:42], ip("192.168.2.2").AsSlice())
-	return pkt
+	eth := &layers.Ethernet{SrcMAC: macSrc, DstMAC: macDst, EthernetType: layers.EthernetTypeARP}
+	arp := &layers.ARP{
+		AddrType:          layers.LinkTypeEthernet,
+		Protocol:          layers.EthernetTypeIPv4,
+		Operation:         1,
+		SourceHwAddress:   []byte(macSrc),
+		SourceProtAddress: ip("192.168.1.1").AsSlice(),
+		DstHwAddress:      []byte(macDst),
+		DstProtAddress:    ip("192.168.2.2").AsSlice(),
+	}
+
+	buf := gopacket.NewSerializeBuffer()
+	if err := gopacket.SerializeLayers(buf, gopacket.SerializeOptions{FixLengths: true}, eth, arp); err != nil {
+		panic(err)
+	}
+	return buf.Bytes()
 }
 
-func buildTruncatedARPPkt() []byte {
-	pkt := make([]byte, 14+8)
-	copy(pkt[0:6], macDst)
-	copy(pkt[6:12], macSrc)
-	pkt[12], pkt[13] = 0x08, 0x06
-	return pkt
-}
+func buildTruncatedARPPkt() []byte { return truncatePacket(buildARPPkt(), ethHeaderLen+8) }
 
-// buildIPv6Pkt creates a minimal Ethernet + IPv6 packet.
-// BPF returns PARSE_ERR_UNSUPPORTED_ETH_PROTO.
 func buildIPv6Pkt() []byte {
-	pkt := make([]byte, 14+40) // eth(14) + min IPv6(40)
+	pkt := make([]byte, ethHeaderLen+40)
 	copy(pkt[0:6], macDst)
 	copy(pkt[6:12], macSrc)
-	pkt[12], pkt[13] = 0x86, 0xDD // IPv6
-	pkt[14] = 0x60                 // version=6
+	pkt[12], pkt[13] = 0x86, 0xDD
+	pkt[14] = 0x60
 	return pkt
 }
 
-// buildUnknownEthertypePkt creates an Ethernet frame with unrecognized ethertype.
 func buildUnknownEthertypePkt() []byte {
 	pkt := make([]byte, 60)
 	copy(pkt[0:6], macDst)
@@ -230,7 +257,6 @@ func buildUnknownEthertypePkt() []byte {
 	return pkt
 }
 
-// buildICMPIPPkt creates Ethernet + IPv4 + ICMP.
 func buildICMPIPPkt(srcIP, dstIP netip.Addr) []byte {
 	eth := &layers.Ethernet{SrcMAC: macSrc, DstMAC: macDst, EthernetType: layers.EthernetTypeIPv4}
 	ip4 := &layers.IPv4{
@@ -238,7 +264,6 @@ func buildICMPIPPkt(srcIP, dstIP netip.Addr) []byte {
 		Protocol: layers.IPProtocolICMPv4,
 		SrcIP:    srcIP.AsSlice(), DstIP: dstIP.AsSlice(),
 	}
-	// Minimal ICMP Echo Request header (8 bytes).
 	icmp := gopacket.Payload([]byte{8, 0, 0, 0, 0, 1, 0, 1})
 
 	buf := gopacket.NewSerializeBuffer()
@@ -250,81 +275,45 @@ func buildICMPIPPkt(srcIP, dstIP netip.Addr) []byte {
 }
 
 func buildTruncatedICMPPkt() []byte {
-	pkt := make([]byte, 14+20+4)
-	pkt[12], pkt[13] = 0x08, 0x00
-	pkt[14] = 0x45
-	binary.BigEndian.PutUint16(pkt[16:18], 20+4)
-	pkt[23] = 1 // ICMP
-	return pkt
+	return setIPv4TotalLen(
+		truncatePacket(buildICMPIPPkt(ip("192.168.1.1"), ip("192.168.2.2")), ethHeaderLen+ipv4HeaderLen+4),
+		ipv4HeaderLen+4,
+	)
 }
 
-// buildTruncatedEthPkt returns < 14 bytes (incomplete Ethernet header).
-func buildTruncatedEthPkt() []byte {
-	return make([]byte, 10)
-}
+func buildTruncatedEthPkt() []byte { return make([]byte, 10) }
 
-// buildTruncatedIPPkt returns Ethernet + 10 bytes of IPv4 (incomplete IP header).
 func buildTruncatedIPPkt() []byte {
-	pkt := make([]byte, 14+10) // eth(14) + partial IP(10)
-	pkt[12], pkt[13] = 0x08, 0x00
-	pkt[14] = 0x45 // version=4, IHL=5
-	return pkt
+	return truncatePacket(buildEthernetPkt(ip("192.168.1.1"), ip("192.168.2.2"), 12345, 80, "tcp_syn"), ethHeaderLen+10)
 }
 
-// buildInvalidIHLPkt returns a valid-length packet with IPv4 IHL=3 (< minimum 5).
 func buildInvalidIHLPkt() []byte {
-	pkt := make([]byte, 14+20) // enough bytes to pass initial sizeof(iphdr) check
-	pkt[12], pkt[13] = 0x08, 0x00
-	pkt[14] = 0x43 // version=4, IHL=3 → ihl_len=12 < 20 → PARSE_ERR_BAD_IPV4
-	return pkt
+	return setIPv4IHL(buildEthernetPkt(ip("192.168.1.1"), ip("192.168.2.2"), 12345, 80, "tcp_syn"), 3)
 }
 
-// buildIPv4OptionsPkt returns IPv4 with IHL=6. The fast path only supports IHL=5.
 func buildIPv4OptionsPkt() []byte {
-	pkt := make([]byte, 14+24+20)
-	pkt[12], pkt[13] = 0x08, 0x00
-	pkt[14] = 0x46 // version=4, IHL=6
-	binary.BigEndian.PutUint16(pkt[16:18], 24+20)
-	pkt[23] = 6 // TCP
-	pkt[14+24+12] = 0x50
-	return pkt
+	return setIPv4IHL(buildEthernetPkt(ip("192.168.1.1"), ip("192.168.2.2"), 12345, 80, "tcp_syn"), 6)
 }
 
-// buildTruncatedTCPPkt returns Ethernet + IPv4 + 10 bytes of TCP (need 20).
 func buildTruncatedTCPPkt() []byte {
-	pkt := make([]byte, 14+20+10) // 44 bytes
-	pkt[12], pkt[13] = 0x08, 0x00
-	pkt[14] = 0x45 // IPv4, IHL=5
-	binary.BigEndian.PutUint16(pkt[16:18], 20+10)
-	pkt[23] = 6 // TCP
-	return pkt
+	return setIPv4TotalLen(
+		truncatePacket(buildEthernetPkt(ip("192.168.1.1"), ip("192.168.2.2"), 12345, 80, "tcp_syn"), ethHeaderLen+ipv4HeaderLen+10),
+		ipv4HeaderLen+10,
+	)
 }
 
-// buildInvalidDoffPkt returns a full-size packet with TCP data_offset=2 (< minimum 5).
 func buildInvalidDoffPkt() []byte {
-	pkt := make([]byte, 14+20+20) // full TCP header present
-	pkt[12], pkt[13] = 0x08, 0x00
-	pkt[14] = 0x45
-	binary.BigEndian.PutUint16(pkt[16:18], 20+20)
-	pkt[23] = 6
-	// TCP byte 12 (offset 46): doff=2 → (2<<4)=0x20
-	pkt[46] = 0x20
+	pkt := clonePacket(buildEthernetPkt(ip("192.168.1.1"), ip("192.168.2.2"), 12345, 80, "tcp_syn"))
+	tcpDoffOffset := ethHeaderLen + ipv4HeaderLen + 12
+	pkt[tcpDoffOffset] = (2 << 4) | (pkt[tcpDoffOffset] & 0x0f)
 	return pkt
 }
 
-// buildTruncatedUDPPkt returns Ethernet + IPv4 + 4 bytes of UDP (need 8).
 func buildTruncatedUDPPkt() []byte {
-	pkt := make([]byte, 14+20+4) // 38 bytes
-	pkt[12], pkt[13] = 0x08, 0x00
-	pkt[14] = 0x45
-	binary.BigEndian.PutUint16(pkt[16:18], 20+4)
-	pkt[23] = 17 // UDP
-	return pkt
-}
-
-func withTrailingPadding(pkt []byte, padLen int) []byte {
-	out := append([]byte(nil), pkt...)
-	return append(out, make([]byte, padLen)...)
+	return setIPv4TotalLen(
+		truncatePacket(buildEthernetPkt(ip("192.168.1.1"), ip("192.168.2.2"), 12345, 80, "udp"), ethHeaderLen+ipv4HeaderLen+4),
+		ipv4HeaderLen+4,
+	)
 }
 
 // ---------------------------------------------------------------------------
@@ -334,37 +323,24 @@ func withTrailingPadding(pkt []byte, padLen int) []byte {
 func setupBPFRuntime(t *testing.T, rules []rule.Rule) (*siderspObjects, *ringbuf.Reader) {
 	t.Helper()
 
-	if err := rlimit.RemoveMemlock(); err != nil {
-		t.Fatalf("remove memlock: %v", err)
-	}
+	require.NoError(t, rlimit.RemoveMemlock(), "remove memlock")
 
 	var objs siderspObjects
-	if err := loadSiderspObjects(&objs, nil); err != nil {
-		t.Fatalf("load BPF objects: %v", err)
-	}
+	require.NoError(t, loadSiderspObjects(&objs, nil), "load BPF objects")
 
 	if len(rules) > 0 {
 		set := rule.RuleSet{Rules: make([]rule.Rule, len(rules))}
 		copy(set.Rules, rules)
 
 		snapshot, err := buildSnapshot(set)
-		if err != nil {
-			objs.Close()
-			t.Fatalf("build snapshot: %v", err)
-		}
+		require.NoError(t, err, "build snapshot")
 		writeSnapshotToMaps(t, &objs, snapshot)
 	} else {
-		if err := writeGlobalConfig(objs.GlobalCfgMap, siderspGlobalCfg{}); err != nil {
-			objs.Close()
-			t.Fatalf("write empty config: %v", err)
-		}
+		require.NoError(t, writeGlobalConfig(objs.GlobalCfgMap, siderspGlobalCfg{}), "write empty config")
 	}
 
 	reader, err := ringbuf.NewReader(objs.EventRingbuf)
-	if err != nil {
-		objs.Close()
-		t.Fatalf("create ringbuf reader: %v", err)
-	}
+	require.NoError(t, err, "create ringbuf reader")
 
 	return &objs, reader
 }
@@ -384,19 +360,14 @@ func writeSnapshotToMaps(t *testing.T, objs *siderspObjects, snap mapSnapshot) {
 		{"global config", func() error { return writeGlobalConfig(objs.GlobalCfgMap, snap.globalCfg) }},
 	}
 	for _, w := range writers {
-		if err := w.fn(); err != nil {
-			objs.Close()
-			t.Fatalf("write %s: %v", w.name, err)
-		}
+		require.NoError(t, w.fn(), "write %s", w.name)
 	}
 }
 
 func readStat(t *testing.T, objs *siderspObjects, idx uint32) uint64 {
 	t.Helper()
 	val, err := readPerCPUCounter(objs.StatsMap, idx)
-	if err != nil {
-		t.Fatalf("read stats[%d]: %v", idx, err)
-	}
+	require.NoError(t, err, "read stats[%d]", idx)
 	return val
 }
 
@@ -444,9 +415,7 @@ func mustReadEvent(t *testing.T, reader *ringbuf.Reader) ruleEvent {
 	defer timer.Stop()
 	select {
 	case r := <-readEventAsync(reader):
-		if !r.ok {
-			t.Fatal("ringbuf read returned error")
-		}
+		require.True(t, r.ok, "ringbuf read returned error")
 		return r.evt
 	case <-timer.C:
 		t.Fatal("timed out waiting for ringbuf event (500ms)")
@@ -517,36 +486,23 @@ func TestBPFParserPassAndParseFailures(t *testing.T) {
 			beforeMatch := readStat(t, objs, statMatchedRules)
 
 			ret, _, err := objs.XdpSidersp.Test(tc.pkt)
-			if err != nil {
-				t.Fatalf("prog.Test(): %v", err)
-			}
+			require.NoError(t, err, "prog.Test()")
 
 			afterRx := readStat(t, objs, statRXPackets)
 			afterPF := readStat(t, objs, statParseFailed)
 			afterMatch := readStat(t, objs, statMatchedRules)
 
-			if ret != xdpPass {
-				t.Fatalf("XDP retval=%d, want=%d", ret, xdpPass)
-			}
-			if afterRx <= beforeRx {
-				t.Fatal("rx_packets not incremented")
-			}
+			require.Equal(t, uint32(xdpPass), ret, "XDP retval")
+			require.Greater(t, afterRx, beforeRx, "rx_packets not incremented")
 
 			if tc.wantParseFail {
-				if afterPF <= beforePF {
-					t.Fatal("parse_failed not incremented for malformed packet")
-				}
-				if afterMatch > beforeMatch {
-					t.Fatal("parse-failed packet should not match any rule")
-				}
+				require.Greater(t, afterPF, beforePF, "parse_failed not incremented for malformed packet")
+				require.LessOrEqual(t, afterMatch, beforeMatch, "parse-failed packet should not match any rule")
 				// No ringbuf event for parse failures.
-				if _, found := tryReadEvent(t, reader); found {
-					t.Fatal("unexpected ringbuf event for parse-failed packet")
-				}
+				_, found := tryReadEvent(t, reader)
+				require.False(t, found, "unexpected ringbuf event for parse-failed packet")
 			} else {
-				if afterPF != beforePF {
-					t.Fatalf("parse_failed changed (%d→%d) for valid packet", beforePF, afterPF)
-				}
+				require.Equal(t, beforePF, afterPF, "parse_failed")
 				// If the packet happened to match a rule, drain the event.
 				if afterMatch > beforeMatch {
 					mustReadEvent(t, reader)
@@ -640,33 +596,23 @@ func TestBPFRuleMatchMatrix(t *testing.T) {
 
 			beforeMatch := readStat(t, objs, statMatchedRules)
 			ret, _, err := objs.XdpSidersp.Test(pkt)
-			if err != nil {
-				t.Fatalf("prog.Test(): %v", err)
-			}
+			require.NoError(t, err, "prog.Test()")
 			afterMatch := readStat(t, objs, statMatchedRules)
 
-			if ret != xdpPass {
-				t.Fatalf("XDP retval=%d, want=%d", ret, xdpPass)
-			}
+			require.Equal(t, uint32(xdpPass), ret, "XDP retval")
 
 			bpfMatched := afterMatch > beforeMatch
-			if bpfMatched != want.Matched {
-				t.Fatalf("BPF matched=%v, reference matched=%v (ruleID=%d)",
-					bpfMatched, want.Matched, want.RuleID)
-			}
+			require.Equal(t, want.Matched, bpfMatched, "BPF matched differs from reference matcher (ruleID=%d)", want.RuleID)
 
 			if !want.Matched {
-				if _, found := tryReadEvent(t, reader); found {
-					t.Fatal("unexpected ringbuf event for no-match case")
-				}
+				_, found := tryReadEvent(t, reader)
+				require.False(t, found, "unexpected ringbuf event for no-match case")
 				return
 			}
 
 			// Verify rule ID matches the reference matcher.
 			evt := mustReadEvent(t, reader)
-			if evt.RuleID != uint32(want.RuleID) {
-				t.Fatalf("BPF ruleID=%d, reference ruleID=%d", evt.RuleID, want.RuleID)
-			}
+			require.Equal(t, uint32(want.RuleID), evt.RuleID, "BPF ruleID")
 		})
 	}
 }
@@ -729,36 +675,24 @@ func TestBPFPrioritySelection(t *testing.T) {
 						break
 					}
 				}
-				if !found {
-					t.Fatalf("design error: rule %d should match this packet (overlap check)", ruleID)
-				}
+				require.True(t, found, "design error: rule %d should match this packet (overlap check)", ruleID)
 			}
 
 			want := refMatch(testRules, refPkt)
-			if want.RuleID != tc.wantRuleID {
-				t.Fatalf("reference matcher returned ruleID=%d, expected=%d", want.RuleID, tc.wantRuleID)
-			}
+			require.Equal(t, tc.wantRuleID, want.RuleID, "reference matcher ruleID")
 
 			pkt := buildEthernetPkt(srcIP, dstIP, tc.srcPort, tc.dstPort, "tcp_syn")
 			beforeMatch := readStat(t, objs, statMatchedRules)
 
 			ret, _, err := objs.XdpSidersp.Test(pkt)
-			if err != nil {
-				t.Fatalf("prog.Test(): %v", err)
-			}
+			require.NoError(t, err, "prog.Test()")
 
 			afterMatch := readStat(t, objs, statMatchedRules)
-			if ret != xdpPass {
-				t.Fatalf("XDP retval=%d, want=%d", ret, xdpPass)
-			}
-			if afterMatch <= beforeMatch {
-				t.Fatal("packet should match at least one rule")
-			}
+			require.Equal(t, uint32(xdpPass), ret, "XDP retval")
+			require.Greater(t, afterMatch, beforeMatch, "packet should match at least one rule")
 
 			evt := mustReadEvent(t, reader)
-			if evt.RuleID != uint32(tc.wantRuleID) {
-				t.Fatalf("BPF ruleID=%d, want=%d", evt.RuleID, tc.wantRuleID)
-			}
+			require.Equal(t, uint32(tc.wantRuleID), evt.RuleID, "BPF ruleID")
 		})
 	}
 }
@@ -782,49 +716,27 @@ func TestBPFEventEncoding(t *testing.T) {
 		pkt := withTrailingPadding(buildEthernetPkt(srcIP, dstIP, 54321, 80, "tcp_syn"), 18)
 
 		ret, _, err := objs.XdpSidersp.Test(pkt)
-		if err != nil {
-			t.Fatalf("prog.Test(): %v", err)
-		}
-		if ret != xdpPass {
-			t.Fatalf("XDP retval=%d", ret)
-		}
+		require.NoError(t, err, "prog.Test()")
+		require.Equal(t, uint32(xdpPass), ret, "XDP retval")
 
 		evt := mustReadEvent(t, reader)
 
 		// rule_id: matches rule 1001 (dst 10.0.5.2/32:80, TCP_SYN)
-		if evt.RuleID != 1001 {
-			t.Errorf("rule_id=%d, want=1001", evt.RuleID)
-		}
+		assert.Equal(t, uint32(1001), evt.RuleID, "rule_id")
 		// action: RST (code 1)
-		if evt.Action != uint32(actionRST) {
-			t.Errorf("action=%d, want=%d (RST)", evt.Action, actionRST)
-		}
+		assert.Equal(t, uint32(actionRST), evt.Action, "action")
 		// sip/dip: host byte order
-		if evt.SIP != ipv4ToUint32(srcIP) {
-			t.Errorf("sip=%s, want=%s", ipv4String(evt.SIP), srcIP)
-		}
-		if evt.DIP != ipv4ToUint32(dstIP) {
-			t.Errorf("dip=%s, want=%s", ipv4String(evt.DIP), dstIP)
-		}
+		assert.Equal(t, ipv4ToUint32(srcIP), evt.SIP, "sip")
+		assert.Equal(t, ipv4ToUint32(dstIP), evt.DIP, "dip")
 		// sport/dport: host byte order
-		if evt.SPort != 54321 {
-			t.Errorf("sport=%d, want=54321", evt.SPort)
-		}
-		if evt.DPort != 80 {
-			t.Errorf("dport=%d, want=80", evt.DPort)
-		}
+		assert.Equal(t, uint16(54321), evt.SPort, "sport")
+		assert.Equal(t, uint16(80), evt.DPort, "dport")
 		// ip_proto: TCP (6)
-		if evt.IPProto != 6 {
-			t.Errorf("ip_proto=%d, want=6", evt.IPProto)
-		}
+		assert.Equal(t, uint8(6), evt.IPProto, "ip_proto")
 		// tcp_flags: SYN (0x02)
-		if evt.TCPFlags != 0x02 {
-			t.Errorf("tcp_flags=0x%02x, want=0x02", evt.TCPFlags)
-		}
+		assert.Equal(t, uint8(0x02), evt.TCPFlags, "tcp_flags")
 		// payload_len: SYN-only packet has no payload
-		if evt.PayloadLen != 0 {
-			t.Errorf("payload_len=%d, want=0", evt.PayloadLen)
-		}
+		assert.Equal(t, uint16(0), evt.PayloadLen, "payload_len")
 		// pkt_conds: COND_DST_PREFIX | COND_SRC_PORT | COND_DST_PORT | COND_TCP_SYN
 		//   src=10.0.1.100 → no src prefix match → no COND_SRC_PREFIX
 		//   dst=10.0.5.2   → matches /32 in LPM → COND_DST_PREFIX
@@ -832,9 +744,7 @@ func TestBPFEventEncoding(t *testing.T) {
 		//   dport=80≠0     → COND_DST_PORT
 		//   SYN flag       → COND_TCP_SYN
 		wantConds := uint32(condDstPrefix | condSrcPort | condDstPort | condTCPSYN)
-		if evt.PktConds != wantConds {
-			t.Errorf("pkt_conds=0x%08x, want=0x%08x", evt.PktConds, wantConds)
-		}
+		assert.Equal(t, wantConds, evt.PktConds, "pkt_conds")
 	})
 
 	// Case 2: Multi-condition match → verify pkt_conds includes both prefix bits.
@@ -844,23 +754,15 @@ func TestBPFEventEncoding(t *testing.T) {
 		pkt := buildEthernetPkt(srcIP, dstIP, 40000, 3306, "tcp_syn")
 
 		ret, _, err := objs.XdpSidersp.Test(pkt)
-		if err != nil {
-			t.Fatalf("prog.Test(): %v", err)
-		}
-		if ret != xdpPass {
-			t.Fatalf("XDP retval=%d", ret)
-		}
+		require.NoError(t, err, "prog.Test()")
+		require.Equal(t, uint32(xdpPass), ret, "XDP retval")
 
 		evt := mustReadEvent(t, reader)
 
-		if evt.RuleID != 1050 {
-			t.Fatalf("rule_id=%d, want=1050", evt.RuleID)
-		}
+		require.Equal(t, uint32(1050), evt.RuleID, "rule_id")
 		// pkt_conds: COND_SRC_PREFIX | COND_DST_PREFIX | COND_SRC_PORT | COND_DST_PORT | COND_TCP_SYN
 		wantConds := uint32(condSrcPrefix | condDstPrefix | condSrcPort | condDstPort | condTCPSYN)
-		if evt.PktConds != wantConds {
-			t.Errorf("pkt_conds=0x%08x, want=0x%08x", evt.PktConds, wantConds)
-		}
+		assert.Equal(t, wantConds, evt.PktConds, "pkt_conds")
 	})
 
 	// Case 3: No-match → no ringbuf event, matched_rules unchanged.
@@ -869,20 +771,13 @@ func TestBPFEventEncoding(t *testing.T) {
 
 		beforeMatch := readStat(t, objs, statMatchedRules)
 		ret, _, err := objs.XdpSidersp.Test(pkt)
-		if err != nil {
-			t.Fatalf("prog.Test(): %v", err)
-		}
+		require.NoError(t, err, "prog.Test()")
 		afterMatch := readStat(t, objs, statMatchedRules)
 
-		if ret != xdpPass {
-			t.Fatalf("XDP retval=%d", ret)
-		}
-		if afterMatch > beforeMatch {
-			t.Error("matched_rules should not increment for no-match packet")
-		}
-		if _, found := tryReadEvent(t, reader); found {
-			t.Fatal("unexpected ringbuf event for no-match packet")
-		}
+		require.Equal(t, uint32(xdpPass), ret, "XDP retval")
+		assert.LessOrEqual(t, afterMatch, beforeMatch, "matched_rules should not increment for no-match packet")
+		_, found := tryReadEvent(t, reader)
+		require.False(t, found, "unexpected ringbuf event for no-match packet")
 	})
 }
 
@@ -936,26 +831,17 @@ func TestBPFBoundaryPackets(t *testing.T) {
 
 			beforeMatch := readStat(t, objs, statMatchedRules)
 			ret, _, err := objs.XdpSidersp.Test(pkt)
-			if err != nil {
-				t.Fatalf("prog.Test(): %v", err)
-			}
+			require.NoError(t, err, "prog.Test()")
 			afterMatch := readStat(t, objs, statMatchedRules)
 
-			if ret != xdpPass {
-				t.Fatalf("XDP retval=%d, want=%d", ret, xdpPass)
-			}
+			require.Equal(t, uint32(xdpPass), ret, "XDP retval")
 
 			bpfMatched := afterMatch > beforeMatch
-			if bpfMatched != want.Matched {
-				t.Fatalf("BPF matched=%v, reference matched=%v (ruleID=%d)",
-					bpfMatched, want.Matched, want.RuleID)
-			}
+			require.Equal(t, want.Matched, bpfMatched, "BPF matched differs from reference matcher (ruleID=%d)", want.RuleID)
 
 			if bpfMatched {
 				evt := mustReadEvent(t, reader)
-				if evt.RuleID != uint32(want.RuleID) {
-					t.Fatalf("BPF ruleID=%d, reference ruleID=%d", evt.RuleID, want.RuleID)
-				}
+				require.Equal(t, uint32(want.RuleID), evt.RuleID, "BPF ruleID")
 			}
 		})
 	}
@@ -975,20 +861,13 @@ func TestBPFEmptyRules(t *testing.T) {
 
 	beforeMatch := readStat(t, objs, statMatchedRules)
 	ret, _, err := objs.XdpSidersp.Test(pkt)
-	if err != nil {
-		t.Fatalf("prog.Test(): %v", err)
-	}
+	require.NoError(t, err, "prog.Test()")
 	afterMatch := readStat(t, objs, statMatchedRules)
 
-	if ret != xdpPass {
-		t.Fatalf("XDP retval=%d, want=%d", ret, xdpPass)
-	}
-	if afterMatch > beforeMatch {
-		t.Fatal("empty rule set should not match any packet")
-	}
-	if _, found := tryReadEvent(t, reader); found {
-		t.Fatal("unexpected ringbuf event with empty rule set")
-	}
+	require.Equal(t, uint32(xdpPass), ret, "XDP retval")
+	require.LessOrEqual(t, afterMatch, beforeMatch, "empty rule set should not match any packet")
+	_, found := tryReadEvent(t, reader)
+	require.False(t, found, "unexpected ringbuf event with empty rule set")
 }
 
 // ---------------------------------------------------------------------------
@@ -1003,12 +882,9 @@ func TestReferenceMatcherSelfConsistent(t *testing.T) {
 	}
 	r1 := refMatch(testRules, pkt)
 	r2 := refMatch(testRules, pkt)
-	if r1 != r2 {
-		t.Fatalf("non-deterministic: %v != %v", r1, r2)
-	}
-	if !r1.Matched || r1.RuleID != 1001 {
-		t.Fatalf("expected match ruleID=1001, got matched=%v ruleID=%d", r1.Matched, r1.RuleID)
-	}
+	require.Equal(t, r1, r2, "reference matcher should be deterministic")
+	require.True(t, r1.Matched, "expected reference matcher hit")
+	require.Equal(t, 1001, r1.RuleID, "reference matcher ruleID")
 
 	// No-match case.
 	noMatch := refPacket{
@@ -1016,9 +892,7 @@ func TestReferenceMatcherSelfConsistent(t *testing.T) {
 		SrcPort: 40000, DstPort: 80, TCPFlags: 0x02, VLAN: uint16(vlanNone), IPProto: 6,
 	}
 	r3 := refMatch(testRules, noMatch)
-	if r3.Matched {
-		t.Fatal("expected no match for unrelated IP")
-	}
+	require.False(t, r3.Matched, "expected no match for unrelated IP")
 
 	// Coverage: count how many rules are hit by the combined test packets.
 	hitRules := make(map[int]bool)
@@ -1039,7 +913,11 @@ func TestReferenceMatcherSelfConsistent(t *testing.T) {
 
 	// Matcher cases.
 	for _, tc := range []struct {
-		sIP string; dIP string; sP, dP uint16; proto string; vlan uint16
+		sIP    string
+		dIP    string
+		sP, dP uint16
+		proto  string
+		vlan   uint16
 	}{
 		{"172.16.0.1", "192.168.99.99", 50000, 443, "tcp_syn", 0},
 		{"10.0.9.9", "10.0.8.8", 8080, 12345, "tcp_syn", 0},
@@ -1060,7 +938,9 @@ func TestReferenceMatcherSelfConsistent(t *testing.T) {
 
 	// Priority cases also contribute coverage.
 	for _, tc := range []struct {
-		sIP string; dIP string; sP, dP uint16
+		sIP    string
+		dIP    string
+		sP, dP uint16
 	}{
 		{"10.0.1.1", "10.0.5.2", 8080, 80},
 		{"10.0.3.2", "10.0.3.50", 40000, 6379},
@@ -1071,7 +951,9 @@ func TestReferenceMatcherSelfConsistent(t *testing.T) {
 
 	// Boundary cases also contribute coverage.
 	for _, tc := range []struct {
-		sIP string; dIP string; sP, dP uint16
+		sIP    string
+		dIP    string
+		sP, dP uint16
 	}{
 		{"10.0.3.0", "10.0.9.1", 40000, 5555},
 		{"10.0.3.255", "10.0.9.1", 40000, 5555},
@@ -1088,9 +970,7 @@ func TestReferenceMatcherSelfConsistent(t *testing.T) {
 			missing = append(missing, r.ID)
 		}
 	}
-	if len(missing) > 0 {
-		t.Fatalf("rules not covered by any test packet: %v — add more test cases", missing)
-	}
+	require.Empty(t, missing, "rules not covered by any test packet: %v - add more test cases", missing)
 
 	fmt.Printf("reference matcher covers all %d rules\n", len(testRules))
 }
