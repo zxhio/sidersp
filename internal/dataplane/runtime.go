@@ -256,6 +256,12 @@ func (r *Runtime) streamEvents(ctx context.Context, reader *ringbuf.Reader) {
 	}
 }
 
+// ReplaceRules rebuilds and writes the full rule snapshot to BPF maps.
+//
+// TODO: incremental updates — currently any rule change (create/update/delete/enable/disable)
+// triggers a full rebuild of all indexes (rule_index, vlan/src_port/dst_port hash maps,
+// src/dst prefix LPM tries, global_cfg). This is correct but costly at scale. Future work:
+// stable ruleID→slot mapping, per-rule incremental index add/remove, unified delta path.
 func (r *Runtime) ReplaceRules(set rule.RuleSet) error {
 	snapshot, err := buildSnapshot(set)
 	if err != nil {
