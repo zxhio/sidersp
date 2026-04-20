@@ -280,20 +280,19 @@ static parse_err_t parse_udp(struct pkt_ctx *ctx, void *data, void *data_end, __
 
 #if 0
 /* Deferred ICMP parser support. */
-static __always_inline parse_err_t parse_icmp(struct pkt_ctx *ctx, void *data, void *data_end)
+static __always_inline parse_err_t parse_icmp(struct pkt_ctx *ctx, void *data, void *data_end, __u32 l4_len)
 {
     struct icmphdr *icmp = data;
     void *payload;
 
     if ((void *)(icmp + 1) > data_end)
         return PARSE_ERR_TRANSPORT_SHORT;
-
-    payload = icmp + 1;
-    if (payload > data_end)
+    if (sizeof(*icmp) > l4_len)
         return PARSE_ERR_TRANSPORT_SHORT;
 
+    payload = icmp + 1;
     ctx->payload = payload;
-    ctx->payload_len = (__u16)((long)data_end - (long)payload);
+    ctx->payload_len = (__u16)(l4_len - sizeof(*icmp));
     return PARSE_OK;
 }
 #endif
@@ -340,8 +339,9 @@ static parse_err_t parse_ip_l4(struct pkt_ctx *ctx, void *l4,
         return parse_udp(ctx, l4, data_end, l4_len);
 #if 0
     case IPPROTO_ICMP:
+        return parse_icmp(ctx, l4, data_end, l4_len);
     case IPPROTO_ICMPV6:
-        return parse_icmp(ctx, l4, data_end);
+        return parse_icmp(ctx, l4, data_end, l4_len);
 #endif
     default:
         return PARSE_ERR_UNSUPPORTED_IP_PROTO;
@@ -351,7 +351,6 @@ static parse_err_t parse_ip_l4(struct pkt_ctx *ctx, void *l4,
 static parse_err_t parse_ipv4(struct pkt_ctx *ctx, void *data, void *data_end)
 {
     struct iphdr *ip = data;
-    __u32 ihl_len;
     __u32 total_len;
     __u32 captured_len;
     void *l4;
@@ -359,20 +358,17 @@ static parse_err_t parse_ipv4(struct pkt_ctx *ctx, void *data, void *data_end)
     if ((void *)(ip + 1) > data_end)
         return PARSE_ERR_NETWORK_SHORT;
 
-    ihl_len = ip->ihl * 4;
     total_len = bpf_ntohs(ip->tot_len);
     captured_len = (__u32)((long)data_end - (long)data);
-    if (ihl_len < sizeof(*ip) || ihl_len > 60 || total_len < ihl_len || total_len > captured_len)
-        return PARSE_ERR_BAD_IPV4;
-    if ((void *)ip + ihl_len > data_end)
+    if (ip->ihl != 5 || total_len < sizeof(*ip) || total_len > captured_len)
         return PARSE_ERR_BAD_IPV4;
 
     ctx->ip_version = 4;
     ctx->saddr = ip->saddr;
     ctx->daddr = ip->daddr;
 
-    l4 = (void *)ip + ihl_len;
-    return parse_ip_l4(ctx, l4, data_end, ip->protocol, total_len - ihl_len);
+    l4 = ip + 1;
+    return parse_ip_l4(ctx, l4, data_end, ip->protocol, total_len - sizeof(*ip));
 }
 
 #if 0
@@ -380,9 +376,16 @@ static parse_err_t parse_ipv4(struct pkt_ctx *ctx, void *data, void *data_end)
 static __always_inline parse_err_t parse_ipv6(struct pkt_ctx *ctx, void *data, void *data_end)
 {
     struct ipv6hdr *ip6 = data;
+    __u32 payload_len;
+    __u32 captured_len;
     void *l4;
 
     if ((void *)(ip6 + 1) > data_end)
+        return PARSE_ERR_NETWORK_SHORT;
+
+    payload_len = bpf_ntohs(ip6->payload_len);
+    captured_len = (__u32)((long)data_end - (long)data);
+    if (sizeof(*ip6) + payload_len > captured_len)
         return PARSE_ERR_NETWORK_SHORT;
 
     ctx->ip_version = 6;
@@ -390,7 +393,7 @@ static __always_inline parse_err_t parse_ipv6(struct pkt_ctx *ctx, void *data, v
     ctx->daddr6 = ip6->daddr;
 
     l4 = ip6 + 1;
-    return parse_ip_l4(ctx, l4, data_end, ip6->nexthdr);
+    return parse_ip_l4(ctx, l4, data_end, ip6->nexthdr, payload_len);
 }
 
 static __always_inline parse_err_t parse_arp(struct pkt_ctx *ctx, void *data, void *data_end)

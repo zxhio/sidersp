@@ -21,16 +21,17 @@ incremented depends on the parse result.
 | ARP (0x0806) | — | **yes** | `PARSE_ERR_UNSUPPORTED_ETH_PROTO` |
 | Other | — | **yes** | `PARSE_ERR_UNSUPPORTED_ETH_PROTO` |
 
-Truncated or malformed headers (short Ethernet, short IPv4, invalid IHL, short
-TCP, invalid TCP data offset, short UDP) also increment `parse_failed`.
+Truncated or malformed headers (short Ethernet, short IPv4, unsupported IPv4
+options, invalid IHL, short TCP, invalid TCP data offset, short UDP) also
+increment `parse_failed`.
 
 ### Packet Requirements for Matching (no parse_failed)
 
 - Valid Ethernet header (>= 14 bytes)
-- For IPv4: valid IHL >= 5, sufficient bytes (version field **not** checked —
-  entry is determined by EtherType, so a malformed version nibble is not caught).
-  Header bounds are checked against captured frame end (`data_end`) only; IP
-  total length is not validated.
+- For IPv4: IHL must be exactly 5 (no IPv4 options on the fast path), sufficient
+  bytes, and `total_length` must fit within the captured frame. The version field
+  is **not** checked — entry is determined by EtherType, so a malformed version
+  nibble is not caught.
 - IPv4 fragments: the fragment offset field (`ip->frag_off`) is **not** checked.
   Non-first fragments will be parsed as if they carry a TCP/UDP header starting
   at `ip + ihl`, which may produce incorrect ports/flags or a `parse_failed`.

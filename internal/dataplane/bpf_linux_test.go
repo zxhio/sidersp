@@ -3,6 +3,7 @@
 package dataplane
 
 import (
+	"encoding/binary"
 	"fmt"
 	"net"
 	"net/netip"
@@ -255,12 +256,24 @@ func buildInvalidIHLPkt() []byte {
 	return pkt
 }
 
+// buildIPv4OptionsPkt returns IPv4 with IHL=6. The fast path only supports IHL=5.
+func buildIPv4OptionsPkt() []byte {
+	pkt := make([]byte, 14+24+20)
+	pkt[12], pkt[13] = 0x08, 0x00
+	pkt[14] = 0x46 // version=4, IHL=6
+	binary.BigEndian.PutUint16(pkt[16:18], 24+20)
+	pkt[23] = 6 // TCP
+	pkt[14+24+12] = 0x50
+	return pkt
+}
+
 // buildTruncatedTCPPkt returns Ethernet + IPv4 + 10 bytes of TCP (need 20).
 func buildTruncatedTCPPkt() []byte {
 	pkt := make([]byte, 14+20+10) // 44 bytes
 	pkt[12], pkt[13] = 0x08, 0x00
 	pkt[14] = 0x45 // IPv4, IHL=5
-	pkt[23] = 6    // TCP
+	binary.BigEndian.PutUint16(pkt[16:18], 20+10)
+	pkt[23] = 6 // TCP
 	return pkt
 }
 
@@ -269,6 +282,7 @@ func buildInvalidDoffPkt() []byte {
 	pkt := make([]byte, 14+20+20) // full TCP header present
 	pkt[12], pkt[13] = 0x08, 0x00
 	pkt[14] = 0x45
+	binary.BigEndian.PutUint16(pkt[16:18], 20+20)
 	pkt[23] = 6
 	// TCP byte 12 (offset 46): doff=2 → (2<<4)=0x20
 	pkt[46] = 0x20
@@ -280,8 +294,14 @@ func buildTruncatedUDPPkt() []byte {
 	pkt := make([]byte, 14+20+4) // 38 bytes
 	pkt[12], pkt[13] = 0x08, 0x00
 	pkt[14] = 0x45
+	binary.BigEndian.PutUint16(pkt[16:18], 20+4)
 	pkt[23] = 17 // UDP
 	return pkt
+}
+
+func withTrailingPadding(pkt []byte, padLen int) []byte {
+	out := append([]byte(nil), pkt...)
+	return append(out, make([]byte, padLen)...)
 }
 
 // ---------------------------------------------------------------------------
@@ -461,6 +481,7 @@ func TestBPFParserPassAndParseFailures(t *testing.T) {
 		{"truncated_eth", buildTruncatedEthPkt(), true},
 		{"truncated_ip", buildTruncatedIPPkt(), true},
 		{"invalid_ihl", buildInvalidIHLPkt(), true},
+		{"ipv4_options_unsupported", buildIPv4OptionsPkt(), true},
 		{"truncated_tcp", buildTruncatedTCPPkt(), true},
 		{"invalid_doff", buildInvalidDoffPkt(), true},
 		{"truncated_udp", buildTruncatedUDPPkt(), true},
@@ -735,7 +756,7 @@ func TestBPFEventEncoding(t *testing.T) {
 	t.Run("tcp_syn_all_fields", func(t *testing.T) {
 		srcIP := ip("10.0.1.100")
 		dstIP := ip("10.0.5.2")
-		pkt := buildEthernetPkt(srcIP, dstIP, 54321, 80, "tcp_syn")
+		pkt := withTrailingPadding(buildEthernetPkt(srcIP, dstIP, 54321, 80, "tcp_syn"), 18)
 
 		ret, _, err := objs.XdpSidersp.Test(pkt)
 		if err != nil {
