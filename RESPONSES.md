@@ -43,6 +43,11 @@ XSK TX 不依赖 ringbuf 携带原包或构包字段。`xsk_meta` 携带 `rule_i
 
 ## 响应结果结构
 
+> Note: The following structure represents the planned XSK worker response
+> result. The current implementation only emits ringbuf observation events
+> with verdict (OBSERVE / TX / XSK). Full response results will be available
+> after the XSK worker implementation is complete.
+
 响应结果由 BPF TX 统计或用户态 XSK worker 生成，用于状态展示和审计。
 
 ```json

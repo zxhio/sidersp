@@ -150,7 +150,10 @@ static __always_inline __u16 csum_fold_helper(__u32 csum)
     return (__u16)~csum;
 }
 
-static __always_inline __u16 ipv4_hdr_csum(struct iphdr *iph)
+/* Computes checksum for a fixed 20-byte header (no IP/TCP options).
+ * Only valid because do_tcp_reset_tx sets ihl=5 and doff=5.
+ */
+static __always_inline __u16 ipv4_rst_csum(struct iphdr *iph)
 {
     __u32 csum = 0;
     __u16 *w = (__u16 *)iph;
@@ -162,7 +165,10 @@ static __always_inline __u16 ipv4_hdr_csum(struct iphdr *iph)
     return csum_fold_helper(csum);
 }
 
-static __always_inline __u16 tcp_hdr_csum(__be32 saddr, __be32 daddr,
+/* Computes checksum for a fixed 20-byte header (no IP/TCP options).
+ * Only valid because do_tcp_reset_tx sets ihl=5 and doff=5.
+ */
+static __always_inline __u16 tcp_rst_csum(__be32 saddr, __be32 daddr,
                                            struct tcphdr *tcp)
 {
     __u32 csum = 0;
@@ -252,7 +258,7 @@ static __always_inline int do_tcp_reset_tx(struct xdp_md *xdp,
 
     ip->tot_len = bpf_htons(sizeof(*ip) + sizeof(*tcp));
     ip->check = 0;
-    ip->check = ipv4_hdr_csum(ip);
+    ip->check = ipv4_rst_csum(ip);
 
     tmp_port = tcp->source;
     tcp->source = tcp->dest;
@@ -280,7 +286,7 @@ static __always_inline int do_tcp_reset_tx(struct xdp_md *xdp,
         set_tcp_rst_flags(tcp, 1);
     }
 
-    tcp->check = tcp_hdr_csum(ip->saddr, ip->daddr, tcp);
+    tcp->check = tcp_rst_csum(ip->saddr, ip->daddr, tcp);
 
     return XDP_TX;
 }

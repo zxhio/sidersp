@@ -80,6 +80,9 @@ response:
     sender_mac: "02:00:00:00:00:01"
 ```
 
+> Note: `params` is a reserved field. It is not passed to the BPF data plane
+> and has no effect on the current implementation.
+
 ## 优先级语义
 
 - `priority` 数值越小，优先级越高

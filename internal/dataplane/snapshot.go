@@ -324,6 +324,13 @@ func parsePrefixes(rawPrefixes []string, cache map[string]netip.Prefix) ([]netip
 	return prefixes, nil
 }
 
+// makeLPMKey constructs an LPM trie key from an IPv4 prefix.
+//
+// Byte-order contract: binary.LittleEndian.Uint32 reinterprets the 4-byte
+// network-order address as a little-endian uint32. On little-endian hosts
+// (where this program runs), the resulting in-memory bytes match the __be32
+// layout that the BPF LPM lookup uses. This is correct because both Go and
+// BPF run on the same host. Do NOT use binary.BigEndian here.
 func makeLPMKey(prefix netip.Prefix) siderspIpv4LpmKey {
 	addr := prefix.Masked().Addr().As4()
 	return siderspIpv4LpmKey{
