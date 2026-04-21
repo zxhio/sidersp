@@ -269,7 +269,10 @@ func TestKernelStatsFields(t *testing.T) {
 	if got := fields["xsk_tx"]; got != uint64(0) {
 		t.Fatalf("xsk_tx = %v, want %d", got, 0)
 	}
-	if len(fields) != 7 {
-		t.Fatalf("len(fields) = %d, want %d", len(fields), 7)
+	if got := fields["tx_fail"]; got != uint64(0) {
+		t.Fatalf("tx_fail = %v, want %d", got, 0)
+	}
+	if len(fields) != 8 {
+		t.Fatalf("len(fields) = %d, want %d", len(fields), 8)
 	}
 }

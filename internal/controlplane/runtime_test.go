@@ -126,6 +126,38 @@ func TestUpdateRuleConflict(t *testing.T) {
 	}
 }
 
+func TestUpdateRuleAllowsChangingOwnID(t *testing.T) {
+	t.Parallel()
+
+	r := NewRuntime(config.Config{}, &testSyncer{}, testStreamer{}, testStatsReader{})
+	r.rules = rule.RuleSet{
+		Rules: []rule.Rule{
+			{ID: 1, Name: "one", Enabled: true, Priority: 10, Response: rule.RuleResponse{Action: "tcp_reset"}},
+			{ID: 2, Name: "two", Enabled: true, Priority: 20, Response: rule.RuleResponse{Action: "tcp_reset"}},
+		},
+	}
+
+	updated, err := r.UpdateRule(1, rule.Rule{
+		ID:       3,
+		Name:     "three",
+		Enabled:  true,
+		Priority: 10,
+		Response: rule.RuleResponse{Action: "tcp_reset"},
+	})
+	if err != nil {
+		t.Fatalf("UpdateRule() error = %v", err)
+	}
+	if updated.ID != 3 {
+		t.Fatalf("updated rule id = %d, want 3", updated.ID)
+	}
+	if r.rules.Rules[0].ID != 3 {
+		t.Fatalf("first rule id = %d, want 3", r.rules.Rules[0].ID)
+	}
+	if r.rules.Rules[1].ID != 2 {
+		t.Fatalf("second rule id = %d, want 2", r.rules.Rules[1].ID)
+	}
+}
+
 func TestDeleteRuleRemovesAndSyncs(t *testing.T) {
 	t.Parallel()
 

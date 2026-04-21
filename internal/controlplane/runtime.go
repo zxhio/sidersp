@@ -239,12 +239,14 @@ func (r *Runtime) UpdateRule(id int, item rule.Rule) (rule.Rule, error) {
 
 	next := cloneRuleSet(r.rules)
 	found := false
+	replacedIdx := -1
 	for idx := range next.Rules {
 		if next.Rules[idx].ID != id {
 			continue
 		}
 		next.Rules[idx] = cloneRule(item)
 		found = true
+		replacedIdx = idx
 		break
 	}
 	if !found {
@@ -252,7 +254,10 @@ func (r *Runtime) UpdateRule(id int, item rule.Rule) (rule.Rule, error) {
 	}
 
 	if item.ID != id {
-		for _, existing := range next.Rules {
+		for i, existing := range next.Rules {
+			if i == replacedIdx {
+				continue
+			}
 			if existing.ID == item.ID {
 				return rule.Rule{}, ErrRuleConflict
 			}

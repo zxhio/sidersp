@@ -60,6 +60,7 @@ type StatsResponse struct {
 	RingbufDropped uint64                 `json:"ringbuf_dropped"`
 	XDPTX          uint64                 `json:"xdp_tx"`
 	XskTX          uint64                 `json:"xsk_tx"`
+	TXFailed       uint64                 `json:"tx_failed"`
 	Histories      []StatsHistoryResponse `json:"histories"`
 }
 
@@ -81,4 +82,5 @@ type StatsPointResponse struct {
 	RingbufDropped uint64 `json:"ringbuf_dropped"`
 	XDPTX          uint64 `json:"xdp_tx"`
 	XskTX          uint64 `json:"xsk_tx"`
+	TXFailed       uint64 `json:"tx_failed"`
 }

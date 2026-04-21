@@ -19,7 +19,8 @@
  *   ├──────────────────────────────────────────────────────────┤
  *   │  event_ringbuf        RINGBUF    [16 MB]                 │
  *   ├──────────────────────────────────────────────────────────┤
- *   │  stats_map            PERCPU_ARRAY<u32, u64>  [STAT_COUNT]
+ *   │  stats_map            PERCPU_ARRAY<u32, u64>  [STAT_COUNT]│
+ *   │    rx/parse/match/event/drop/tx counters                  │
  *   ├──────────────────────────────────────────────────────────┤
  *   │  xsks_map             XSKMAP<u32, u32>       [64]        │
  *   │    queue_id → XSK fd for XDP_REDIRECT                    │

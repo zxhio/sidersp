@@ -13,17 +13,19 @@ type kernelStats struct {
 	RingbufDropped uint64
 	XDPTX          uint64
 	XskTX          uint64
+	TXFailed       uint64
 }
 
 func (s kernelStats) fields() logrus.Fields {
 	return logrus.Fields{
-		"rx":     s.RXPackets,
-		"parse":  s.ParseFailed,
-		"cand":   s.RuleCandidates,
-		"match":  s.MatchedRules,
-		"drop":   s.RingbufDropped,
-		"xdp_tx": s.XDPTX,
-		"xsk_tx": s.XskTX,
+		"rx":      s.RXPackets,
+		"parse":   s.ParseFailed,
+		"cand":    s.RuleCandidates,
+		"match":   s.MatchedRules,
+		"drop":    s.RingbufDropped,
+		"xdp_tx":  s.XDPTX,
+		"xsk_tx":  s.XskTX,
+		"tx_fail": s.TXFailed,
 	}
 }
 

@@ -596,6 +596,7 @@ int xdp_sidersp(struct xdp_md *xdp)
             emit_event(&ctx, &best_rule, pkt_conds, VERDICT_TX);
             return XDP_TX;
         }
+        stat_inc(STAT_TX_FAILED);
         return XDP_PASS;
     }
     case ACTION_ICMP_ECHO_REPLY:

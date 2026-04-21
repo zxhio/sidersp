@@ -237,6 +237,7 @@ func newStatsResponse(item controlplane.Stats) StatsResponse {
 				RingbufDropped: point.RingbufDropped,
 				XDPTX:          point.XDPTX,
 				XskTX:          point.XskTX,
+				TXFailed:       point.TXFailed,
 			})
 		}
 		histories = append(histories, StatsHistoryResponse{
@@ -257,6 +258,7 @@ func newStatsResponse(item controlplane.Stats) StatsResponse {
 		RingbufDropped: item.RingbufDropped,
 		XDPTX:          item.XDPTX,
 		XskTX:          item.XskTX,
+		TXFailed:       item.TXFailed,
 		Histories:      histories,
 	}
 }
