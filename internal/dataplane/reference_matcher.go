@@ -20,7 +20,10 @@ type refPacket struct {
 	DstPort  uint16
 	TCPFlags uint8
 	VLAN     uint16 // 0xFFFF = no VLAN
-	IPProto  uint8  // 6=TCP, 17=UDP
+	IPProto  uint8  // 6=TCP, 17=UDP, 1=ICMP
+	ICMPType uint8
+	ICMPCode uint8
+	ARPOp    uint16
 }
 
 // refMatchResult is the output of the reference matcher.
@@ -64,6 +67,69 @@ func refMatch(rules []rule.Rule, pkt refPacket) refMatchResult {
 // refRuleMatches checks if a single rule matches a packet by evaluating
 // each condition directly (no bitmaps, no indexes).
 func refRuleMatches(r rule.Rule, pkt refPacket) bool {
+	switch strings.ToLower(strings.TrimSpace(r.Match.Protocol)) {
+	case "tcp":
+		if pkt.IPProto != 6 {
+			return false
+		}
+	case "udp":
+		if pkt.IPProto != 17 {
+			return false
+		}
+	case "icmp":
+		if pkt.IPProto != 1 {
+			return false
+		}
+	case "arp":
+		if pkt.ARPOp == 0 {
+			return false
+		}
+	case "":
+	}
+
+	tf := r.Match.TCPFlags
+	if tf.SYN != nil && *tf.SYN && pkt.TCPFlags&0x02 == 0 {
+		return false
+	}
+	if tf.ACK != nil && *tf.ACK && pkt.TCPFlags&0x10 == 0 {
+		return false
+	}
+	if tf.RST != nil && *tf.RST && pkt.TCPFlags&0x04 == 0 {
+		return false
+	}
+	if tf.FIN != nil && *tf.FIN && pkt.TCPFlags&0x01 == 0 {
+		return false
+	}
+	if tf.PSH != nil && *tf.PSH && pkt.TCPFlags&0x08 == 0 {
+		return false
+	}
+
+	if r.Match.ICMP != nil {
+		switch strings.ToLower(strings.TrimSpace(r.Match.ICMP.Type)) {
+		case "echo_request":
+			if pkt.ICMPType != 8 || pkt.ICMPCode != 0 {
+				return false
+			}
+		case "echo_reply":
+			if pkt.ICMPType != 0 || pkt.ICMPCode != 0 {
+				return false
+			}
+		}
+	}
+
+	if r.Match.ARP != nil {
+		switch strings.ToLower(strings.TrimSpace(r.Match.ARP.Operation)) {
+		case "request":
+			if pkt.ARPOp != 1 {
+				return false
+			}
+		case "reply":
+			if pkt.ARPOp != 2 {
+				return false
+			}
+		}
+	}
+
 	// VLAN condition
 	if len(r.Match.VLANs) > 0 {
 		if pkt.VLAN == vlanNone {
@@ -142,19 +208,6 @@ func refRuleMatches(r rule.Rule, pkt refPacket) bool {
 		}
 		if !found {
 			return false
-		}
-	}
-
-	// Feature conditions
-	for _, f := range r.Match.Features {
-		switch strings.ToUpper(strings.TrimSpace(f)) {
-		case "TCP_SYN":
-			if pkt.TCPFlags&0x02 == 0 {
-				return false
-			}
-		default:
-			// Unsupported features are rejected at validation time,
-			// so they won't appear here.
 		}
 	}
 

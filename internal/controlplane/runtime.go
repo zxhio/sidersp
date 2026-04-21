@@ -342,6 +342,20 @@ func cloneRule(item rule.Rule) rule.Rule {
 	item.Match.DstPrefixes = append([]string(nil), item.Match.DstPrefixes...)
 	item.Match.SrcPorts = append([]int(nil), item.Match.SrcPorts...)
 	item.Match.DstPorts = append([]int(nil), item.Match.DstPorts...)
-	item.Match.Features = append([]string(nil), item.Match.Features...)
+	if item.Match.ICMP != nil {
+		icmp := *item.Match.ICMP
+		item.Match.ICMP = &icmp
+	}
+	if item.Match.ARP != nil {
+		arp := *item.Match.ARP
+		item.Match.ARP = &arp
+	}
+	if len(item.Response.Params) > 0 {
+		params := make(map[string]interface{}, len(item.Response.Params))
+		for key, value := range item.Response.Params {
+			params[key] = value
+		}
+		item.Response.Params = params
+	}
 	return item
 }

@@ -235,6 +235,8 @@ func newStatsResponse(item controlplane.Stats) StatsResponse {
 				RuleCandidates: point.RuleCandidates,
 				MatchedRules:   point.MatchedRules,
 				RingbufDropped: point.RingbufDropped,
+				XDPTX:          point.XDPTX,
+				XskTX:          point.XskTX,
 			})
 		}
 		histories = append(histories, StatsHistoryResponse{
@@ -253,6 +255,8 @@ func newStatsResponse(item controlplane.Stats) StatsResponse {
 		RuleCandidates: item.RuleCandidates,
 		MatchedRules:   item.MatchedRules,
 		RingbufDropped: item.RingbufDropped,
+		XDPTX:          item.XDPTX,
+		XskTX:          item.XskTX,
 		Histories:      histories,
 	}
 }
@@ -272,14 +276,23 @@ func newRuleBody(item rule.Rule) RuleBody {
 		Enabled:  item.Enabled,
 		Priority: item.Priority,
 		Match: RuleMatch{
+			Protocol:    item.Match.Protocol,
 			VLANs:       append([]int(nil), item.Match.VLANs...),
 			SrcPrefixes: append([]string(nil), item.Match.SrcPrefixes...),
 			DstPrefixes: append([]string(nil), item.Match.DstPrefixes...),
 			SrcPorts:    append([]int(nil), item.Match.SrcPorts...),
 			DstPorts:    append([]int(nil), item.Match.DstPorts...),
-			Features:    append([]string(nil), item.Match.Features...),
+			TCPFlags: ruleTCPFlags{
+				SYN: item.Match.TCPFlags.SYN,
+				ACK: item.Match.TCPFlags.ACK,
+				RST: item.Match.TCPFlags.RST,
+				FIN: item.Match.TCPFlags.FIN,
+				PSH: item.Match.TCPFlags.PSH,
+			},
+			ICMP: newConsoleICMPMatch(item.Match.ICMP),
+			ARP:  newConsoleARPMatch(item.Match.ARP),
 		},
-		Response: RuleAction{Action: item.Response.Action},
+		Response: RuleAction{Action: item.Response.Action, Params: cloneParams(item.Response.Params)},
 	}
 }
 
@@ -290,13 +303,61 @@ func newRuleModel(item RuleBody) rule.Rule {
 		Enabled:  item.Enabled,
 		Priority: item.Priority,
 		Match: rule.RuleMatch{
+			Protocol:    item.Match.Protocol,
 			VLANs:       append([]int(nil), item.Match.VLANs...),
 			SrcPrefixes: append([]string(nil), item.Match.SrcPrefixes...),
 			DstPrefixes: append([]string(nil), item.Match.DstPrefixes...),
 			SrcPorts:    append([]int(nil), item.Match.SrcPorts...),
 			DstPorts:    append([]int(nil), item.Match.DstPorts...),
-			Features:    append([]string(nil), item.Match.Features...),
+			TCPFlags: rule.TCPFlags{
+				SYN: item.Match.TCPFlags.SYN,
+				ACK: item.Match.TCPFlags.ACK,
+				RST: item.Match.TCPFlags.RST,
+				FIN: item.Match.TCPFlags.FIN,
+				PSH: item.Match.TCPFlags.PSH,
+			},
+			ICMP: newRuleICMPMatch(item.Match.ICMP),
+			ARP:  newRuleARPMatch(item.Match.ARP),
 		},
-		Response: rule.RuleResponse{Action: item.Response.Action},
+		Response: rule.RuleResponse{Action: item.Response.Action, Params: cloneParams(item.Response.Params)},
 	}
+}
+
+func newConsoleICMPMatch(item *rule.ICMPMatch) *ruleICMPMatch {
+	if item == nil {
+		return nil
+	}
+	return &ruleICMPMatch{Type: item.Type}
+}
+
+func newConsoleARPMatch(item *rule.ARPMatch) *ruleARPMatch {
+	if item == nil {
+		return nil
+	}
+	return &ruleARPMatch{Operation: item.Operation}
+}
+
+func newRuleICMPMatch(item *ruleICMPMatch) *rule.ICMPMatch {
+	if item == nil {
+		return nil
+	}
+	return &rule.ICMPMatch{Type: item.Type}
+}
+
+func newRuleARPMatch(item *ruleARPMatch) *rule.ARPMatch {
+	if item == nil {
+		return nil
+	}
+	return &rule.ARPMatch{Operation: item.Operation}
+}
+
+func cloneParams(params map[string]interface{}) map[string]interface{} {
+	if len(params) == 0 {
+		return nil
+	}
+	cloned := make(map[string]interface{}, len(params))
+	for key, value := range params {
+		cloned[key] = value
+	}
+	return cloned
 }

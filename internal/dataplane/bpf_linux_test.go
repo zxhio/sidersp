@@ -21,7 +21,10 @@ import (
 	"sidersp/internal/rule"
 )
 
-const xdpPass = 2
+const (
+	xdpPass = 2
+	xdpTX   = 3
+)
 
 // ---------------------------------------------------------------------------
 // Environment gating
@@ -43,49 +46,66 @@ func requireBPFTestEnv(t *testing.T) {
 var testRules = []rule.Rule{
 	{
 		ID: 1001, Name: "rst_tcp_syn_to_ns5_port80", Enabled: true, Priority: 100,
-		Match:    rule.RuleMatch{DstPorts: []int{80}, DstPrefixes: []string{"10.0.5.2/32"}, Features: []string{"TCP_SYN"}},
-		Response: rule.RuleResponse{Action: "RST"},
+		Match:    tcpSynMatch(rule.RuleMatch{DstPorts: []int{80}, DstPrefixes: []string{"10.0.5.2/32"}}),
+		Response: rule.RuleResponse{Action: "tcp_reset"},
 	},
 	{
 		ID: 1002, Name: "rst_tcp_syn_to_ns5_port22", Enabled: true, Priority: 100,
-		Match:    rule.RuleMatch{DstPorts: []int{22}, DstPrefixes: []string{"10.0.5.2/32"}, Features: []string{"TCP_SYN"}},
-		Response: rule.RuleResponse{Action: "RST"},
+		Match:    tcpSynMatch(rule.RuleMatch{DstPorts: []int{22}, DstPrefixes: []string{"10.0.5.2/32"}}),
+		Response: rule.RuleResponse{Action: "tcp_reset"},
 	},
 	{
 		ID: 1010, Name: "rst_tcp_syn_from_ns3_subnet", Enabled: true, Priority: 110,
-		Match:    rule.RuleMatch{SrcPrefixes: []string{"10.0.3.0/24"}, Features: []string{"TCP_SYN"}},
-		Response: rule.RuleResponse{Action: "RST"},
+		Match:    tcpSynMatch(rule.RuleMatch{SrcPrefixes: []string{"10.0.3.0/24"}}),
+		Response: rule.RuleResponse{Action: "tcp_reset"},
 	},
 	{
 		ID: 1020, Name: "rst_tcp_syn_to_ns4_subnet", Enabled: true, Priority: 120,
-		Match:    rule.RuleMatch{DstPrefixes: []string{"10.0.4.0/24"}, Features: []string{"TCP_SYN"}},
-		Response: rule.RuleResponse{Action: "RST"},
+		Match:    tcpSynMatch(rule.RuleMatch{DstPrefixes: []string{"10.0.4.0/24"}}),
+		Response: rule.RuleResponse{Action: "tcp_reset"},
 	},
 	{
 		ID: 1030, Name: "rst_tcp_syn_port443_any", Enabled: true, Priority: 130,
-		Match:    rule.RuleMatch{DstPorts: []int{443}, Features: []string{"TCP_SYN"}},
-		Response: rule.RuleResponse{Action: "RST"},
+		Match:    tcpSynMatch(rule.RuleMatch{DstPorts: []int{443}}),
+		Response: rule.RuleResponse{Action: "tcp_reset"},
 	},
 	{
 		ID: 1040, Name: "rst_tcp_syn_from_high_ports", Enabled: true, Priority: 140,
-		Match:    rule.RuleMatch{SrcPorts: []int{8080, 9090}, Features: []string{"TCP_SYN"}},
-		Response: rule.RuleResponse{Action: "RST"},
+		Match:    tcpSynMatch(rule.RuleMatch{SrcPorts: []int{8080, 9090}}),
+		Response: rule.RuleResponse{Action: "tcp_reset"},
 	},
 	{
 		ID: 1050, Name: "rst_ns2_to_ns5_port3306", Enabled: true, Priority: 150,
-		Match:    rule.RuleMatch{SrcPrefixes: []string{"10.0.2.0/24"}, DstPrefixes: []string{"10.0.5.0/24"}, DstPorts: []int{3306}, Features: []string{"TCP_SYN"}},
-		Response: rule.RuleResponse{Action: "RST"},
+		Match:    tcpSynMatch(rule.RuleMatch{SrcPrefixes: []string{"10.0.2.0/24"}, DstPrefixes: []string{"10.0.5.0/24"}, DstPorts: []int{3306}}),
+		Response: rule.RuleResponse{Action: "tcp_reset"},
 	},
 	{
 		ID: 1070, Name: "rst_tcp_syn_multi_ports", Enabled: true, Priority: 170,
-		Match:    rule.RuleMatch{DstPorts: []int{6379, 9200, 27017}, DstPrefixes: []string{"10.0.3.0/24"}, Features: []string{"TCP_SYN"}},
-		Response: rule.RuleResponse{Action: "RST"},
+		Match:    tcpSynMatch(rule.RuleMatch{DstPorts: []int{6379, 9200, 27017}, DstPrefixes: []string{"10.0.3.0/24"}}),
+		Response: rule.RuleResponse{Action: "tcp_reset"},
 	},
 	{
 		ID: 1060, Name: "rst_tcp_syn_to_all_test_subnets", Enabled: true, Priority: 200,
-		Match:    rule.RuleMatch{DstPrefixes: []string{"10.0.2.0/23"}, Features: []string{"TCP_SYN"}},
-		Response: rule.RuleResponse{Action: "RST"},
+		Match:    tcpSynMatch(rule.RuleMatch{DstPrefixes: []string{"10.0.2.0/23"}}),
+		Response: rule.RuleResponse{Action: "tcp_reset"},
 	},
+}
+
+func tcpSynMatch(match rule.RuleMatch) rule.RuleMatch {
+	match.Protocol = "tcp"
+	match.TCPFlags.SYN = boolPtr(true)
+	return match
+}
+
+func boolPtr(v bool) *bool {
+	return &v
+}
+
+func wantXDPReturn(matched bool) uint32 {
+	if matched {
+		return xdpTX
+	}
+	return xdpPass
 }
 
 // ---------------------------------------------------------------------------
@@ -492,7 +512,11 @@ func TestBPFParserPassAndParseFailures(t *testing.T) {
 			afterPF := readStat(t, objs, statParseFailed)
 			afterMatch := readStat(t, objs, statMatchedRules)
 
-			require.Equal(t, uint32(xdpPass), ret, "XDP retval")
+			if afterMatch > beforeMatch {
+				require.Equal(t, uint32(xdpTX), ret, "XDP retval")
+			} else {
+				require.Equal(t, uint32(xdpPass), ret, "XDP retval")
+			}
 			require.Greater(t, afterRx, beforeRx, "rx_packets not incremented")
 
 			if tc.wantParseFail {
@@ -599,9 +623,8 @@ func TestBPFRuleMatchMatrix(t *testing.T) {
 			require.NoError(t, err, "prog.Test()")
 			afterMatch := readStat(t, objs, statMatchedRules)
 
-			require.Equal(t, uint32(xdpPass), ret, "XDP retval")
-
 			bpfMatched := afterMatch > beforeMatch
+			require.Equal(t, wantXDPReturn(bpfMatched), ret, "XDP retval")
 			require.Equal(t, want.Matched, bpfMatched, "BPF matched differs from reference matcher (ruleID=%d)", want.RuleID)
 
 			if !want.Matched {
@@ -688,7 +711,7 @@ func TestBPFPrioritySelection(t *testing.T) {
 			require.NoError(t, err, "prog.Test()")
 
 			afterMatch := readStat(t, objs, statMatchedRules)
-			require.Equal(t, uint32(xdpPass), ret, "XDP retval")
+			require.Equal(t, uint32(xdpTX), ret, "XDP retval")
 			require.Greater(t, afterMatch, beforeMatch, "packet should match at least one rule")
 
 			evt := mustReadEvent(t, reader)
@@ -701,7 +724,7 @@ func TestBPFPrioritySelection(t *testing.T) {
 // Category 4: Event encoding — full ringbuf event field verification
 // ---------------------------------------------------------------------------
 //
-// Verifies every field of the 36-byte ringbuf event, including pkt_conds.
+// Verifies every field of the 32-byte ringbuf event, including pkt_conds.
 
 func TestBPFEventEncoding(t *testing.T) {
 	requireBPFTestEnv(t)
@@ -717,14 +740,13 @@ func TestBPFEventEncoding(t *testing.T) {
 
 		ret, _, err := objs.XdpSidersp.Test(pkt)
 		require.NoError(t, err, "prog.Test()")
-		require.Equal(t, uint32(xdpPass), ret, "XDP retval")
+		require.Equal(t, uint32(xdpTX), ret, "XDP retval")
 
 		evt := mustReadEvent(t, reader)
 
 		// rule_id: matches rule 1001 (dst 10.0.5.2/32:80, TCP_SYN)
 		assert.Equal(t, uint32(1001), evt.RuleID, "rule_id")
-		// action: RST (code 1)
-		assert.Equal(t, uint32(actionRST), evt.Action, "action")
+		assert.Equal(t, actionTCPReset, evt.Action, "action")
 		// sip/dip: host byte order
 		assert.Equal(t, ipv4ToUint32(srcIP), evt.SIP, "sip")
 		assert.Equal(t, ipv4ToUint32(dstIP), evt.DIP, "dip")
@@ -733,17 +755,13 @@ func TestBPFEventEncoding(t *testing.T) {
 		assert.Equal(t, uint16(80), evt.DPort, "dport")
 		// ip_proto: TCP (6)
 		assert.Equal(t, uint8(6), evt.IPProto, "ip_proto")
-		// tcp_flags: SYN (0x02)
-		assert.Equal(t, uint8(0x02), evt.TCPFlags, "tcp_flags")
-		// payload_len: SYN-only packet has no payload
-		assert.Equal(t, uint16(0), evt.PayloadLen, "payload_len")
 		// pkt_conds: COND_DST_PREFIX | COND_SRC_PORT | COND_DST_PORT | COND_TCP_SYN
 		//   src=10.0.1.100 → no src prefix match → no COND_SRC_PREFIX
 		//   dst=10.0.5.2   → matches /32 in LPM → COND_DST_PREFIX
 		//   sport=54321≠0  → COND_SRC_PORT
 		//   dport=80≠0     → COND_DST_PORT
 		//   SYN flag       → COND_TCP_SYN
-		wantConds := uint32(condDstPrefix | condSrcPort | condDstPort | condTCPSYN)
+		wantConds := uint32(condProtoTCP | condDstPrefix | condSrcPort | condDstPort | condTCPSYN)
 		assert.Equal(t, wantConds, evt.PktConds, "pkt_conds")
 	})
 
@@ -755,13 +773,13 @@ func TestBPFEventEncoding(t *testing.T) {
 
 		ret, _, err := objs.XdpSidersp.Test(pkt)
 		require.NoError(t, err, "prog.Test()")
-		require.Equal(t, uint32(xdpPass), ret, "XDP retval")
+		require.Equal(t, uint32(xdpTX), ret, "XDP retval")
 
 		evt := mustReadEvent(t, reader)
 
 		require.Equal(t, uint32(1050), evt.RuleID, "rule_id")
 		// pkt_conds: COND_SRC_PREFIX | COND_DST_PREFIX | COND_SRC_PORT | COND_DST_PORT | COND_TCP_SYN
-		wantConds := uint32(condSrcPrefix | condDstPrefix | condSrcPort | condDstPort | condTCPSYN)
+		wantConds := uint32(condProtoTCP | condSrcPrefix | condDstPrefix | condSrcPort | condDstPort | condTCPSYN)
 		assert.Equal(t, wantConds, evt.PktConds, "pkt_conds")
 	})
 
@@ -834,9 +852,8 @@ func TestBPFBoundaryPackets(t *testing.T) {
 			require.NoError(t, err, "prog.Test()")
 			afterMatch := readStat(t, objs, statMatchedRules)
 
-			require.Equal(t, uint32(xdpPass), ret, "XDP retval")
-
 			bpfMatched := afterMatch > beforeMatch
+			require.Equal(t, wantXDPReturn(bpfMatched), ret, "XDP retval")
 			require.Equal(t, want.Matched, bpfMatched, "BPF matched differs from reference matcher (ruleID=%d)", want.RuleID)
 
 			if bpfMatched {

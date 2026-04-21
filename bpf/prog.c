@@ -22,31 +22,15 @@
 #define IPPROTO_ICMP 1
 #endif
 
+#define TCP_FLAG_TO_COND(flags, flag, cond) \
+    (((__u32)((flags) & (flag))) << (__builtin_ctz(cond) - __builtin_ctz(flag)))
+
 struct arp_eth_ipv4 {
     __u8 sha[ETH_ALEN];
     __u8 sip[4];
     __u8 tha[ETH_ALEN];
     __u8 dip[4];
 };
-
-#if 0
-/*
- * Deferred protocol / payload support kept for later re-enable.
- *
- * Current XDP build stays on the minimal fast path:
- * Ethernet/VLAN + IPv4 + TCP/UDP/ICMP + shallow conditions.
- *
- * Re-enable in this order to keep verifier pressure manageable:
- * 1. IPv6
- * 2. HTTP payload features
- */
-#include <linux/ipv6.h>
-#include <linux/icmpv6.h>
-
-#ifndef IPPROTO_ICMPV6
-#define IPPROTO_ICMPV6 58
-#endif
-#endif
 
 struct vlan_hdr {
     __be16 tci;
@@ -59,101 +43,6 @@ static __always_inline void stat_inc(__u32 idx)
 
     if (val)
         (*val)++;
-}
-
-#if 0
-/* Deferred HTTP payload feature helpers. */
-static __always_inline int payload_prefix_eq(const struct pkt_ctx *ctx, void *data_end,
-                                             const char *lit, __u32 lit_len)
-{
-    const char *p = ctx->payload;
-    __u32 i;
-
-    if (!p || ctx->payload_len < lit_len)
-        return 0;
-    if ((const void *)(p + lit_len) > data_end)
-        return 0;
-
-    for (i = 0; i < 8; i++) {
-        if (i >= lit_len)
-            break;
-        if (p[i] != lit[i])
-            return 0;
-    }
-
-    return 1;
-}
-
-static __always_inline int payload_eq_at(const char *p, void *data_end, __u32 off,
-                                         const char *lit, __u32 lit_len)
-{
-    __u32 i;
-
-    if ((const void *)(p + off + lit_len) > data_end)
-        return 0;
-
-    for (i = 0; i < 8; i++) {
-        if (i >= lit_len)
-            break;
-        if (p[off + i] != lit[i])
-            return 0;
-    }
-
-    return 1;
-}
-
-static __always_inline int payload_contains_http11(const struct pkt_ctx *ctx, void *data_end)
-{
-    const char *p = ctx->payload;
-    const char *lit = "HTTP/1.1";
-    __u32 max_scan = 24;
-    __u32 off;
-
-    if (!p || ctx->payload_len < 8)
-        return 0;
-    if (payload_prefix_eq(ctx, data_end, lit, 8))
-        return 1;
-
-    if (ctx->payload_len < max_scan + 8)
-        max_scan = ctx->payload_len - 8;
-
-#pragma clang loop unroll(disable)
-    for (off = 0; off < 24; off++) {
-        if (off > max_scan)
-            break;
-        if (payload_eq_at(p, data_end, off, lit, 8))
-            return 1;
-    }
-
-    return 0;
-}
-#endif
-
-static __u32 detect_conditions(const struct pkt_ctx *ctx)
-{
-    __u32 pkt_conds = 0;
-
-    if (ctx->vlan_id != VLAN_ID_NONE)
-        pkt_conds |= COND_VLAN;
-    if (ctx->sport != 0)
-        pkt_conds |= COND_SRC_PORT;
-    if (ctx->dport != 0)
-        pkt_conds |= COND_DST_PORT;
-    if (ctx->tcp_flags & TCP_FLAG_SYN)
-        pkt_conds |= COND_TCP_SYN;
-
-#if 0
-    /* Deferred HTTP payload-derived conditions. */
-    if (payload_prefix_eq(ctx, data_end, "GET ", 4) ||
-        payload_prefix_eq(ctx, data_end, "POST ", 5) ||
-        payload_prefix_eq(ctx, data_end, "HEAD ", 5))
-        pkt_conds |= COND_HTTP_METHOD;
-
-    if (payload_contains_http11(ctx, data_end))
-        pkt_conds |= COND_HTTP_11;
-#endif
-
-    return pkt_conds;
 }
 
 static __always_inline int apply_u16_index(void *map, __u16 key, mask_t *candidates)
@@ -216,7 +105,7 @@ static int pick_best_rule(const mask_t *candidates, __u32 pkt_conds,
 
             slot = group * RULES_PER_GROUP + bit;
             rule = bpf_map_lookup_elem(&rule_index_map, &slot);
-            if (!rule || !rule->enabled)
+            if (!rule)
                 continue;
             if (!rule_matches(rule, pkt_conds))
                 continue;
@@ -229,8 +118,9 @@ static int pick_best_rule(const mask_t *candidates, __u32 pkt_conds,
     return 0;
 }
 
-static __always_inline void emit_event(const struct pkt_ctx *ctx, const struct rule_meta *rule,
-                                       __u32 pkt_conds)
+static __always_inline void emit_event(const struct pkt_ctx *ctx,
+                                       const struct rule_meta *rule,
+                                       __u32 pkt_conds, __u8 verdict)
 {
     struct rule_event *evt = bpf_ringbuf_reserve(&event_ringbuf, sizeof(*evt), 0);
 
@@ -242,23 +132,194 @@ static __always_inline void emit_event(const struct pkt_ctx *ctx, const struct r
     evt->timestamp_ns = bpf_ktime_get_ns();
     evt->rule_id = rule->rule_id;
     evt->pkt_conds = pkt_conds;
+    evt->sip = bpf_ntohl(ctx->saddr);
+    evt->dip = bpf_ntohl(ctx->daddr);
     evt->action = rule->action;
-    evt->sip = ctx->ip_version == 4 ? bpf_ntohl(ctx->saddr) : 0;
-    evt->dip = ctx->ip_version == 4 ? bpf_ntohl(ctx->daddr) : 0;
     evt->sport = ctx->sport;
     evt->dport = ctx->dport;
-    evt->tcp_flags = ctx->tcp_flags;
+    evt->verdict = verdict;
     evt->ip_proto = ctx->ip_proto;
-    evt->payload_len = ctx->payload_len;
 
     bpf_ringbuf_submit(evt, 0);
+}
+
+static __always_inline __u16 csum_fold_helper(__u32 csum)
+{
+    csum = (csum & 0xffff) + (csum >> 16);
+    csum = (csum & 0xffff) + (csum >> 16);
+    return (__u16)~csum;
+}
+
+static __always_inline __u16 ipv4_hdr_csum(struct iphdr *iph)
+{
+    __u32 csum = 0;
+    __u16 *w = (__u16 *)iph;
+
+    csum += w[0]; csum += w[1]; csum += w[2]; csum += w[3];
+    csum += w[4]; csum += w[5]; csum += w[6]; csum += w[7];
+    csum += w[8]; csum += w[9];
+
+    return csum_fold_helper(csum);
+}
+
+static __always_inline __u16 tcp_hdr_csum(__be32 saddr, __be32 daddr,
+                                           struct tcphdr *tcp)
+{
+    __u32 csum = 0;
+    __u16 *w;
+
+    w = (__u16 *)&saddr; csum += w[0]; csum += w[1];
+    w = (__u16 *)&daddr; csum += w[0]; csum += w[1];
+    csum += bpf_htons((__u16)IPPROTO_TCP);
+    csum += bpf_htons((__u16)sizeof(*tcp));
+
+    w = (__u16 *)tcp;
+    csum += w[0]; csum += w[1]; csum += w[2]; csum += w[3];
+    csum += w[4]; csum += w[5]; csum += w[6]; csum += w[7];
+    csum += w[8]; csum += w[9];
+
+    return csum_fold_helper(csum);
+}
+
+static __always_inline void set_tcp_rst_flags(struct tcphdr *tcp, __u8 ack)
+{
+    tcp->fin = 0;
+    tcp->syn = 0;
+    tcp->rst = 1;
+    tcp->psh = 0;
+    tcp->ack = ack;
+    tcp->urg = 0;
+    tcp->ece = 0;
+    tcp->cwr = 0;
+}
+
+static __always_inline int do_tcp_reset_tx(struct xdp_md *xdp,
+                                           const struct pkt_ctx *ctx)
+{
+    void *data = (void *)(long)xdp->data;
+    void *data_end = (void *)(long)xdp->data_end;
+    struct ethhdr *eth;
+    struct vlan_hdr *vlan;
+    struct iphdr *ip;
+    struct tcphdr *tcp;
+    __u8 tmp_mac[ETH_ALEN];
+    __be32 tmp_addr;
+    __u16 tmp_port;
+    int target_len;
+    int l3_off;
+
+    if (ctx->ip_proto != IPPROTO_TCP)
+        return XDP_PASS;
+
+    if (ctx->vlan_id != VLAN_ID_NONE) {
+        target_len = sizeof(*eth) + sizeof(*vlan) + sizeof(*ip) + sizeof(*tcp);
+        l3_off = sizeof(*eth) + sizeof(*vlan);
+    } else {
+        target_len = sizeof(*eth) + sizeof(*ip) + sizeof(*tcp);
+        l3_off = sizeof(*eth);
+    }
+
+    if (bpf_xdp_adjust_tail(xdp, target_len - (data_end - data)))
+        return XDP_PASS;
+
+    data = (void *)(long)xdp->data;
+    data_end = (void *)(long)xdp->data_end;
+
+    eth = data;
+    if ((void *)(eth + 1) > data_end)
+        return XDP_PASS;
+
+    __builtin_memcpy(tmp_mac, eth->h_source, ETH_ALEN);
+    __builtin_memcpy(eth->h_source, eth->h_dest, ETH_ALEN);
+    __builtin_memcpy(eth->h_dest, tmp_mac, ETH_ALEN);
+
+    if (ctx->vlan_id != VLAN_ID_NONE) {
+        vlan = (void *)(eth + 1);
+        if ((void *)(vlan + 1) > data_end)
+            return XDP_PASS;
+    }
+
+    ip = data + l3_off;
+    if ((void *)(ip + 1) > data_end)
+        return XDP_PASS;
+    tcp = (void *)(ip + 1);
+    if ((void *)(tcp + 1) > data_end)
+        return XDP_PASS;
+
+    tmp_addr = ip->saddr;
+    ip->saddr = ip->daddr;
+    ip->daddr = tmp_addr;
+
+    ip->tot_len = bpf_htons(sizeof(*ip) + sizeof(*tcp));
+    ip->check = 0;
+    ip->check = ipv4_hdr_csum(ip);
+
+    tmp_port = tcp->source;
+    tcp->source = tcp->dest;
+    tcp->dest = tmp_port;
+
+    tcp->doff = 5;
+    tcp->window = 0;
+    tcp->urg_ptr = 0;
+    tcp->res1 = 0;
+    tcp->check = 0;
+
+    if (ctx->tcp_flags & TCP_FLAG_ACK) {
+        tcp->seq = tcp->ack_seq;
+        tcp->ack_seq = 0;
+        set_tcp_rst_flags(tcp, 0);
+    } else {
+        __u32 ack_val = bpf_ntohl(tcp->seq);
+        ack_val += ctx->payload_len;
+        if (ctx->tcp_flags & TCP_FLAG_SYN)
+            ack_val++;
+        if (ctx->tcp_flags & TCP_FLAG_FIN)
+            ack_val++;
+        tcp->ack_seq = bpf_htonl(ack_val);
+        tcp->seq = 0;
+        set_tcp_rst_flags(tcp, 1);
+    }
+
+    tcp->check = tcp_hdr_csum(ip->saddr, ip->daddr, tcp);
+
+    return XDP_TX;
+}
+
+static __always_inline int redirect_xsk_with_meta(struct xdp_md *xdp,
+                                                  const struct rule_meta *rule)
+{
+    void *data;
+    void *data_end;
+    struct xsk_meta *meta;
+    int redir;
+
+    if (bpf_xdp_adjust_head(xdp, -(int)sizeof(*meta)))
+        return XDP_PASS;
+
+    data = (void *)(long)xdp->data;
+    data_end = (void *)(long)xdp->data_end;
+    meta = data;
+    if ((void *)(meta + 1) > data_end)
+        goto rollback;
+
+    meta->rule_id = rule->rule_id;
+    meta->action = rule->action;
+    meta->reserved = 0;
+
+    redir = bpf_redirect_map(&xsks_map, xdp->rx_queue_index, XDP_PASS);
+    if (redir == XDP_REDIRECT)
+        return XDP_REDIRECT;
+
+rollback:
+    if (bpf_xdp_adjust_head(xdp, sizeof(*meta)))
+        return XDP_DROP;
+    return XDP_PASS;
 }
 
 static parse_err_t parse_udp(struct pkt_ctx *ctx, void *data, void *data_end, __u32 l4_len)
 {
     struct udphdr *udp = data;
     __u32 udp_len;
-    void *payload;
 
     if ((void *)(udp + 1) > data_end)
         return PARSE_ERR_TRANSPORT_SHORT;
@@ -269,10 +330,14 @@ static parse_err_t parse_udp(struct pkt_ctx *ctx, void *data, void *data_end, __
 
     ctx->sport = bpf_ntohs(udp->source);
     ctx->dport = bpf_ntohs(udp->dest);
+    if (ctx->sport != 0)
+        ctx->conds |= COND_SRC_PORT;
+    if (ctx->dport != 0)
+        ctx->conds |= COND_DST_PORT;
 
-    payload = udp + 1;
-    ctx->payload = payload;
     ctx->payload_len = (__u16)(udp_len - sizeof(*udp));
+    if (ctx->payload_len > 0)
+        ctx->conds |= COND_L4_PAYLOAD;
     return PARSE_OK;
 }
 
@@ -280,16 +345,26 @@ static parse_err_t parse_udp(struct pkt_ctx *ctx, void *data, void *data_end, __
 static __always_inline parse_err_t parse_icmp(struct pkt_ctx *ctx, void *data, void *data_end, __u32 l4_len)
 {
     struct icmphdr *icmp = data;
-    void *payload;
+    __u8 icmp_type;
+    __u8 icmp_code;
 
     if ((void *)(icmp + 1) > data_end)
         return PARSE_ERR_TRANSPORT_SHORT;
     if (sizeof(*icmp) > l4_len)
         return PARSE_ERR_TRANSPORT_SHORT;
 
-    payload = icmp + 1;
-    ctx->payload = payload;
+    icmp_type = icmp->type;
+    icmp_code = icmp->code;
+    if (icmp_code == 0) {
+        if (icmp_type == 8)
+            ctx->conds |= COND_ICMP_ECHO_REQUEST;
+        if (icmp_type == 0)
+            ctx->conds |= COND_ICMP_ECHO_REPLY;
+    }
+
     ctx->payload_len = (__u16)(l4_len - sizeof(*icmp));
+    if (ctx->payload_len > 0)
+        ctx->conds |= COND_L4_PAYLOAD;
     return PARSE_OK;
 }
 
@@ -297,7 +372,6 @@ static parse_err_t parse_tcp(struct pkt_ctx *ctx, void *data, void *data_end, __
 {
     struct tcphdr *tcp = data;
     __u32 doff_len;
-    void *payload;
 
     if ((void *)(tcp + 1) > data_end)
         return PARSE_ERR_TRANSPORT_SHORT;
@@ -310,16 +384,22 @@ static parse_err_t parse_tcp(struct pkt_ctx *ctx, void *data, void *data_end, __
 
     ctx->sport = bpf_ntohs(tcp->source);
     ctx->dport = bpf_ntohs(tcp->dest);
-    ctx->tcp_flags =
-        (tcp->syn ? TCP_FLAG_SYN : 0) |
-        (tcp->ack ? TCP_FLAG_ACK : 0) |
-        (tcp->rst ? TCP_FLAG_RST : 0) |
-        (tcp->fin ? TCP_FLAG_FIN : 0) |
-        (tcp->psh ? TCP_FLAG_PSH : 0);
+    if (ctx->sport != 0)
+        ctx->conds |= COND_SRC_PORT;
+    if (ctx->dport != 0)
+        ctx->conds |= COND_DST_PORT;
 
-    payload = (void *)tcp + doff_len;
-    ctx->payload = payload;
+    ctx->tcp_flags = ((__u8 *)tcp)[13] &
+        (TCP_FLAG_FIN | TCP_FLAG_SYN | TCP_FLAG_RST | TCP_FLAG_PSH | TCP_FLAG_ACK);
+    ctx->conds |= TCP_FLAG_TO_COND(ctx->tcp_flags, TCP_FLAG_SYN, COND_TCP_SYN) |
+                  TCP_FLAG_TO_COND(ctx->tcp_flags, TCP_FLAG_ACK, COND_TCP_ACK) |
+                  TCP_FLAG_TO_COND(ctx->tcp_flags, TCP_FLAG_RST, COND_TCP_RST) |
+                  TCP_FLAG_TO_COND(ctx->tcp_flags, TCP_FLAG_FIN, COND_TCP_FIN) |
+                  TCP_FLAG_TO_COND(ctx->tcp_flags, TCP_FLAG_PSH, COND_TCP_PSH);
+
     ctx->payload_len = (__u16)(l4_len - doff_len);
+    if (ctx->payload_len > 0)
+        ctx->conds |= COND_L4_PAYLOAD;
     return PARSE_OK;
 }
 
@@ -330,15 +410,14 @@ static parse_err_t parse_ip_l4(struct pkt_ctx *ctx, void *l4,
 
     switch (ip_proto) {
     case IPPROTO_TCP:
+        ctx->conds |= COND_PROTO_TCP;
         return parse_tcp(ctx, l4, data_end, l4_len);
     case IPPROTO_UDP:
+        ctx->conds |= COND_PROTO_UDP;
         return parse_udp(ctx, l4, data_end, l4_len);
     case IPPROTO_ICMP:
+        ctx->conds |= COND_PROTO_ICMP;
         return parse_icmp(ctx, l4, data_end, l4_len);
-#if 0
-    case IPPROTO_ICMPV6:
-        return parse_icmp(ctx, l4, data_end, l4_len);
-#endif
     default:
         return PARSE_ERR_UNSUPPORTED_IP_PROTO;
     }
@@ -359,7 +438,6 @@ static parse_err_t parse_ipv4(struct pkt_ctx *ctx, void *data, void *data_end)
     if (ip->ihl != 5 || total_len < sizeof(*ip) || total_len > captured_len)
         return PARSE_ERR_BAD_IPV4;
 
-    ctx->ip_version = 4;
     ctx->saddr = ip->saddr;
     ctx->daddr = ip->daddr;
 
@@ -367,37 +445,12 @@ static parse_err_t parse_ipv4(struct pkt_ctx *ctx, void *data, void *data_end)
     return parse_ip_l4(ctx, l4, data_end, ip->protocol, total_len - sizeof(*ip));
 }
 
-#if 0
-/* Deferred IPv6 parser support. */
-static __always_inline parse_err_t parse_ipv6(struct pkt_ctx *ctx, void *data, void *data_end)
-{
-    struct ipv6hdr *ip6 = data;
-    __u32 payload_len;
-    __u32 captured_len;
-    void *l4;
-
-    if ((void *)(ip6 + 1) > data_end)
-        return PARSE_ERR_NETWORK_SHORT;
-
-    payload_len = bpf_ntohs(ip6->payload_len);
-    captured_len = (__u32)((long)data_end - (long)data);
-    if (sizeof(*ip6) + payload_len > captured_len)
-        return PARSE_ERR_NETWORK_SHORT;
-
-    ctx->ip_version = 6;
-    ctx->saddr6 = ip6->saddr;
-    ctx->daddr6 = ip6->daddr;
-
-    l4 = ip6 + 1;
-    return parse_ip_l4(ctx, l4, data_end, ip6->nexthdr, payload_len);
-}
-#endif
-
 /* ARP parser support. */
 static __always_inline parse_err_t parse_arp(struct pkt_ctx *ctx, void *data, void *data_end)
 {
     struct arphdr *arp = data;
     struct arp_eth_ipv4 *arp4;
+    __u16 arp_op;
 
     if ((void *)(arp + 1) > data_end)
         return PARSE_ERR_NETWORK_SHORT;
@@ -408,11 +461,17 @@ static __always_inline parse_err_t parse_arp(struct pkt_ctx *ctx, void *data, vo
     if (arp->ar_hln != ETH_ALEN || arp->ar_pln != 4)
         return PARSE_ERR_BAD_ARP;
 
+    arp_op = bpf_ntohs(arp->ar_op);
+    ctx->conds |= COND_PROTO_ARP;
+    if (arp_op == 1)
+        ctx->conds |= COND_ARP_REQUEST;
+    if (arp_op == 2)
+        ctx->conds |= COND_ARP_REPLY;
+
     arp4 = (void *)(arp + 1);
     if ((void *)(arp4 + 1) > data_end)
         return PARSE_ERR_NETWORK_SHORT;
 
-    ctx->ip_version = 4;
     ctx->ip_proto = 0;
     __builtin_memcpy(&ctx->saddr, arp4->sip, sizeof(ctx->saddr));
     __builtin_memcpy(&ctx->daddr, arp4->dip, sizeof(ctx->daddr));
@@ -429,7 +488,7 @@ static parse_err_t parse_vlan(struct pkt_ctx *ctx, void *data, void *data_end)
 
     ctx->vlan_id = bpf_ntohs(vh->tci) & 0x0fff;
     encap = bpf_ntohs(vh->encapsulated_proto);
-    ctx->eth_proto = encap;
+    ctx->conds |= COND_VLAN;
 
     if (encap == ETH_P_8021Q)
         return PARSE_ERR_BAD_VLAN;
@@ -437,10 +496,6 @@ static parse_err_t parse_vlan(struct pkt_ctx *ctx, void *data, void *data_end)
     switch (encap) {
     case ETH_P_IP:
         return parse_ipv4(ctx, vh + 1, data_end);
-#if 0
-    case ETH_P_IPV6:
-        return parse_ipv6(ctx, vh + 1, data_end);
-#endif
     case ETH_P_ARP:
         return parse_arp(ctx, vh + 1, data_end);
     default:
@@ -453,31 +508,24 @@ static parse_err_t parse_packet(struct pkt_ctx *ctx, void *data, void *data_end)
     struct ethhdr *eth = data;
     __u16 proto;
 
-    ctx->eth_proto = 0;
     ctx->vlan_id = VLAN_ID_NONE;
-    ctx->ip_version = 0;
     ctx->ip_proto = 0;
     ctx->sport = 0;
     ctx->dport = 0;
     ctx->tcp_flags = 0;
-    ctx->payload = NULL;
     ctx->payload_len = 0;
+    ctx->conds = 0;
 
     if ((void *)(eth + 1) > data_end)
         return PARSE_ERR_ETH_SHORT;
 
     proto = bpf_ntohs(eth->h_proto);
-    ctx->eth_proto = proto;
 
     switch (proto) {
     case ETH_P_8021Q:
         return parse_vlan(ctx, eth + 1, data_end);
     case ETH_P_IP:
         return parse_ipv4(ctx, eth + 1, data_end);
-#if 0
-    case ETH_P_IPV6:
-        return parse_ipv6(ctx, eth + 1, data_end);
-#endif
     case ETH_P_ARP:
         return parse_arp(ctx, eth + 1, data_end);
     default:
@@ -494,7 +542,7 @@ int xdp_sidersp(struct xdp_md *xdp)
     struct global_cfg *cfg;
     struct rule_meta best_rule = {};
     mask_t candidates;
-    __u32 pkt_conds = 0;
+    __u32 pkt_conds;
     __u32 zero = 0;
     parse_err_t err;
 
@@ -505,12 +553,13 @@ int xdp_sidersp(struct xdp_md *xdp)
         stat_inc(STAT_PARSE_FAILED);
         return XDP_PASS;
     }
+    pkt_conds = ctx.conds;
 
     cfg = bpf_map_lookup_elem(&global_cfg_map, &zero);
     if (!cfg)
         return XDP_PASS;
 
-    mask_copy(&candidates, &cfg->all_enabled_rules);
+    mask_copy(&candidates, &cfg->all_active_rules);
 
     if (!apply_u16_index(&vlan_index_map, ctx.vlan_id, &candidates))
         mask_and(&candidates, &cfg->vlan_optional_rules);
@@ -534,14 +583,37 @@ int xdp_sidersp(struct xdp_md *xdp)
 
     stat_inc(STAT_RULE_CANDIDATES);
 
-    pkt_conds |= detect_conditions(&ctx);
-
     if (!pick_best_rule(&candidates, pkt_conds, &best_rule))
         return XDP_PASS;
 
     stat_inc(STAT_MATCHED_RULES);
-    emit_event(&ctx, &best_rule, pkt_conds);
-    return XDP_PASS;
+
+    switch (best_rule.action) {
+    case ACTION_TCP_RESET: {
+        int ret = do_tcp_reset_tx(xdp, &ctx);
+        if (ret == XDP_TX) {
+            stat_inc(STAT_XDP_TX);
+            emit_event(&ctx, &best_rule, pkt_conds, VERDICT_TX);
+            return XDP_TX;
+        }
+        return XDP_PASS;
+    }
+    case ACTION_ICMP_ECHO_REPLY:
+    case ACTION_ARP_REPLY:
+    case ACTION_TCP_SYN_ACK: {
+        int redir = redirect_xsk_with_meta(xdp, &best_rule);
+        if (redir == XDP_REDIRECT) {
+            stat_inc(STAT_XSK_TX);
+            emit_event(&ctx, &best_rule, pkt_conds, VERDICT_XSK);
+            return XDP_REDIRECT;
+        }
+        return redir;
+    }
+    default:
+        if (best_rule.action != ACTION_NONE)
+            emit_event(&ctx, &best_rule, pkt_conds, VERDICT_OBSERVE);
+        return XDP_PASS;
+    }
 }
 
 char LICENSE[] SEC("license") = "GPL";

@@ -39,8 +39,8 @@ func TestSetRuleEnabledSyncsEnabledRulesOnly(t *testing.T) {
 	r := NewRuntime(config.Config{}, syncer, testStreamer{}, testStatsReader{})
 	r.rules = rule.RuleSet{
 		Rules: []rule.Rule{
-			{ID: 1, Name: "one", Enabled: true, Priority: 10, Response: rule.RuleResponse{Action: "RST"}},
-			{ID: 2, Name: "two", Enabled: false, Priority: 20, Response: rule.RuleResponse{Action: "RST"}},
+			{ID: 1, Name: "one", Enabled: true, Priority: 10, Response: rule.RuleResponse{Action: "tcp_reset"}},
+			{ID: 2, Name: "two", Enabled: false, Priority: 20, Response: rule.RuleResponse{Action: "tcp_reset"}},
 		},
 	}
 
@@ -77,7 +77,7 @@ func TestCreateRulePersistsAndSyncs(t *testing.T) {
 	}, syncer, testStreamer{}, testStatsReader{})
 	r.rules = rule.RuleSet{
 		Rules: []rule.Rule{
-			{ID: 1, Name: "one", Enabled: true, Priority: 10, Response: rule.RuleResponse{Action: "RST"}},
+			{ID: 1, Name: "one", Enabled: true, Priority: 10, Response: rule.RuleResponse{Action: "tcp_reset"}},
 		},
 	}
 
@@ -87,7 +87,7 @@ func TestCreateRulePersistsAndSyncs(t *testing.T) {
 		Enabled:  true,
 		Priority: 20,
 		Match:    rule.RuleMatch{DstPorts: []int{443}},
-		Response: rule.RuleResponse{Action: "RST"},
+		Response: rule.RuleResponse{Action: "tcp_reset"},
 	})
 	if err != nil {
 		t.Fatalf("CreateRule() error = %v", err)
@@ -109,8 +109,8 @@ func TestUpdateRuleConflict(t *testing.T) {
 	r := NewRuntime(config.Config{}, &testSyncer{}, testStreamer{}, testStatsReader{})
 	r.rules = rule.RuleSet{
 		Rules: []rule.Rule{
-			{ID: 1, Name: "one", Enabled: true, Priority: 10, Response: rule.RuleResponse{Action: "RST"}},
-			{ID: 2, Name: "two", Enabled: true, Priority: 20, Response: rule.RuleResponse{Action: "RST"}},
+			{ID: 1, Name: "one", Enabled: true, Priority: 10, Response: rule.RuleResponse{Action: "tcp_reset"}},
+			{ID: 2, Name: "two", Enabled: true, Priority: 20, Response: rule.RuleResponse{Action: "tcp_reset"}},
 		},
 	}
 
@@ -119,7 +119,7 @@ func TestUpdateRuleConflict(t *testing.T) {
 		Name:     "dup",
 		Enabled:  true,
 		Priority: 20,
-		Response: rule.RuleResponse{Action: "RST"},
+		Response: rule.RuleResponse{Action: "tcp_reset"},
 	})
 	if !errors.Is(err, ErrRuleConflict) {
 		t.Fatalf("UpdateRule() error = %v, want %v", err, ErrRuleConflict)
@@ -133,8 +133,8 @@ func TestDeleteRuleRemovesAndSyncs(t *testing.T) {
 	r := NewRuntime(config.Config{}, syncer, testStreamer{}, testStatsReader{})
 	r.rules = rule.RuleSet{
 		Rules: []rule.Rule{
-			{ID: 1, Name: "one", Enabled: true, Priority: 10, Response: rule.RuleResponse{Action: "RST"}},
-			{ID: 2, Name: "two", Enabled: false, Priority: 20, Response: rule.RuleResponse{Action: "RST"}},
+			{ID: 1, Name: "one", Enabled: true, Priority: 10, Response: rule.RuleResponse{Action: "tcp_reset"}},
+			{ID: 2, Name: "two", Enabled: false, Priority: 20, Response: rule.RuleResponse{Action: "tcp_reset"}},
 		},
 	}
 
@@ -159,7 +159,7 @@ func TestSetRuleEnabledPersistsAndSyncs(t *testing.T) {
 	}, syncer, testStreamer{}, testStatsReader{})
 	r.rules = rule.RuleSet{
 		Rules: []rule.Rule{
-			{ID: 1, Name: "one", Enabled: true, Priority: 10, Response: rule.RuleResponse{Action: "RST"}},
+			{ID: 1, Name: "one", Enabled: true, Priority: 10, Response: rule.RuleResponse{Action: "tcp_reset"}},
 		},
 	}
 
@@ -197,8 +197,8 @@ func TestStatsReturnsRuntimeAndDataplaneCounters(t *testing.T) {
 	})
 	r.rules = rule.RuleSet{
 		Rules: []rule.Rule{
-			{ID: 1, Name: "one", Enabled: true, Priority: 10, Response: rule.RuleResponse{Action: "RST"}},
-			{ID: 2, Name: "two", Enabled: false, Priority: 20, Response: rule.RuleResponse{Action: "RST"}},
+			{ID: 1, Name: "one", Enabled: true, Priority: 10, Response: rule.RuleResponse{Action: "tcp_reset"}},
+			{ID: 2, Name: "two", Enabled: false, Priority: 20, Response: rule.RuleResponse{Action: "tcp_reset"}},
 		},
 	}
 

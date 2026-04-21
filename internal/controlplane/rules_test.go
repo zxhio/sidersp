@@ -18,40 +18,46 @@ func TestLoadRules(t *testing.T) {
     enabled: false
     priority: 50
     match:
+      protocol: tcp
       vlans: [300]
       src_prefixes: ["10.10.0.0/16"]
       dst_prefixes: ["192.168.3.0/24"]
       src_ports: [34567]
       dst_ports: [443]
-      features: [HTTP_11]
+      tcp_flags:
+        syn: true
     response:
-      action: RST
+      action: tcp_reset
   - id: 1002
     name: later
     enabled: true
     priority: 200
     match:
+      protocol: tcp
       vlans: [200]
       src_prefixes: ["10.0.0.1/8"]
       dst_prefixes: ["192.168.1.0/24"]
       src_ports: [12345]
       dst_ports: [8080]
-      features: [" TCP_SYN ", HTTP_11]
+      tcp_flags:
+        syn: true
     response:
-      action: rst
+      action: tcp_reset
   - id: 1001
     name: first
     enabled: true
     priority: 100
     match:
+      protocol: tcp
       vlans: [100]
       src_prefixes: ["10.0.0.0/8"]
       dst_prefixes: ["192.168.2.0/24"]
       src_ports: [23456]
       dst_ports: [80]
-      features: [HTTP_METHOD]
+      tcp_flags:
+        syn: true
     response:
-      action: RST
+      action: tcp_reset
 `)
 
 	set, err := LoadRules(path)
@@ -71,12 +77,12 @@ func TestLoadRules(t *testing.T) {
 		t.Fatalf("normalized src prefix = %q, want %q", got, "10.0.0.0/8")
 	}
 
-	if got := set.Rules[2].Response.Action; got != "RST" {
-		t.Fatalf("normalized action = %q, want %q", got, "RST")
+	if got := set.Rules[2].Response.Action; got != "tcp_reset" {
+		t.Fatalf("normalized action = %q, want %q", got, "tcp_reset")
 	}
 
-	if got := set.Rules[2].Match.Features[0]; got != "TCP_SYN" {
-		t.Fatalf("normalized feature = %q, want %q", got, "TCP_SYN")
+	if set.Rules[2].Match.TCPFlags.SYN == nil || !*set.Rules[2].Match.TCPFlags.SYN {
+		t.Fatal("normalized tcp_flags.syn = nil/false, want true")
 	}
 
 	if set.Rules[0].Enabled {
@@ -98,7 +104,8 @@ func TestLoadRulesValidationError(t *testing.T) {
       dst_prefixes: ["192.168.1.0/24"]
       src_ports: [12345]
       dst_ports: [70000]
-      features: [TCP_SYN]
+      tcp_flags:
+        syn: true
     response:
       action: DROP
 `)
@@ -127,9 +134,10 @@ func TestLoadRulesRejectsInvalidVLAN(t *testing.T) {
       dst_prefixes: ["192.168.1.0/24"]
       src_ports: [12345]
       dst_ports: [80]
-      features: [TCP_SYN]
+      tcp_flags:
+        syn: true
     response:
-      action: RST
+      action: tcp_reset
 `)
 
 	_, err := LoadRules(path)
@@ -156,7 +164,8 @@ func TestLoadRulesRejectsEmptyAction(t *testing.T) {
       dst_prefixes: ["192.168.1.0/24"]
       src_ports: [12345]
       dst_ports: [80]
-      features: [TCP_SYN]
+      tcp_flags:
+        syn: true
     response:
       action: "   "
 `)
@@ -182,7 +191,7 @@ func TestLoadRulesRejectsIPv6Prefix(t *testing.T) {
     match:
       src_prefixes: ["2001:db8::/32"]
     response:
-      action: RST
+      action: tcp_reset
 `)
 
 	_, err := LoadRules(path)
@@ -206,15 +215,15 @@ func TestSaveRulesNormalizesAndSorts(t *testing.T) {
 				Name:     "later",
 				Enabled:  true,
 				Priority: 20,
-				Match:    rule.RuleMatch{Features: []string{" HTTP_11 "}},
-				Response: rule.RuleResponse{Action: "rst"},
+				Match:    rule.RuleMatch{Protocol: "tcp", TCPFlags: rule.TCPFlags{SYN: boolPtr(true)}},
+				Response: rule.RuleResponse{Action: "tcp_reset"},
 			},
 			{
 				ID:       1,
 				Name:     "first",
 				Enabled:  true,
 				Priority: 10,
-				Response: rule.RuleResponse{Action: "RST"},
+				Response: rule.RuleResponse{Action: "tcp_reset"},
 			},
 		},
 	})
@@ -229,9 +238,13 @@ func TestSaveRulesNormalizesAndSorts(t *testing.T) {
 	if set.Rules[0].ID != 1 {
 		t.Fatalf("first rule id = %d, want 1", set.Rules[0].ID)
 	}
-	if got := set.Rules[1].Response.Action; got != "RST" {
-		t.Fatalf("action = %q, want RST", got)
+	if got := set.Rules[1].Response.Action; got != "tcp_reset" {
+		t.Fatalf("action = %q, want tcp_reset", got)
 	}
+}
+
+func boolPtr(v bool) *bool {
+	return &v
 }
 
 func TestLoadRulesRejectsDuplicateID(t *testing.T) {
@@ -243,13 +256,13 @@ func TestLoadRulesRejectsDuplicateID(t *testing.T) {
     enabled: true
     priority: 100
     response:
-      action: RST
+      action: tcp_reset
   - id: 1001
     name: duplicate
     enabled: true
     priority: 200
     response:
-      action: RST
+      action: tcp_reset
 `)
 
 	_, err := LoadRules(path)

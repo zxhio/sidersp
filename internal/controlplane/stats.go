@@ -20,6 +20,8 @@ type Stats struct {
 	RuleCandidates uint64               `json:"rule_candidates"`
 	MatchedRules   uint64               `json:"matched_rules"`
 	RingbufDropped uint64               `json:"ringbuf_dropped"`
+	XDPTX          uint64               `json:"xdp_tx"`
+	XskTX          uint64               `json:"xsk_tx"`
 	Histories      []StatsHistorySeries `json:"histories"`
 }
 
@@ -39,6 +41,8 @@ type StatsPoint struct {
 	RuleCandidates uint64    `json:"rule_candidates"`
 	MatchedRules   uint64    `json:"matched_rules"`
 	RingbufDropped uint64    `json:"ringbuf_dropped"`
+	XDPTX          uint64    `json:"xdp_tx"`
+	XskTX          uint64    `json:"xsk_tx"`
 }
 
 func buildStatsRetention(plan []config.ParsedStatsHistoryWindow) (time.Duration, time.Duration, int) {
@@ -69,6 +73,8 @@ func newStats(rules rule.RuleSet, dpStats model.DataplaneStats) Stats {
 		RuleCandidates: dpStats.RuleCandidates,
 		MatchedRules:   dpStats.MatchedRules,
 		RingbufDropped: dpStats.RingbufDropped,
+		XDPTX:          dpStats.XDPTX,
+		XskTX:          dpStats.XskTX,
 	}
 }
 
@@ -82,6 +88,8 @@ func newStatsPoint(ts time.Time, item Stats) StatsPoint {
 		RuleCandidates: item.RuleCandidates,
 		MatchedRules:   item.MatchedRules,
 		RingbufDropped: item.RingbufDropped,
+		XDPTX:          item.XDPTX,
+		XskTX:          item.XskTX,
 	}
 }
 

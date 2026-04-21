@@ -3,10 +3,10 @@
  *
  *   ┌──────────────────────────────────────────────────────────┐
  *   │  rule_index_map       ARRAY<u32, rule_meta>    [1024]    │
- *   │    slot → rule metadata (id, priority, required_mask)    │
+ *   │    slot → rule metadata (id, required_mask, action)      │
  *   ├──────────────────────────────────────────────────────────┤
  *   │  global_cfg_map       ARRAY<u32, global_cfg>    [1]      │
- *   │    all_enabled_rules bitmap (initial candidates)         │
+ *   │    all_active_rules bitmap (initial candidates)          │
  *   ├──────────────────────────────────────────────────────────┤
  *   │  vlan_index_map       HASH<u16, mask_t>        [4096]    │
  *   │  src_port_index_map   HASH<u16, mask_t>        [4096]    │
@@ -19,7 +19,10 @@
  *   ├──────────────────────────────────────────────────────────┤
  *   │  event_ringbuf        RINGBUF    [16 MB]                 │
  *   ├──────────────────────────────────────────────────────────┤
- *   │  stats_map            PERCPU_ARRAY<u32, u64>  [5]        │
+ *   │  stats_map            PERCPU_ARRAY<u32, u64>  [STAT_COUNT]
+ *   ├──────────────────────────────────────────────────────────┤
+ *   │  xsks_map             XSKMAP<u32, u32>       [64]        │
+ *   │    queue_id → XSK fd for XDP_REDIRECT                    │
  *   └──────────────────────────────────────────────────────────┘
  */
 #ifndef SIDERSP_BPF_MAPS_H
@@ -101,5 +104,12 @@ struct {
     __type(key, __u32);
     __type(value, __u64);
 } stats_map SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_XSKMAP);
+    __uint(max_entries, 64);
+    __type(key, __u32);
+    __type(value, __u32);
+} xsks_map SEC(".maps");
 
 #endif

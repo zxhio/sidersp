@@ -20,7 +20,7 @@ func TestBuildSnapshotBuildsKernelIndexes(t *testing.T) {
 				Name:     "wildcard",
 				Enabled:  true,
 				Priority: 100,
-				Response: rule.RuleResponse{Action: "RST"},
+				Response: rule.RuleResponse{Action: "tcp_reset"},
 			},
 			{
 				ID:       1002,
@@ -30,9 +30,10 @@ func TestBuildSnapshotBuildsKernelIndexes(t *testing.T) {
 				Match: rule.RuleMatch{
 					DstPorts:    []int{80},
 					SrcPrefixes: []string{"10.0.0.0/8"},
-					Features:    []string{"TCP_SYN"},
+					Protocol:    "tcp",
+					TCPFlags:    rule.TCPFlags{SYN: boolRulePtr(true)},
 				},
-				Response: rule.RuleResponse{Action: "RST"},
+				Response: rule.RuleResponse{Action: "tcp_reset"},
 			},
 			{
 				ID:       1003,
@@ -43,7 +44,7 @@ func TestBuildSnapshotBuildsKernelIndexes(t *testing.T) {
 					DstPorts:    []int{80},
 					SrcPrefixes: []string{"10.1.0.0/16"},
 				},
-				Response: rule.RuleResponse{Action: "RST"},
+				Response: rule.RuleResponse{Action: "tcp_reset"},
 			},
 		},
 	}
@@ -83,9 +84,14 @@ func TestBuildSnapshotBuildsKernelIndexes(t *testing.T) {
 	}
 
 	meta := got.ruleIndex[1]
-	if meta.RequiredMask != condSrcPrefix|condDstPort|condTCPSYN {
-		t.Fatalf("required mask = %d, want %d", meta.RequiredMask, condSrcPrefix|condDstPort|condTCPSYN)
+	wantMask := uint32(condProtoTCP | condSrcPrefix | condDstPort | condTCPSYN)
+	if meta.RequiredMask != wantMask {
+		t.Fatalf("required mask = %d, want %d", meta.RequiredMask, wantMask)
 	}
+}
+
+func boolRulePtr(v bool) *bool {
+	return &v
 }
 
 func maskHas(mask siderspMaskT, slot uint32) bool {
@@ -135,18 +141,17 @@ func TestParseAttachModeRejectsUnknownValue(t *testing.T) {
 func TestDecodeRuleEvent(t *testing.T) {
 	t.Parallel()
 
-	raw := make([]byte, 36)
+	raw := make([]byte, 32)
 	binary.LittleEndian.PutUint64(raw[0:8], 123)
 	binary.LittleEndian.PutUint32(raw[8:12], 1001)
 	binary.LittleEndian.PutUint32(raw[12:16], 9)
-	binary.LittleEndian.PutUint32(raw[16:20], 1)
-	binary.LittleEndian.PutUint32(raw[20:24], 0xc0a82001)
-	binary.LittleEndian.PutUint32(raw[24:28], 0xc0a8209b)
-	binary.LittleEndian.PutUint16(raw[28:30], 54321)
-	binary.LittleEndian.PutUint16(raw[30:32], 80)
-	raw[32] = 0x02
-	raw[33] = 6
-	binary.LittleEndian.PutUint16(raw[34:36], 128)
+	binary.LittleEndian.PutUint32(raw[16:20], 0xc0a82001)
+	binary.LittleEndian.PutUint32(raw[20:24], 0xc0a8209b)
+	binary.LittleEndian.PutUint16(raw[24:26], actionTCPReset)
+	binary.LittleEndian.PutUint16(raw[26:28], 54321)
+	binary.LittleEndian.PutUint16(raw[28:30], 80)
+	raw[30] = 1
+	raw[31] = 6
 
 	got, err := decodeRuleEvent(raw)
 	if err != nil {
@@ -165,8 +170,8 @@ func TestDecodeRuleEvent(t *testing.T) {
 func TestActionName(t *testing.T) {
 	t.Parallel()
 
-	if got := actionName(1); got != "RST" {
-		t.Fatalf("actionName(1) = %q, want %q", got, "RST")
+	if got := actionName(actionTCPReset); got != "TCP_RESET" {
+		t.Fatalf("actionName(actionTCPReset) = %q, want %q", got, "TCP_RESET")
 	}
 	if got := actionName(99); got != "UNKNOWN(99)" {
 		t.Fatalf("actionName(99) = %q, want %q", got, "UNKNOWN(99)")
@@ -176,8 +181,8 @@ func TestActionName(t *testing.T) {
 func TestConditionNames(t *testing.T) {
 	t.Parallel()
 
-	got := conditionNames(condSrcPrefix | condDstPort | condTCPSYN)
-	want := "SRC_PREFIX|DST_PORT|TCP_SYN"
+	got := conditionNames(condProtoTCP | condSrcPrefix | condDstPort | condTCPSYN)
+	want := "PROTO_TCP|SRC_PREFIX|DST_PORT|TCP_SYN"
 	if got != want {
 		t.Fatalf("conditionNames() = %q, want %q", got, want)
 	}
@@ -258,7 +263,13 @@ func TestKernelStatsFields(t *testing.T) {
 	if got := fields["drop"]; got != uint64(1) {
 		t.Fatalf("drop = %v, want %d", got, 1)
 	}
-	if len(fields) != 5 {
-		t.Fatalf("len(fields) = %d, want %d", len(fields), 5)
+	if got := fields["xdp_tx"]; got != uint64(0) {
+		t.Fatalf("xdp_tx = %v, want %d", got, 0)
+	}
+	if got := fields["xsk_tx"]; got != uint64(0) {
+		t.Fatalf("xsk_tx = %v, want %d", got, 0)
+	}
+	if len(fields) != 7 {
+		t.Fatalf("len(fields) = %d, want %d", len(fields), 7)
 	}
 }

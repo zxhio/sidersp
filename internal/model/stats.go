@@ -6,4 +6,6 @@ type DataplaneStats struct {
 	RuleCandidates uint64 `json:"rule_candidates"`
 	MatchedRules   uint64 `json:"matched_rules"`
 	RingbufDropped uint64 `json:"ringbuf_dropped"`
+	XDPTX          uint64 `json:"xdp_tx"`
+	XskTX          uint64 `json:"xsk_tx"`
 }

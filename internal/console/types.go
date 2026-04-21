@@ -1,16 +1,36 @@
 package console
 
 type RuleMatch struct {
-	VLANs       []int    `json:"vlans"`
-	SrcPrefixes []string `json:"src_prefixes"`
-	DstPrefixes []string `json:"dst_prefixes"`
-	SrcPorts    []int    `json:"src_ports"`
-	DstPorts    []int    `json:"dst_ports"`
-	Features    []string `json:"features"`
+	Protocol    string         `json:"protocol"`
+	VLANs       []int          `json:"vlans"`
+	SrcPrefixes []string       `json:"src_prefixes"`
+	DstPrefixes []string       `json:"dst_prefixes"`
+	SrcPorts    []int          `json:"src_ports"`
+	DstPorts    []int          `json:"dst_ports"`
+	TCPFlags    ruleTCPFlags   `json:"tcp_flags"`
+	ICMP        *ruleICMPMatch `json:"icmp,omitempty"`
+	ARP         *ruleARPMatch  `json:"arp,omitempty"`
 }
 
 type RuleAction struct {
-	Action string `json:"action"`
+	Action string                 `json:"action"`
+	Params map[string]interface{} `json:"params,omitempty"`
+}
+
+type ruleTCPFlags struct {
+	SYN *bool `json:"syn,omitempty"`
+	ACK *bool `json:"ack,omitempty"`
+	RST *bool `json:"rst,omitempty"`
+	FIN *bool `json:"fin,omitempty"`
+	PSH *bool `json:"psh,omitempty"`
+}
+
+type ruleICMPMatch struct {
+	Type string `json:"type"`
+}
+
+type ruleARPMatch struct {
+	Operation string `json:"operation"`
 }
 
 type RuleBody struct {
@@ -38,6 +58,8 @@ type StatsResponse struct {
 	RuleCandidates uint64                 `json:"rule_candidates"`
 	MatchedRules   uint64                 `json:"matched_rules"`
 	RingbufDropped uint64                 `json:"ringbuf_dropped"`
+	XDPTX          uint64                 `json:"xdp_tx"`
+	XskTX          uint64                 `json:"xsk_tx"`
 	Histories      []StatsHistoryResponse `json:"histories"`
 }
 
@@ -57,4 +79,6 @@ type StatsPointResponse struct {
 	RuleCandidates uint64 `json:"rule_candidates"`
 	MatchedRules   uint64 `json:"matched_rules"`
 	RingbufDropped uint64 `json:"ringbuf_dropped"`
+	XDPTX          uint64 `json:"xdp_tx"`
+	XskTX          uint64 `json:"xsk_tx"`
 }

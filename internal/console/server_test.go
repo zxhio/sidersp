@@ -289,7 +289,7 @@ func TestCreateRule(t *testing.T) {
 	t.Parallel()
 
 	server := NewServer("127.0.0.1:0", &stubService{})
-	body := []byte(`{"id":3,"name":"three","enabled":true,"priority":30,"match":{"dst_ports":[443]},"response":{"action":"RST"}}`)
+	body := []byte(`{"id":3,"name":"three","enabled":true,"priority":30,"match":{"dst_ports":[443]},"response":{"action":"tcp_reset"}}`)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/rules", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -305,9 +305,9 @@ func TestUpdateRule(t *testing.T) {
 	t.Parallel()
 
 	server := NewServer("127.0.0.1:0", &stubService{
-		rules: []rule.Rule{{ID: 2, Name: "two", Enabled: false, Priority: 20, Response: rule.RuleResponse{Action: "RST"}}},
+		rules: []rule.Rule{{ID: 2, Name: "two", Enabled: false, Priority: 20, Response: rule.RuleResponse{Action: "tcp_reset"}}},
 	})
-	body := []byte(`{"id":2,"name":"two-updated","enabled":true,"priority":10,"match":{"dst_ports":[80]},"response":{"action":"RST"}}`)
+	body := []byte(`{"id":2,"name":"two-updated","enabled":true,"priority":10,"match":{"dst_ports":[80]},"response":{"action":"tcp_reset"}}`)
 
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/rules/2", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -339,7 +339,7 @@ func TestCreateRuleValidationError(t *testing.T) {
 	t.Parallel()
 
 	server := NewServer("127.0.0.1:0", &stubService{})
-	body := []byte(`{"id":0,"name":"","enabled":true,"priority":30,"match":{"dst_ports":[443]},"response":{"action":"RST"}}`)
+	body := []byte(`{"id":0,"name":"","enabled":true,"priority":30,"match":{"dst_ports":[443]},"response":{"action":"tcp_reset"}}`)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/rules", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")

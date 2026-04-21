@@ -16,7 +16,19 @@ import (
 )
 
 var allowedActions = map[string]struct{}{
-	"RST": {},
+	"none":            {},
+	"alert":           {},
+	"tcp_reset":       {},
+	"icmp_echo_reply": {},
+	"arp_reply":       {},
+	"tcp_syn_ack":     {},
+}
+
+var allowedProtocols = map[string]struct{}{
+	"tcp":  {},
+	"udp":  {},
+	"icmp": {},
+	"arp":  {},
 }
 
 var ErrRuleValidation = errors.New("rule validation failed")
@@ -127,7 +139,35 @@ func normalizeRule(r *rule.Rule) error {
 		return fmt.Errorf("match.dst_ports: %w", err)
 	}
 
-	action := strings.TrimSpace(strings.ToUpper(r.Response.Action))
+	protocol := strings.ToLower(strings.TrimSpace(r.Match.Protocol))
+	if protocol != "" {
+		if _, ok := allowedProtocols[protocol]; !ok {
+			return fmt.Errorf("match.protocol %q is not allowed", r.Match.Protocol)
+		}
+	}
+	if err := validateTCPFlags(r.Match.TCPFlags); err != nil {
+		return fmt.Errorf("match.tcp_flags: %w", err)
+	}
+	if r.Match.ICMP != nil {
+		icmpType := strings.ToLower(strings.TrimSpace(r.Match.ICMP.Type))
+		switch icmpType {
+		case "echo_request", "echo_reply":
+			r.Match.ICMP.Type = icmpType
+		default:
+			return fmt.Errorf("match.icmp.type %q is not allowed", r.Match.ICMP.Type)
+		}
+	}
+	if r.Match.ARP != nil {
+		operation := strings.ToLower(strings.TrimSpace(r.Match.ARP.Operation))
+		switch operation {
+		case "request", "reply":
+			r.Match.ARP.Operation = operation
+		default:
+			return fmt.Errorf("match.arp.operation %q is not allowed", r.Match.ARP.Operation)
+		}
+	}
+
+	action := strings.ToLower(strings.TrimSpace(r.Response.Action))
 	if action == "" {
 		return fmt.Errorf("response.action is required")
 	}
@@ -140,9 +180,27 @@ func normalizeRule(r *rule.Rule) error {
 	r.Match.DstPrefixes = dstPrefixes
 	r.Match.SrcPorts = srcPorts
 	r.Match.DstPorts = dstPorts
-	r.Match.Features = normalizeStrings(r.Match.Features)
+	r.Match.Protocol = protocol
 	r.Response.Action = action
 
+	return nil
+}
+
+func validateTCPFlags(flags rule.TCPFlags) error {
+	for _, item := range []struct {
+		name  string
+		value *bool
+	}{
+		{name: "syn", value: flags.SYN},
+		{name: "ack", value: flags.ACK},
+		{name: "rst", value: flags.RST},
+		{name: "fin", value: flags.FIN},
+		{name: "psh", value: flags.PSH},
+	} {
+		if item.value != nil && !*item.value {
+			return fmt.Errorf("negative %s is not supported", item.name)
+		}
+	}
 	return nil
 }
 

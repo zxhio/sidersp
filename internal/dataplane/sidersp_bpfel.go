@@ -15,7 +15,7 @@ import (
 
 type siderspGlobalCfg struct {
 	_                      structs.HostLayout
-	AllEnabledRules        siderspMaskT
+	AllActiveRules         siderspMaskT
 	VlanOptionalRules      siderspMaskT
 	SrcPortOptionalRules   siderspMaskT
 	DstPortOptionalRules   siderspMaskT
@@ -37,10 +37,10 @@ type siderspMaskT struct {
 type siderspRuleMeta struct {
 	_            structs.HostLayout
 	RuleId       uint32
-	Priority     uint32
-	Enabled      uint32
 	RequiredMask uint32
-	Action       uint32
+	Action       uint16
+	Flags        uint8
+	_            [1]byte
 }
 
 // loadSidersp returns the embedded CollectionSpec for sidersp.
@@ -101,6 +101,7 @@ type siderspMapSpecs struct {
 	SrcPrefixLpmMap *ebpf.MapSpec `ebpf:"src_prefix_lpm_map"`
 	StatsMap        *ebpf.MapSpec `ebpf:"stats_map"`
 	VlanIndexMap    *ebpf.MapSpec `ebpf:"vlan_index_map"`
+	XsksMap         *ebpf.MapSpec `ebpf:"xsks_map"`
 }
 
 // siderspVariableSpecs contains global variables before they are loaded into the kernel.
@@ -138,6 +139,7 @@ type siderspMaps struct {
 	SrcPrefixLpmMap *ebpf.Map `ebpf:"src_prefix_lpm_map"`
 	StatsMap        *ebpf.Map `ebpf:"stats_map"`
 	VlanIndexMap    *ebpf.Map `ebpf:"vlan_index_map"`
+	XsksMap         *ebpf.Map `ebpf:"xsks_map"`
 }
 
 func (m *siderspMaps) Close() error {
@@ -151,6 +153,7 @@ func (m *siderspMaps) Close() error {
 		m.SrcPrefixLpmMap,
 		m.StatsMap,
 		m.VlanIndexMap,
+		m.XsksMap,
 	)
 }
 
