@@ -1,7 +1,8 @@
 # BPF Data Plane Specification
 
 This document specifies the behavior of the XDP BPF program (`bpf/prog.c`):
-packet parsing, rule matching, event output, and map layouts.
+packet parsing, rule matching, action handling, event output, and
+map layouts.
 All tests and implementations must conform to this specification.
 
 ## 1. Supported Packet Types
@@ -29,7 +30,7 @@ invalid ARP) also increment `parse_failed`.
 ### Packet Requirements for Matching (no parse_failed)
 
 - Valid Ethernet header (>= 14 bytes)
-- For IPv4: IHL must be exactly 5 (no IPv4 options on the fast path), sufficient
+- For IPv4: IHL must be exactly 5, sufficient
   bytes, and `total_length` must fit within the captured frame. The version field
   is **not** checked — entry is determined by EtherType, so a malformed version
   nibble is not caught.
@@ -40,48 +41,76 @@ invalid ARP) also increment `parse_failed`.
 - For UDP: >= 8 bytes UDP header
 - IP protocol must be TCP (6), UDP (17), or ICMP (1)
 
-## 2. XDP Return Values
+## 2. XDP Return Values and Response Paths
 
-The program **always** returns `XDP_PASS` (value `2`).
+The program returns one of three outcomes:
 
-Matched packets are reported via ringbuf events but **not** dropped or redirected.
-The current `action` field is purely informational — RST/drop actions are for
-future implementation.
+| Return | Meaning |
+|--------|---------|
+| `XDP_PASS` | No match, parse failure, unsupported response path, or TX fallback |
+| `XDP_TX` | Synchronous response was built in-place and transmitted from XDP |
+| `XDP_REDIRECT` | Packet was submitted to XSK for user-space TX handling |
+
+Response behavior is fixed by action code. `tcp_reset` is the synchronous
+`XDP_TX` action. ICMP echo reply, ARP reply, and TCP
+SYN-ACK spoof require full original-packet context and are handled through XSK.
 
 ## 3. Rule Matching Semantics
 
 ### 3.1 Matching Algorithm
 
 1. Parse packet; if parse fails → increment `parse_failed`, return XDP_PASS
-2. Look up `global_cfg_map[0]` for `all_enabled_rules` bitmap
+2. Look up `global_cfg_map[0]` for `all_active_rules` bitmap
 3. Pre-filter candidates using inverted indexes:
    - VLAN index → `vlan_optional_rules` fallback
    - Source port index → `src_port_optional_rules` fallback
    - Destination port index → `dst_port_optional_rules` fallback
    - Source prefix LPM trie → `src_prefix_optional_rules` fallback
    - Destination prefix LPM trie → `dst_prefix_optional_rules` fallback
+   - Protocol is not indexed; `COND_PROTO_*` bits in `required_mask` confirm it
 4. If candidates bitmap is all-zero → return XDP_PASS
-5. Detect packet conditions (set bits in `pkt_conds`)
+5. Detect positive packet conditions (set bits in `pkt_conds`)
 6. Iterate candidate slots 0..N; first slot where `(pkt_conds & required_mask) == required_mask` wins
-7. Emit ringbuf event with matched rule details
+7. Execute the action behavior fixed in BPF code
+8. For `ACTION_TCP_RESET`: rewrite packet as TCP RST and return `XDP_TX`
+9. For spoof actions: prepend `xsk_meta` and submit the original packet to `xsks_map[ctx->rx_queue_index]`
+10. Emit optional ringbuf observation event
 
 ### 3.2 Condition Bits
 
 | Bit | Name | Meaning |
 |-----|------|---------|
-| 0 | COND_VLAN | Packet carries a VLAN tag (vlan_id != 0xFFFF) |
-| 1 | COND_SRC_PREFIX | Source IP matched a prefix in the LPM trie |
-| 2 | COND_DST_PREFIX | Destination IP matched a prefix in the LPM trie |
-| 3 | COND_SRC_PORT | Source port is non-zero |
-| 4 | COND_DST_PORT | Destination port is non-zero |
-| 5 | COND_HTTP_METHOD | Payload starts with GET/POST/HEAD — accepted by control plane but **never set by BPF**; rules requiring this condition are unmatchable |
-| 6 | COND_HTTP_11 | Payload contains "HTTP/1.1" — accepted by control plane but **never set by BPF**; rules requiring this condition are unmatchable |
-| 7 | COND_TCP_SYN | TCP SYN flag is set |
+| 0 | COND_PROTO_TCP | IPv4 protocol is TCP |
+| 1 | COND_PROTO_UDP | IPv4 protocol is UDP |
+| 2 | COND_PROTO_ICMP | IPv4 protocol is ICMP |
+| 3 | COND_PROTO_ARP | EtherType is ARP |
+| 4 | COND_VLAN | Packet carries a VLAN tag (vlan_id != 0xFFFF) |
+| 5 | COND_SRC_PREFIX | Source IPv4 matched a source prefix condition |
+| 6 | COND_DST_PREFIX | Destination IPv4 matched a destination prefix condition |
+| 7 | COND_SRC_PORT | TCP/UDP source port matched a source port condition |
+| 8 | COND_DST_PORT | TCP/UDP destination port matched a destination port condition |
+| 9 | COND_TCP_SYN | TCP SYN flag is set |
+| 10 | COND_TCP_ACK | TCP ACK flag is set |
+| 11 | COND_TCP_RST | TCP RST flag is set |
+| 12 | COND_TCP_FIN | TCP FIN flag is set |
+| 13 | COND_TCP_PSH | TCP PSH flag is set |
+| 14 | COND_ICMP_ECHO_REQUEST | ICMP type=8 and code=0 |
+| 15 | COND_ICMP_ECHO_REPLY | ICMP type=0 and code=0 |
+| 16 | COND_ARP_REQUEST | ARP operation is request |
+| 17 | COND_ARP_REPLY | ARP operation is reply |
+| 18 | COND_L4_PAYLOAD | L4 payload length is greater than zero |
+
+`required_mask` supports positive conditions only. Negative conditions such as
+`tcp_flags.ack=false` are rejected by the control plane.
 
 ### 3.3 Priority Ordering
 
-Rules are compiled into slots sorted by `(priority ASC, id ASC)`.
-Slot 0 has the highest priority. First matching slot wins.
+The control plane filters disabled rules, validates rule IDs, and compiles active
+rules into slots sorted by `(priority ASC, id ASC)`. Slot 0 has the highest
+priority. First matching slot wins.
+
+`priority` and `enabled` are user-space rule lifecycle fields and are not stored
+in `rule_meta`.
 
 ### 3.4 Wildcard / Optional Conditions
 
@@ -101,49 +130,83 @@ entry's network address. For example, a `/24` entry's mask includes rules with
 matching `/24`, `/23`, `/16`, or `/0` prefixes — all prefixes that contain the
 `/24` subnet.
 
+### 3.6 Control Plane Responsibilities
+
+The control plane performs all high-level validation and compilation before
+writing BPF maps:
+
+- Filter out `enabled=false` rules.
+- Reject duplicate rule IDs.
+- Reject unsupported negative match conditions.
+- Reject unsupported match fields and action names.
+- Sort active rules by `(priority ASC, id ASC)`.
+- Compile concrete values into index maps.
+- Compile positive semantic requirements into `required_mask`.
+
+The BPF program only consumes active, normalized rules.
+
 ## 4. Ringbuf Event Format
 
-Each matched packet attempts to produce one event in the `event_ringbuf` map.
-`matched_rules` is incremented before the ringbuf reserve attempt; if the reserve
-fails, `ringbuf_dropped` is incremented instead and no event is delivered.
+Ringbuf events are observation records only. They are not used as the packet
+data channel for TX response construction. XSK TX handlers receive
+the full original packet through XSK.
 
-### Structure (36 bytes, packed, little-endian)
+Each matched packet may attempt to produce one event in the `event_ringbuf` map.
+`matched_rules` is incremented before the action path is selected.
+If the event reserve fails, `ringbuf_dropped` is incremented instead and no event
+is delivered.
+
+### Structure
 
 | Offset | Size | Field | Description |
 |--------|------|-------|-------------|
 | 0 | 8 | timestamp_ns | `bpf_ktime_get_ns()` — monotonic nanoseconds |
 | 8 | 4 | rule_id | Matched rule's ID (from `rule_meta.rule_id`) |
 | 12 | 4 | pkt_conds | Packet condition bitmask |
-| 16 | 4 | action | Action code: 0=NONE, 1=RST, 2=REPORT (see §6) |
-| 20 | 4 | sip | Source IPv4 address, **host byte order** (bpf_ntohl) |
-| 24 | 4 | dip | Destination IPv4 address, **host byte order** (bpf_ntohl) |
-| 28 | 2 | sport | Source port, **host byte order** (bpf_ntohs) |
-| 30 | 2 | dport | Destination port, **host byte order** (bpf_ntohs) |
-| 32 | 1 | tcp_flags | TCP flags: SYN=0x02, ACK=0x10, RST=0x04, FIN=0x01, PSH=0x08 |
-| 33 | 1 | ip_proto | IP protocol: 6=TCP, 17=UDP |
-| 34 | 2 | payload_len | L4 payload bytes after transport header, bounded by IPv4 `total_length`; Ethernet padding/trailing bytes are excluded |
+| 16 | 4 | sip | Source IPv4 address, **host byte order** (bpf_ntohl) |
+| 20 | 4 | dip | Destination IPv4 address, **host byte order** (bpf_ntohl) |
+| 24 | 2 | action | Action code (see §6) |
+| 26 | 2 | sport | Source port, **host byte order** (bpf_ntohs) |
+| 28 | 2 | dport | Destination port, **host byte order** (bpf_ntohs) |
+| 30 | 1 | verdict | Data-plane verdict: observe / xdp_tx / xsk |
+| 31 | 1 | ip_proto | IP protocol: 1=ICMP, 6=TCP, 17=UDP |
 
 ### Guarantees
 
-- No event for unmatched packets
+- No packet payload or packet snapshot is stored in the ringbuf event
+- No event is required for unmatched packets
 - `matched_rules` may be greater than actual delivered events when ringbuf is full
 - `sip`/`dip` are stored in **host byte order** (not network byte order)
 - `sport`/`dport` are stored in **host byte order**
+- `ifindex`, `rx_queue`, `tcp_flags`, and `payload_len` are excluded from the 32-byte event format
 
 ## 5. BPF Map Layouts
 
 ### `rule_index_map` — ARRAY (1024 entries)
 
 Key: `uint32` slot index (0..1023)
-Value: `rule_meta` (20 bytes)
+Value: `rule_meta`
 
 | Field | Type | Description |
 |-------|------|-------------|
 | rule_id | uint32 | Rule identifier |
-| priority | uint32 | Sort key (lower = higher priority) |
-| enabled | uint32 | 1 = active, 0 = unused slot |
 | required_mask | uint32 | Bitmask of required condition bits |
-| action | uint32 | Action code (0=NONE, 1=RST, 2=REPORT) |
+| action | uint16 | Action code (see §6) |
+| flags | uint8 | Per-rule action flags; written as 0 |
+
+`rule_meta` intentionally does not contain `enabled`, `priority`, or
+`forbidden_mask`.
+
+C layout:
+
+```c
+struct rule_meta {
+    __u32 rule_id;
+    __u32 required_mask;
+    __u16 action;
+    __u8  flags;
+};
+```
 
 ### `global_cfg_map` — ARRAY (1 entry)
 
@@ -152,7 +215,7 @@ Value: `global_cfg`
 
 | Field | Type | Description |
 |-------|------|-------------|
-| all_enabled_rules | mask_t (128 bytes) | Bitmap of all active rule slots |
+| all_active_rules | mask_t (128 bytes) | Bitmap of all active compiled rule slots |
 | vlan_optional_rules | mask_t | Rules without VLAN condition |
 | src_port_optional_rules | mask_t | Rules without src port condition |
 | dst_port_optional_rules | mask_t | Rules without dst port condition |
@@ -188,7 +251,20 @@ the lookup key with `prefixlen=32` and the raw `__be32` value from the packet
 ensures the `addr` bytes in the Go struct match the network-order bytes the BPF
 side will look up, so the kernel's byte-wise prefix comparison works correctly.
 
-### `stats_map` — PERCPU_ARRAY (5 entries)
+### `xsks_map` — XSKMAP
+
+Key: `uint32` RX queue index (`ctx->rx_queue_index`)
+Value: AF_XDP socket bound to the same queue
+
+XSK TX actions use:
+
+```c
+bpf_redirect_map(&xsks_map, ctx->rx_queue_index, XDP_PASS)
+```
+
+If no XSK socket is installed for the queue, the fallback action is `XDP_PASS`.
+
+### `stats_map` — PERCPU_ARRAY
 
 | Index | Name | Description |
 |-------|------|-------------|
@@ -197,16 +273,67 @@ side will look up, so the kernel's byte-wise prefix comparison works correctly.
 | 2 | rule_candidates | Packets with non-empty candidate set |
 | 3 | matched_rules | Packets that matched a rule |
 | 4 | ringbuf_dropped | Events dropped due to full ringbuf |
+| 5 | xdp_tx | Synchronous responses transmitted with `XDP_TX` |
+| 6 | xsk_tx | Packets submitted to XSK for user-space TX |
 
 Values are `per-CPU uint64` — sum across CPUs for total.
 
-## 6. Action Semantics (Current)
+## 6. Action Semantics
 
 | Action | Code | Status | Behavior |
 |--------|------|--------|----------|
-| NONE | 0 | reserved | Internal default; not configurable via API |
-| RST | 1 | **active** | Event recorded; **no actual RST packet sent** (future) |
-| REPORT | 2 | reserved | Enum value exists in BPF; not configurable via API |
+| ACTION_NONE | 0 | active | No response |
+| ACTION_ALERT | 1 | active | Observation only |
+| ACTION_TCP_RESET | 2 | tx | Build TCP RST in BPF and return `XDP_TX` |
+| ACTION_ICMP_ECHO_REPLY | 3 | tx | Submit original packet to XSK for user-space TX |
+| ACTION_ARP_REPLY | 4 | tx | Submit original packet to XSK for user-space TX |
+| ACTION_TCP_SYN_ACK | 5 | tx | Submit original packet to XSK for user-space TX |
 
-Currently only RST is accepted by the control plane. All actions are informational
-only — the XDP program always returns `XDP_PASS` regardless of the matched action.
+Control plane validation rules:
+
+- The control plane compiles only the action code; there is no separate path field.
+- The concrete TX path is fixed in BPF code: `tcp_reset` uses synchronous
+  `XDP_TX`; spoof actions use XSK and user-space TX.
+- Rule YAML uses snake_case action strings; BPF maps use numeric action codes.
+
+## 7. TCP Reset Synchronous TX
+
+`ACTION_TCP_RESET` is the synchronous response action.
+
+Supported packet scope:
+
+- Ethernet + IPv4 + TCP
+- IPv4 IHL = 5
+- TCP data offset >= 5
+- No IPv6 and no IPv4 options
+
+Behavior:
+
+1. Swap Ethernet source/destination MAC addresses.
+2. Swap IPv4 source/destination addresses.
+3. Swap TCP source/destination ports.
+4. Set TCP flags to `RST` or `RST|ACK`.
+5. Set sequence and acknowledgement numbers according to TCP reset rules.
+6. Set IPv4 total length to IPv4 header + TCP header.
+7. Recompute IPv4 and TCP checksums.
+8. Return `XDP_TX`.
+
+Sequence/acknowledgement rule:
+
+- If the original packet has ACK set: `rst.seq = original.ack_seq`, flags = `RST`.
+- Otherwise: `rst.ack_seq = original.seq + payload_len + syn_inc + fin_inc`,
+  flags = `RST|ACK`.
+
+## 8. XSK TX Response
+
+Spoof actions do not require expanding ringbuf events with packet fields. The
+original packet is submitted to AF_XDP:
+
+```text
+BPF match -> prepend xsk_meta -> XSK RX
+XSK worker -> read xsk_meta -> parse full packet -> build response -> XSK TX
+```
+
+User-space reads `rule_id` and `action` from the XSK frame headroom metadata.
+Response construction uses the original packet bytes from XSK and does not
+depend on ringbuf delivery.

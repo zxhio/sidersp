@@ -1,14 +1,14 @@
-# BPF Verifier Scaling Guide
+# BPF Verifier Analysis
 
 The kernel 5.10 LTS BPF verifier enforces a **1,000,000 processed instruction** limit
 per program. The current 1024-rule configuration consumes ~50K–80K processed
-instructions — well within bounds. This document describes how to reason about
-verifier cost when scaling beyond the current limits:
+instructions — well within bounds. This document records the current verifier
+cost model, measured ceilings, and optimization techniques used by the BPF data
+plane.
 
 1. **How to measure verifier cost** (from BPF instruction dumps)
 2. **Measured scaling ceilings per rule count** (256 / 1024 / 4096)
 3. **Optimization techniques** (reducing branch paths, simplifying loop bodies)
-4. **Extension plan beyond the single-program limit** (tail call sharding)
 
 ---
 
@@ -110,14 +110,12 @@ The compiler expands `__builtin_memcpy` into 16 load/store pairs:
 406: (07) r1 += 272         // ⑧ inline array lookup base
 407: (61) r0 = *(u32 *)…    // ⑨ load key value
 408: (35) if r0 >= 0x400 …  // ⑩ bounds check (1024)
-409: (27) r0 *= 24          // ⑪ sizeof(rule_meta)=24
+409: (27) r0 *= 12          // ⑪ sizeof(rule_meta)=12
 410: (0f) r0 += r1
 411: (05) goto pc+1
 412: (b7) r0 = 0            // ⑫ null
 413: (15) if r0 == 0x0 …    // ⑬ null check
-414: (61) r1 = *(r0+8)      // ⑭ load enabled
-415: (15) if r1 == 0x0 …    // ⑮ enabled check
-416: (61) r1 = *(r0+12)     // ⑯ load required_mask
+414: (61) r1 = *(r0+4)      // ⑭ load required_mask
 417: (bf) r2 = r1
 418: (79) r3 = pkt_conds    // ⑰
 419: (5f) r2 &= r3          // ⑱ pkt_conds & mask
@@ -126,7 +124,7 @@ The compiler expands `__builtin_memcpy` into 16 load/store pairs:
 422: (55) if r8 != 0x40 …   // ㉑ back-edge (64)
 ```
 
-**Naive upper-bound model: 28 insns × 64 = 1792 processed insns / group**
+**Naive upper-bound model: 26 insns × 64 = 1664 processed insns / group**
 
 Outer loop (423–435): 13 insns × 16 groups = 208
 
@@ -198,9 +196,10 @@ Linux test environment.
 
 ---
 
-## 3. Optimization Techniques
+## 3. Current Optimization Techniques
 
-Apply these techniques when verifier cost approaches the 1M limit.
+The current BPF program uses these techniques to keep verifier cost below the
+1M processed-instruction limit.
 
 ### Technique 1: Eliminate Outer Condition Checks → Reduce Branch Paths
 
@@ -260,40 +259,5 @@ The current 1024-rule configuration applies all 4 techniques:
 - Safety margin: **>10×**
 
 These figures are verifier-log measurements from the Linux build used for this
-analysis. If compiler, kernel, map layout, struct layout, or `RULE_GROUPS`
-changes, re-measure instead of relying on the static estimates above.
-
----
-
-## 4. Scaling to 4096 Rules
-
-A single program is infeasible. Use **tail call sharding**:
-
-```
-Prog 0: parse + index filtering + pick_best_rule(groups 0–15)
-  → match: emit_event, return
-  → no match: tail_call → Prog 1
-
-Prog 1: pick_best_rule(groups 16–31)
-  → match: emit_event, return
-  → no match: tail_call → Prog 2
-
-Prog 2: groups 32–47 → tail_call → Prog 3
-Prog 3: groups 48–63 → emit or return
-```
-
-Each prog has equivalent verifier cost to the 1024-rule single-program design,
-well below the 1M limit. Four tail-call stages are sufficient for 4096 rules.
-
-Tail calls do not carry the caller's stack state. A sharded design must either:
-
-1. Repeat parse + index filtering in each shard, or
-2. Store intermediate state such as `candidates` and `pkt_conds` in an explicit
-   scratch map before the tail call.
-
-The first option is simpler and preserves module boundaries; the second option
-can reduce repeated work but needs careful per-CPU scratch-state ownership and
-cleanup.
-
-Since rules are pre-sorted by priority, the first prog to find a match contains
-the highest-priority rule — no cross-prog comparison is needed.
+analysis. They are tied to the current compiler, kernel, map layout, struct
+layout, and `RULE_GROUPS` values.
