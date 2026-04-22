@@ -254,6 +254,9 @@ func (r *Runtime) ReadStats() (model.DataplaneStats, error) {
 	}, nil
 }
 
+// resetMaps clears BPF maps before ReplaceRules writes the next full snapshot.
+// During this transient window the BPF program sees empty config and passes
+// traffic, which is acceptable for mirrored-traffic deployments.
 func (r *Runtime) resetMaps() error {
 	var zeroRule siderspRuleMeta
 	for slot := uint32(0); slot < maxRuleSlots; slot++ {
@@ -285,6 +288,15 @@ func (r *Runtime) resetMaps() error {
 }
 
 func (r *Runtime) logSnapshot(snapshot mapSnapshot) {
+	logrus.WithFields(logrus.Fields{
+		"rules":              len(snapshot.ruleIndex),
+		"vlan_entries":       len(snapshot.vlanIndex),
+		"src_port_entries":   len(snapshot.srcPortIndex),
+		"dst_port_entries":   len(snapshot.dstPortIndex),
+		"src_prefix_entries": len(snapshot.srcPrefixIndex),
+		"dst_prefix_entries": len(snapshot.dstPrefixIndex),
+	}).Info("Updated dataplane rule snapshot")
+
 	r.logMask("all_active_rules", snapshot.globalCfg.AllActiveRules)
 	r.logMask("vlan_optional_rules", snapshot.globalCfg.VlanOptionalRules)
 	r.logMask("src_port_optional_rules", snapshot.globalCfg.SrcPortOptionalRules)
@@ -305,7 +317,7 @@ func (r *Runtime) logSnapshot(snapshot mapSnapshot) {
 			"rule_id":       meta.RuleId,
 			"action":        actionName(meta.Action),
 			"required_mask": conditionNames(meta.RequiredMask),
-		}).Info("Updated dataplane rule index")
+		}).Debug("Updated dataplane rule index")
 	}
 
 	r.logU16MaskIndex("vlan_index", snapshot.vlanIndex)
@@ -326,7 +338,7 @@ func (r *Runtime) logU16MaskIndex(name string, index map[uint16]siderspMaskT) {
 		logrus.WithFields(logrus.Fields{
 			"index":   name,
 			"entries": "[]",
-		}).Info("Updated dataplane index")
+		}).Debug("Updated dataplane index")
 		return
 	}
 
@@ -337,7 +349,7 @@ func (r *Runtime) logU16MaskIndex(name string, index map[uint16]siderspMaskT) {
 			"key":   key,
 			"slots": formatMaskSlots(mask),
 			"bits":  formatMaskBits(mask),
-		}).Info("Updated dataplane index")
+		}).Debug("Updated dataplane index")
 	}
 }
 
@@ -363,7 +375,7 @@ func (r *Runtime) logPrefixMaskIndex(name string, index map[siderspIpv4LpmKey]si
 		logrus.WithFields(logrus.Fields{
 			"index":   name,
 			"entries": "[]",
-		}).Info("Updated dataplane index")
+		}).Debug("Updated dataplane index")
 		return
 	}
 
@@ -374,7 +386,7 @@ func (r *Runtime) logPrefixMaskIndex(name string, index map[siderspIpv4LpmKey]si
 			"prefix": formatLPMKey(key),
 			"slots":  formatMaskSlots(mask),
 			"bits":   formatMaskBits(mask),
-		}).Info("Updated dataplane index")
+		}).Debug("Updated dataplane index")
 	}
 }
 
@@ -383,7 +395,7 @@ func (r *Runtime) logMask(name string, mask siderspMaskT) {
 		"mask":  name,
 		"slots": formatMaskSlots(mask),
 		"bits":  formatMaskBits(mask),
-	}).Info("Updated dataplane mask")
+	}).Debug("Updated dataplane mask")
 }
 
 func attachXDP(prog *ebpf.Program, opts Options) (link.Link, error) {

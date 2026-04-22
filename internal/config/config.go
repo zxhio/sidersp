@@ -71,6 +71,9 @@ func (c Config) validate() error {
 	if strings.TrimSpace(c.Dataplane.Interface) == "" {
 		return fmt.Errorf("dataplane.interface is required")
 	}
+	if err := validateAttachMode(c.Dataplane.AttachMode); err != nil {
+		return err
+	}
 	if strings.TrimSpace(c.ControlPlane.RulesPath) == "" {
 		return fmt.Errorf("controlplane.rules_path is required")
 	}
@@ -82,6 +85,15 @@ func (c Config) validate() error {
 	}
 
 	return nil
+}
+
+func validateAttachMode(raw string) error {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "driver", "drv", "native", "generic", "skb", "offload", "hw":
+		return nil
+	default:
+		return fmt.Errorf("dataplane.attach_mode %q is not valid", raw)
+	}
 }
 
 func DefaultStatsHistoryWindows() []StatsHistoryWindowConfig {

@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"bytes"
+	"cmp"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -87,7 +88,7 @@ func normalizeRuleSet(s *rule.RuleSet) error {
 	}
 
 	slices.SortStableFunc(s.Rules, func(a, b rule.Rule) int {
-		return a.Priority - b.Priority
+		return cmp.Compare(a.Priority, b.Priority)
 	})
 
 	return nil

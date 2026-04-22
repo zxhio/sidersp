@@ -1,6 +1,7 @@
 package dataplane
 
 import (
+	"cmp"
 	"encoding/binary"
 	"fmt"
 	"net/netip"
@@ -48,9 +49,9 @@ func buildSnapshot(set rule.RuleSet) (mapSnapshot, error) {
 	// in the BPF data plane.
 	slices.SortFunc(set.Rules, func(a, b rule.Rule) int {
 		if a.Priority != b.Priority {
-			return a.Priority - b.Priority
+			return cmp.Compare(a.Priority, b.Priority)
 		}
-		return a.ID - b.ID
+		return cmp.Compare(a.ID, b.ID)
 	})
 
 	for idx, r := range set.Rules {

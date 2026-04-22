@@ -116,6 +116,30 @@ console:
 	}
 }
 
+func TestLoadRejectsInvalidAttachMode(t *testing.T) {
+	t.Parallel()
+
+	path := writeConfigFile(t, `controlplane:
+  rules_path: configs/rules.example.yaml
+
+dataplane:
+  interface: eth0
+  attach_mode: invalid
+
+console:
+  listen_addr: 127.0.0.1:8080
+`)
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load() error = nil, want attach mode validation error")
+	}
+
+	if !strings.Contains(err.Error(), `dataplane.attach_mode "invalid" is not valid`) {
+		t.Fatalf("Load() error = %q, want attach mode validation error", err)
+	}
+}
+
 func TestLoadStatsHistoryConfig(t *testing.T) {
 	t.Parallel()
 
