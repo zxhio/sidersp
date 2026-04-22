@@ -10,12 +10,14 @@ import (
 	"syscall"
 
 	"github.com/sirupsen/logrus"
+	"golang.org/x/sys/unix"
 
 	"sidersp/internal/config"
 	"sidersp/internal/console"
 	"sidersp/internal/controlplane"
 	"sidersp/internal/dataplane"
 	"sidersp/internal/response"
+	"sidersp/internal/response/xsk"
 )
 
 func main() {
@@ -114,6 +116,14 @@ func buildResponseRuntime(cfg config.Config, registrar response.XSKRegistrar) (*
 		}
 	}
 
+	xskCfg := xsk.DefaultConfig()
+	xskCfg.IfIndex = iface.Index
+	xskCfg.BindFlags = uint16(unix.XDP_COPY)
+
+	newBackend := func(queueID int) (response.XSKBackend, error) {
+		return xsk.NewSocket(xskCfg, queueID)
+	}
+
 	return response.NewRuntime(response.RuntimeConfig{
 		IfIndex:              iface.Index,
 		Queues:               cfg.Response.WorkerQueues(),
@@ -121,6 +131,6 @@ func buildResponseRuntime(cfg config.Config, registrar response.XSKRegistrar) (*
 		HardwareAddr:         hardwareAddr,
 		TCPSeq:               cfg.Response.TCPSeq,
 		Registrar:            registrar,
-		BackendFactory:       response.UnsupportedBackendFactory{},
+		NewXSKBackend:        newBackend,
 	})
 }

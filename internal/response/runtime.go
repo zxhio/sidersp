@@ -3,23 +3,18 @@ package response
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 )
-
-type UnsupportedBackendFactory struct{}
-
-func (UnsupportedBackendFactory) NewXSKBackend(int) (XSKBackend, error) {
-	return nil, fmt.Errorf("AF_XDP response backend is not implemented")
-}
 
 type XSKBackend interface {
 	XSKSocket
 	ResponseTransmitter
+	io.Closer
 }
 
-type XSKBackendFactory interface {
-	NewXSKBackend(queueID int) (XSKBackend, error)
-}
+// NewXSKBackendFunc creates an XSKBackend for the given queue ID.
+type NewXSKBackendFunc func(queueID int) (XSKBackend, error)
 
 type RuntimeConfig struct {
 	IfIndex              int
@@ -28,7 +23,7 @@ type RuntimeConfig struct {
 	HardwareAddr         net.HardwareAddr
 	TCPSeq               uint32
 	Registrar            XSKRegistrar
-	BackendFactory       XSKBackendFactory
+	NewXSKBackend        NewXSKBackendFunc
 }
 
 type Runtime struct {
@@ -40,8 +35,8 @@ func NewRuntime(config RuntimeConfig) (*Runtime, error) {
 	if config.Registrar == nil {
 		return nil, fmt.Errorf("create response runtime: registrar is required")
 	}
-	if config.BackendFactory == nil {
-		return nil, fmt.Errorf("create response runtime: backend factory is required")
+	if config.NewXSKBackend == nil {
+		return nil, fmt.Errorf("create response runtime: backend is required")
 	}
 
 	capacity := config.ResultBufferCapacity
@@ -59,7 +54,7 @@ func NewRuntime(config RuntimeConfig) (*Runtime, error) {
 	}
 	workerSpecs := make([]WorkerSpec, 0, len(queues))
 	for _, queueID := range queues {
-		backend, err := config.BackendFactory.NewXSKBackend(queueID)
+		backend, err := config.NewXSKBackend(queueID)
 		if err != nil {
 			return nil, fmt.Errorf("create xsk backend queue %d: %w", queueID, err)
 		}
@@ -76,7 +71,7 @@ func NewRuntime(config RuntimeConfig) (*Runtime, error) {
 		if err != nil {
 			return nil, err
 		}
-		worker, err := NewXSKWorker(config.IfIndex, queueID, config.Registrar, backend, executor)
+		worker, err := NewXSKWorker(config.IfIndex, queueID, config.Registrar, backend, executor.ExecuteXSKFrame, backend)
 		if err != nil {
 			return nil, err
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"io"
 
 	"github.com/sirupsen/logrus"
 )
@@ -21,13 +22,12 @@ type XSKRegistrar interface {
 	RegisterXSKSocket(queueID int, fd uint32) error
 }
 
-type XSKFrameHandler interface {
-	ExecuteXSKFrame(context.Context, []byte) error
-}
+// XSKFrameHandler processes a single XSK frame.
+type XSKFrameHandler func(ctx context.Context, frame []byte) error
 
 type XSKSocket interface {
 	FD() uint32
-	Run(context.Context, XSKFrameHandler) error
+	Run(context.Context, func(context.Context, []byte) error) error
 }
 
 type XSKWorker struct {
@@ -36,9 +36,10 @@ type XSKWorker struct {
 	registrar XSKRegistrar
 	socket    XSKSocket
 	handler   XSKFrameHandler
+	closer    io.Closer
 }
 
-func NewXSKWorker(ifindex, queueID int, registrar XSKRegistrar, socket XSKSocket, handler XSKFrameHandler) (*XSKWorker, error) {
+func NewXSKWorker(ifindex, queueID int, registrar XSKRegistrar, socket XSKSocket, handler XSKFrameHandler, closer io.Closer) (*XSKWorker, error) {
 	if registrar == nil {
 		return nil, fmt.Errorf("create xsk worker: registrar is required")
 	}
@@ -47,6 +48,9 @@ func NewXSKWorker(ifindex, queueID int, registrar XSKRegistrar, socket XSKSocket
 	}
 	if handler == nil {
 		return nil, fmt.Errorf("create xsk worker: frame handler is required")
+	}
+	if closer == nil {
+		return nil, fmt.Errorf("create xsk worker: closer is required")
 	}
 	if queueID < 0 {
 		return nil, fmt.Errorf("create xsk worker: queue %d out of range", queueID)
@@ -57,6 +61,7 @@ func NewXSKWorker(ifindex, queueID int, registrar XSKRegistrar, socket XSKSocket
 		registrar: registrar,
 		socket:    socket,
 		handler:   handler,
+		closer:    closer,
 	}, nil
 }
 
@@ -64,6 +69,8 @@ func (w *XSKWorker) Run(ctx context.Context) error {
 	if w == nil {
 		return fmt.Errorf("run xsk worker: nil worker")
 	}
+	defer w.closer.Close()
+
 	if err := w.registrar.RegisterXSKSocket(w.queueID, w.socket.FD()); err != nil {
 		return err
 	}
