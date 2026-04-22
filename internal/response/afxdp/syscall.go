@@ -1,16 +1,15 @@
-package xsk
+package afxdp
 
 import (
+	"fmt"
 	"syscall"
 	"unsafe"
-
-	"fmt"
 
 	"golang.org/x/sys/unix"
 )
 
 // registerUmem registers a UMEM region with the AF_XDP socket via setsockopt.
-func registerUmem(sockfd int, area []byte, cfg Config) error {
+func registerUmem(sockfd int, area []byte, cfg SocketConfig) error {
 	reg := unix.XDPUmemReg{
 		Addr:     uint64(uintptr(unsafe.Pointer(unsafe.SliceData(area)))),
 		Len:      uint64(len(area)),

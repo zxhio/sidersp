@@ -13,10 +13,12 @@ response:
   hardware_addr: ""
   tcp_seq: 1
   frame_size: 4096
-  fill_size: 2048
-  comp_size: 2048
-  rx_size: 2048
-  tx_size: 2048
+  frame_count: 4096
+  fill_ring_size: 2048
+  completion_ring_size: 2048
+  rx_ring_size: 2048
+  tx_ring_size: 2048
+  tx_frame_reserve: 256
 
 console:
   listen_addr: 127.0.0.1:8080

@@ -1,4 +1,4 @@
-package xsk
+package afxdp
 
 import (
 	"sync/atomic"
@@ -7,8 +7,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// xskQueue is the shared ring buffer structure mapped from kernel memory.
-type xskQueue[T any] struct {
+// ringQueue is the shared ring buffer structure mapped from kernel memory.
+type ringQueue[T any] struct {
 	mem        []byte
 	cachedProd uint32
 	cachedCons uint32
@@ -20,14 +20,14 @@ type xskQueue[T any] struct {
 	ring       []T
 }
 
-func (q *xskQueue[T]) get(idx uint32) *T {
+func (q *ringQueue[T]) get(idx uint32) *T {
 	return &q.ring[idx&q.mask]
 }
 
 // prodQueue is a producer-side ring (Fill, TX).
-type prodQueue[T any] xskQueue[T]
+type prodQueue[T any] ringQueue[T]
 
-func (q *prodQueue[T]) raw() *xskQueue[T] { return (*xskQueue[T])(q) }
+func (q *prodQueue[T]) raw() *ringQueue[T] { return (*ringQueue[T])(q) }
 
 // GetFreeNum returns the number of free slots, capped at n.
 func (q *prodQueue[T]) GetFreeNum(n uint32) uint32 {
@@ -63,9 +63,9 @@ func (q *prodQueue[T]) NeedWakeup() bool {
 }
 
 // consQueue is a consumer-side ring (RX, Completion).
-type consQueue[T any] xskQueue[T]
+type consQueue[T any] ringQueue[T]
 
-func (q *consQueue[T]) raw() *xskQueue[T] { return (*xskQueue[T])(q) }
+func (q *consQueue[T]) raw() *ringQueue[T] { return (*ringQueue[T])(q) }
 
 // GetAvailNum returns the number of available entries, capped at n.
 func (q *consQueue[T]) GetAvailNum(n uint32) uint32 {
@@ -113,7 +113,7 @@ var (
 
 // initQueueByOffset initializes a ring queue from mmap'd memory using the
 // kernel-provided offset structure.
-func initQueueByOffset[T any](q *xskQueue[T], data []byte, off *unix.XDPRingOffset, size uint32) {
+func initQueueByOffset[T any](q *ringQueue[T], data []byte, off *unix.XDPRingOffset, size uint32) {
 	q.mem = data
 	q.producer = (*uint32)(unsafe.Pointer(&data[off.Producer]))
 	q.consumer = (*uint32)(unsafe.Pointer(&data[off.Consumer]))

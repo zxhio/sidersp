@@ -39,12 +39,14 @@ type ResponseConfig struct {
 	HardwareAddr     string `yaml:"hardware_addr"`
 	TCPSeq           uint32 `yaml:"tcp_seq"`
 
-	// XSK socket settings.
-	FrameSize uint32 `yaml:"frame_size"`
-	FillSize  uint32 `yaml:"fill_size"`
-	CompSize  uint32 `yaml:"comp_size"`
-	RxSize    uint32 `yaml:"rx_size"`
-	TxSize    uint32 `yaml:"tx_size"`
+	// AF_XDP socket settings.
+	FrameSize          uint32 `yaml:"frame_size"`
+	FrameCount         uint32 `yaml:"frame_count"`
+	FillRingSize       uint32 `yaml:"fill_ring_size"`
+	CompletionRingSize uint32 `yaml:"completion_ring_size"`
+	RXRingSize         uint32 `yaml:"rx_ring_size"`
+	TXRingSize         uint32 `yaml:"tx_ring_size"`
+	TXFrameReserve     uint32 `yaml:"tx_frame_reserve"`
 }
 
 type StatsHistoryConfig struct {

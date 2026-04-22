@@ -10,14 +10,13 @@ import (
 	"syscall"
 
 	"github.com/sirupsen/logrus"
-	"golang.org/x/sys/unix"
 
 	"sidersp/internal/config"
 	"sidersp/internal/console"
 	"sidersp/internal/controlplane"
 	"sidersp/internal/dataplane"
 	"sidersp/internal/response"
-	"sidersp/internal/response/xsk"
+	"sidersp/internal/response/afxdp"
 )
 
 func main() {
@@ -116,28 +115,10 @@ func buildResponseRuntime(cfg config.Config, registrar response.XSKRegistrar) (*
 		}
 	}
 
-	xskCfg := xsk.DefaultConfig()
-	xskCfg.IfIndex = iface.Index
-	xskCfg.BindFlags = uint16(unix.XDP_COPY)
-
-	if v := cfg.Response.FrameSize; v != 0 {
-		xskCfg.FrameSize = v
-	}
-	if v := cfg.Response.FillSize; v != 0 {
-		xskCfg.FillSize = v
-	}
-	if v := cfg.Response.CompSize; v != 0 {
-		xskCfg.CompSize = v
-	}
-	if v := cfg.Response.RxSize; v != 0 {
-		xskCfg.RxSize = v
-	}
-	if v := cfg.Response.TxSize; v != 0 {
-		xskCfg.TxSize = v
-	}
+	afxdpCfg := buildAFXDPConfig(cfg.Response, iface.Index)
 
 	newBackend := func(queueID int) (response.XSKBackend, error) {
-		return xsk.NewSocket(xskCfg, queueID)
+		return afxdp.NewSocket(afxdpCfg, queueID)
 	}
 
 	return response.NewRuntime(response.RuntimeConfig{
@@ -149,4 +130,33 @@ func buildResponseRuntime(cfg config.Config, registrar response.XSKRegistrar) (*
 		Registrar:            registrar,
 		NewXSKBackend:        newBackend,
 	})
+}
+
+func buildAFXDPConfig(cfg config.ResponseConfig, ifindex int) afxdp.SocketConfig {
+	afxdpCfg := afxdp.DefaultSocketConfig()
+	afxdpCfg.IfIndex = ifindex
+
+	if v := cfg.FrameSize; v != 0 {
+		afxdpCfg.FrameSize = v
+	}
+	if v := cfg.FrameCount; v != 0 {
+		afxdpCfg.FrameCount = v
+	}
+	if v := cfg.FillRingSize; v != 0 {
+		afxdpCfg.FillRingSize = v
+	}
+	if v := cfg.CompletionRingSize; v != 0 {
+		afxdpCfg.CompletionRingSize = v
+	}
+	if v := cfg.RXRingSize; v != 0 {
+		afxdpCfg.RXRingSize = v
+	}
+	if v := cfg.TXRingSize; v != 0 {
+		afxdpCfg.TXRingSize = v
+	}
+	if v := cfg.TXFrameReserve; v != 0 {
+		afxdpCfg.TXFrameReserve = v
+	}
+
+	return afxdpCfg
 }

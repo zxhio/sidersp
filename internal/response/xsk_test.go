@@ -3,7 +3,6 @@ package response
 import (
 	"context"
 	"errors"
-	"io"
 	"strings"
 	"testing"
 )
@@ -26,30 +25,26 @@ type stubSocket struct {
 	fd      uint32
 	err     error
 	calls   int
-	handler func(context.Context, []byte) error
 	frames  [][]byte
+	onEmpty func()
 }
 
 func (s *stubSocket) FD() uint32 { return s.fd }
 
-func (s *stubSocket) Run(_ context.Context, handler func(context.Context, []byte) error) error {
+func (s *stubSocket) Receive(ctx context.Context) ([]byte, error) {
 	s.calls++
-	s.handler = handler
-	for _, frame := range s.frames {
-		if err := handler(context.Background(), frame); err != nil {
-			return err
-		}
+	if len(s.frames) > 0 {
+		frame := s.frames[0]
+		s.frames = s.frames[1:]
+		return frame, nil
 	}
-	return s.err
-}
-
-type stubCloser struct {
-	closed bool
-}
-
-func (s *stubCloser) Close() error {
-	s.closed = true
-	return nil
+	if s.onEmpty != nil {
+		s.onEmpty()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return nil, s.err
 }
 
 func newStubHandler() (*[]frame, XSKFrameHandler) {
@@ -99,19 +94,21 @@ func TestDecodeXSKMetadataRejectsShortFrame(t *testing.T) {
 	}
 }
 
-func TestXSKWorkerRegistersSocketBeforeRun(t *testing.T) {
+func TestXSKWorkerRegistersSocketBeforeReceive(t *testing.T) {
 	t.Parallel()
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	registrar := &stubRegistrar{}
-	socket := &stubSocket{fd: 42}
-	closer := &stubCloser{}
+	socket := &stubSocket{fd: 42, onEmpty: cancel}
 	handler := func(_ context.Context, _ []byte) error { return nil }
-	worker, err := NewXSKWorker(7, 3, registrar, socket, handler, closer)
+	worker, err := NewXSKWorker(7, 3, registrar, socket, handler)
 	if err != nil {
 		t.Fatalf("NewXSKWorker() error = %v", err)
 	}
 
-	if err := worker.Run(context.Background()); err != nil {
+	if err := worker.Run(ctx); err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
 	if registrar.calls != 1 || registrar.queueID != 3 || registrar.fd != 42 {
@@ -119,9 +116,6 @@ func TestXSKWorkerRegistersSocketBeforeRun(t *testing.T) {
 	}
 	if socket.calls != 1 {
 		t.Fatalf("socket calls = %d, want 1", socket.calls)
-	}
-	if !closer.closed {
-		t.Fatal("closer was not called")
 	}
 }
 
@@ -131,8 +125,7 @@ func TestXSKWorkerReturnsRegisterError(t *testing.T) {
 	wantErr := errors.New("register failed")
 	registrar := &stubRegistrar{err: wantErr}
 	socket := &stubSocket{fd: 42}
-	closer := &stubCloser{}
-	worker, err := NewXSKWorker(7, 3, registrar, socket, func(_ context.Context, _ []byte) error { return nil }, closer)
+	worker, err := NewXSKWorker(7, 3, registrar, socket, func(_ context.Context, _ []byte) error { return nil })
 	if err != nil {
 		t.Fatalf("NewXSKWorker() error = %v", err)
 	}
@@ -144,27 +137,27 @@ func TestXSKWorkerReturnsRegisterError(t *testing.T) {
 	if socket.calls != 0 {
 		t.Fatalf("socket calls = %d, want 0", socket.calls)
 	}
-	if !closer.closed {
-		t.Fatal("closer was not called on error path")
-	}
 }
 
 func TestXSKWorkerDispatchesSocketFrames(t *testing.T) {
 	t.Parallel()
 
 	registrar := &stubRegistrar{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	socket := &stubSocket{
-		fd:     42,
-		frames: [][]byte{{0x01, 0x02}, {0x03, 0x04}},
+		fd:      42,
+		frames:  [][]byte{{0x01, 0x02}, {0x03, 0x04}},
+		onEmpty: cancel,
 	}
 
 	frames, handler := newStubHandler()
-	worker, err := NewXSKWorker(7, 3, registrar, socket, handler, &stubCloser{})
+	worker, err := NewXSKWorker(7, 3, registrar, socket, handler)
 	if err != nil {
 		t.Fatalf("NewXSKWorker() error = %v", err)
 	}
 
-	if err := worker.Run(context.Background()); err != nil {
+	if err := worker.Run(ctx); err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
 	if len(*frames) != 2 {
@@ -175,23 +168,28 @@ func TestXSKWorkerDispatchesSocketFrames(t *testing.T) {
 	}
 }
 
-func TestXSKWorkerReturnsFrameHandlerError(t *testing.T) {
+func TestXSKWorkerLogsAndContinuesAfterFrameHandlerError(t *testing.T) {
 	t.Parallel()
 
 	wantErr := errors.New("handle failed")
 	registrar := &stubRegistrar{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	socket := &stubSocket{
-		fd:     42,
-		frames: [][]byte{{0x01, 0x02}},
+		fd:      42,
+		frames:  [][]byte{{0x01, 0x02}, {0x03, 0x04}},
+		onEmpty: cancel,
 	}
-	worker, err := NewXSKWorker(7, 3, registrar, socket, newStubHandlerWithError(wantErr), &stubCloser{})
+	worker, err := NewXSKWorker(7, 3, registrar, socket, newStubHandlerWithError(wantErr))
 	if err != nil {
 		t.Fatalf("NewXSKWorker() error = %v", err)
 	}
 
-	err = worker.Run(context.Background())
-	if !errors.Is(err, wantErr) {
-		t.Fatalf("Run() error = %v, want %v", err, wantErr)
+	if err := worker.Run(ctx); err != nil {
+		t.Fatalf("Run() error = %v, want nil", err)
+	}
+	if socket.calls != 3 {
+		t.Fatalf("socket calls = %d, want 3", socket.calls)
 	}
 }
 
@@ -199,14 +197,12 @@ func TestNewXSKWorkerValidation(t *testing.T) {
 	t.Parallel()
 
 	noopHandler := XSKFrameHandler(func(_ context.Context, _ []byte) error { return nil })
-	noopCloser := io.NopCloser(nil)
 
 	tests := []struct {
 		name      string
 		registrar XSKRegistrar
 		socket    XSKSocket
 		handler   XSKFrameHandler
-		closer    io.Closer
 		queueID   int
 		want      string
 	}{
@@ -214,7 +210,6 @@ func TestNewXSKWorkerValidation(t *testing.T) {
 			name:    "missing registrar",
 			socket:  &stubSocket{},
 			handler: noopHandler,
-			closer:  noopCloser,
 			queueID: 0,
 			want:    "registrar is required",
 		},
@@ -222,7 +217,6 @@ func TestNewXSKWorkerValidation(t *testing.T) {
 			name:      "missing socket",
 			registrar: &stubRegistrar{},
 			handler:   noopHandler,
-			closer:    noopCloser,
 			queueID:   0,
 			want:      "socket is required",
 		},
@@ -230,24 +224,14 @@ func TestNewXSKWorkerValidation(t *testing.T) {
 			name:      "missing handler",
 			registrar: &stubRegistrar{},
 			socket:    &stubSocket{},
-			closer:    noopCloser,
 			queueID:   0,
 			want:      "frame handler is required",
-		},
-		{
-			name:      "missing closer",
-			registrar: &stubRegistrar{},
-			socket:    &stubSocket{},
-			handler:   noopHandler,
-			queueID:   0,
-			want:      "closer is required",
 		},
 		{
 			name:      "negative queue",
 			registrar: &stubRegistrar{},
 			socket:    &stubSocket{},
 			handler:   noopHandler,
-			closer:    noopCloser,
 			queueID:   -1,
 			want:      "queue -1 out of range",
 		},
@@ -258,7 +242,7 @@ func TestNewXSKWorkerValidation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := NewXSKWorker(7, tc.queueID, tc.registrar, tc.socket, tc.handler, tc.closer)
+			_, err := NewXSKWorker(7, tc.queueID, tc.registrar, tc.socket, tc.handler)
 			if err == nil {
 				t.Fatal("NewXSKWorker() error = nil, want validation error")
 			}

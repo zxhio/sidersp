@@ -11,9 +11,9 @@ Rules reference responses through `response.action`. The control plane validates
 | `none` | `0` | dataplane pass | active | Match silently and continue with `XDP_PASS` |
 | `alert` | `1` | dataplane observe | active | Emit an observation event and continue with `XDP_PASS` |
 | `tcp_reset` | `2` | BPF synchronous TX | active | Build TCP RST in BPF and return `XDP_TX` |
-| `icmp_echo_reply` | `3` | XSK TX | builder implemented, worker planned | Redirect the original packet to XSK; user space builds ICMP echo reply |
-| `arp_reply` | `4` | XSK TX | builder implemented, worker planned | Redirect the original packet to XSK; user space builds ARP reply |
-| `tcp_syn_ack` | `5` | XSK TX | builder implemented, worker planned | Redirect the original packet to XSK; user space builds TCP SYN-ACK |
+| `icmp_echo_reply` | `3` | XSK TX | Linux AF_XDP socket implemented, integration pending | Redirect the original packet to XSK; user space builds ICMP echo reply |
+| `arp_reply` | `4` | XSK TX | Linux AF_XDP socket implemented, integration pending | Redirect the original packet to XSK; user space builds ARP reply |
+| `tcp_syn_ack` | `5` | XSK TX | Linux AF_XDP socket implemented, integration pending | Redirect the original packet to XSK; user space builds TCP SYN-ACK |
 
 Action names are stable snake-case API values. Numeric codes are the dataplane ABI and must stay synchronized with BPF definitions.
 
@@ -92,12 +92,11 @@ falls back to `XDP_PASS` and the XSK failure counter is incremented.
 
 Full user-space response results are owned by the XSK worker path. The current
 implementation provides a response result model, bounded in-memory result
-buffer, and response execution core that records build/TX outcomes. AF_XDP
-backend IO still needs to be implemented, but the worker boundary already passes
-metadata-prefixed XSK frames to the execution core. The response package also
-owns worker-group lifecycle and runtime assembly for queue-scoped XSK backend
-factories. Dataplane ringbuf events remain observation events with numeric
-verdict codes for `observe`, `tx`, and `xsk`.
+buffer, response execution core, worker lifecycle, runtime assembly, and Linux
+AF_XDP socket IO. The XSK worker receives metadata-prefixed frames from the
+AF_XDP RX ring, passes them to the execution core, and transmits built response
+frames through the AF_XDP TX ring. Dataplane ringbuf events remain observation
+events with numeric verdict codes for `observe`, `tx`, and `xsk`.
 
 Planned response result shape:
 
@@ -148,13 +147,21 @@ response:
   result_buffer_size: 1024
   hardware_addr: ""
   tcp_seq: 1
+  frame_size: 4096
+  frame_count: 4096
+  fill_ring_size: 2048
+  completion_ring_size: 2048
+  rx_ring_size: 2048
+  tx_ring_size: 2048
+  tx_frame_reserve: 256
 ```
 
-`hardware_addr` is reserved for ARP reply source hardware address selection.
-`tcp_seq` is reserved for the TCP SYN-ACK response sequence seed. AF_XDP socket
-startup is still planned. If response is enabled before a concrete AF_XDP
-backend is configured, startup fails with an explicit unsupported-backend error
-instead of silently ignoring response actions.
+`hardware_addr` selects the ARP reply source hardware address when configured.
+`tcp_seq` sets the TCP SYN-ACK response sequence seed. AF_XDP socket startup is
+Linux-only and requires an attached XDP program plus configured queues that match
+the redirected RX queues. `frame_count` covers both RX fill frames and
+TX-reserved frames; `fill_ring_size + tx_frame_reserve` must not exceed
+`frame_count`.
 
 ## Module Boundaries
 

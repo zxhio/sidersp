@@ -1,4 +1,4 @@
-package xsk
+package afxdp
 
 import (
 	"context"
@@ -6,39 +6,38 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
 )
 
 // Socket is an AF_XDP socket bound to a single queue.
 type Socket struct {
 	sockfd int
-	umem   *xskUmem
+	umem   *umem
 	rx     rxQueue
 	tx     txQueue
-	cfg    Config
+	cfg    SocketConfig
 
 	txStanding uint32
 }
 
 // NewSocket creates and binds an AF_XDP socket for the given queue ID.
-func NewSocket(cfg Config, queueID int) (*Socket, error) {
+func NewSocket(cfg SocketConfig, queueID int) (*Socket, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
 	if queueID < 0 {
-		return nil, fmt.Errorf("create xsk socket: queue %d out of range", queueID)
+		return nil, fmt.Errorf("create af_xdp socket: queue %d out of range", queueID)
 	}
 
 	sockfd, err := unix.Socket(unix.AF_XDP, unix.SOCK_RAW, 0)
 	if err != nil {
-		return nil, fmt.Errorf("create xsk socket: %w", err)
+		return nil, fmt.Errorf("create af_xdp socket: %w", err)
 	}
 
-	umem, err := newXSKUmem(sockfd, cfg)
+	umem, err := newUMEM(sockfd, cfg)
 	if err != nil {
 		unix.Close(sockfd)
-		return nil, fmt.Errorf("create xsk umem: %w", err)
+		return nil, fmt.Errorf("create af_xdp umem: %w", err)
 	}
 
 	off, err := getXDPMmapOffsets(sockfd)
@@ -50,14 +49,14 @@ func NewSocket(cfg Config, queueID int) (*Socket, error) {
 
 	// Create RX ring
 	var rx rxQueue
-	if cfg.RxSize != 0 {
-		if err := unix.SetsockoptInt(sockfd, unix.SOL_XDP, unix.XDP_RX_RING, int(cfg.RxSize)); err != nil {
+	if cfg.RXRingSize != 0 {
+		if err := unix.SetsockoptInt(sockfd, unix.SOL_XDP, unix.XDP_RX_RING, int(cfg.RXRingSize)); err != nil {
 			umem.close()
 			unix.Close(sockfd)
 			return nil, fmt.Errorf("setsockopt XDP_RX_RING: %w", err)
 		}
 		rxMem, err := unix.Mmap(sockfd, unix.XDP_PGOFF_RX_RING,
-			int(off.Rx.Desc+uint64(cfg.RxSize)*sizeofXDPDesc),
+			int(off.Rx.Desc+uint64(cfg.RXRingSize)*sizeofXDPDesc),
 			unix.PROT_READ|unix.PROT_WRITE,
 			unix.MAP_SHARED|unix.MAP_POPULATE)
 		if err != nil {
@@ -65,24 +64,24 @@ func NewSocket(cfg Config, queueID int) (*Socket, error) {
 			unix.Close(sockfd)
 			return nil, fmt.Errorf("mmap rx ring: %w", err)
 		}
-		initQueueByOffset(rx.raw(), rxMem, &off.Rx, cfg.RxSize)
-		rx.mask = cfg.RxSize - 1
-		rx.size = cfg.RxSize
+		initQueueByOffset(rx.raw(), rxMem, &off.Rx, cfg.RXRingSize)
+		rx.mask = cfg.RXRingSize - 1
+		rx.size = cfg.RXRingSize
 		rx.cachedProd = atomic.LoadUint32(rx.producer)
 		rx.cachedCons = atomic.LoadUint32(rx.consumer)
 	}
 
 	// Create TX ring
 	var tx txQueue
-	if cfg.TxSize != 0 {
-		if err := unix.SetsockoptInt(sockfd, unix.SOL_XDP, unix.XDP_TX_RING, int(cfg.TxSize)); err != nil {
+	if cfg.TXRingSize != 0 {
+		if err := unix.SetsockoptInt(sockfd, unix.SOL_XDP, unix.XDP_TX_RING, int(cfg.TXRingSize)); err != nil {
 			unix.Munmap(rx.raw().mem)
 			umem.close()
 			unix.Close(sockfd)
 			return nil, fmt.Errorf("setsockopt XDP_TX_RING: %w", err)
 		}
 		txMem, err := unix.Mmap(sockfd, unix.XDP_PGOFF_TX_RING,
-			int(off.Tx.Desc+uint64(cfg.TxSize)*sizeofXDPDesc),
+			int(off.Tx.Desc+uint64(cfg.TXRingSize)*sizeofXDPDesc),
 			unix.PROT_READ|unix.PROT_WRITE,
 			unix.MAP_SHARED|unix.MAP_POPULATE)
 		if err != nil {
@@ -91,11 +90,11 @@ func NewSocket(cfg Config, queueID int) (*Socket, error) {
 			unix.Close(sockfd)
 			return nil, fmt.Errorf("mmap tx ring: %w", err)
 		}
-		initQueueByOffset(tx.raw(), txMem, &off.Tx, cfg.TxSize)
-		tx.mask = cfg.TxSize - 1
-		tx.size = cfg.TxSize
+		initQueueByOffset(tx.raw(), txMem, &off.Tx, cfg.TXRingSize)
+		tx.mask = cfg.TXRingSize - 1
+		tx.size = cfg.TXRingSize
 		tx.cachedProd = atomic.LoadUint32(tx.producer)
-		tx.cachedCons = atomic.LoadUint32(tx.consumer) + cfg.TxSize
+		tx.cachedCons = atomic.LoadUint32(tx.consumer) + cfg.TXRingSize
 	}
 
 	// Bind socket to interface and queue
@@ -109,7 +108,7 @@ func NewSocket(cfg Config, queueID int) (*Socket, error) {
 		unix.Munmap(tx.raw().mem)
 		umem.close()
 		unix.Close(sockfd)
-		return nil, fmt.Errorf("bind xsk socket queue %d: %w", queueID, err)
+		return nil, fmt.Errorf("bind af_xdp socket queue %d: %w", queueID, err)
 	}
 
 	return &Socket{
@@ -126,31 +125,39 @@ func (s *Socket) FD() uint32 {
 	return uint32(s.sockfd)
 }
 
-// Run is the main receive loop. It polls the RX ring, calls handleFrame for
-// each received frame, refills the fill ring, and drains the TX completion ring.
-func (s *Socket) Run(ctx context.Context, handleFrame func(context.Context, []byte) error) error {
+// Receive polls the RX ring and returns one metadata-prefixed XSK frame. The
+// returned slice is copied out of UMEM so callers do not hold AF_XDP frame
+// ownership across response execution.
+func (s *Socket) Receive(ctx context.Context) ([]byte, error) {
 	pollFds := []unix.PollFd{
 		{Fd: int32(s.sockfd), Events: unix.POLLIN},
 	}
 
 	for {
 		if err := ctx.Err(); err != nil {
-			return nil
+			return nil, nil
 		}
 
 		_, err := unix.Poll(pollFds, 100)
 		if err != nil && err != unix.EINTR {
-			return fmt.Errorf("xsk poll: %w", err)
+			return nil, fmt.Errorf("af_xdp poll: %w", err)
 		}
 
-		s.processRx(handleFrame)
 		s.drainCompletions()
+		frame := s.receiveFrame()
+		if len(frame) != 0 {
+			return frame, nil
+		}
 	}
 }
 
 // Transmit sends a response frame by allocating a UMEM slot, copying data,
 // submitting a TX descriptor, and kicking the TX ring if needed.
 func (s *Socket) Transmit(_ context.Context, frame []byte) error {
+	if len(frame) > int(s.cfg.FrameSize) {
+		return fmt.Errorf("transmit: frame length %d exceeds af_xdp frame size %d", len(frame), s.cfg.FrameSize)
+	}
+
 	addr := s.umem.allocFrame()
 	if addr == invalidUMEMFrame {
 		s.drainCompletions()
@@ -195,30 +202,20 @@ func (s *Socket) Close() error {
 	return unix.Close(s.sockfd)
 }
 
-func (s *Socket) processRx(handleFrame func(context.Context, []byte) error) {
+func (s *Socket) receiveFrame() []byte {
 	var rxIdx uint32
-	rcvd := s.rx.Peek(64, &rxIdx)
+	rcvd := s.rx.Peek(1, &rxIdx)
 	if rcvd == 0 {
-		return
+		return nil
 	}
 
-	for i := uint32(0); i < rcvd; i++ {
-		desc := s.rx.GetDesc(rxIdx + i)
-		frame := s.umem.frameData(desc.Addr, desc.Len)
-
-		if err := handleFrame(context.Background(), frame); err != nil {
-			logrus.WithFields(logrus.Fields{
-				"queue": s.cfg.IfIndex,
-				"addr":  desc.Addr,
-				"len":   desc.Len,
-			}).WithError(err).Debug("XSK frame handler error")
-		}
-
-		s.umem.freeFrame(desc.Addr)
-	}
+	desc := s.rx.GetDesc(rxIdx)
+	frame := append([]byte(nil), s.umem.frameData(desc.Addr, desc.Len)...)
+	s.umem.freeFrame(desc.Addr)
 
 	s.rx.Release(rcvd)
 	s.refillFill()
+	return frame
 }
 
 func (s *Socket) refillFill() {

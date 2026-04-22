@@ -28,16 +28,17 @@ func (s *stubBackendFactory) newFunc() NewXSKBackendFunc {
 }
 
 type stubBackend struct {
-	fd       uint32
-	runCalls int
-	txFrames [][]byte
+	fd           uint32
+	receiveCalls int
+	closeCalls   int
+	txFrames     [][]byte
 }
 
 func (s *stubBackend) FD() uint32 { return s.fd }
 
-func (s *stubBackend) Run(_ context.Context, _ func(context.Context, []byte) error) error {
-	s.runCalls++
-	return nil
+func (s *stubBackend) Receive(context.Context) ([]byte, error) {
+	s.receiveCalls++
+	return nil, context.Canceled
 }
 
 func (s *stubBackend) Transmit(_ context.Context, frame []byte) error {
@@ -45,7 +46,10 @@ func (s *stubBackend) Transmit(_ context.Context, frame []byte) error {
 	return nil
 }
 
-func (s *stubBackend) Close() error { return nil }
+func (s *stubBackend) Close() error {
+	s.closeCalls++
+	return nil
+}
 
 func TestNewRuntimeBuildsWorkersForQueues(t *testing.T) {
 	t.Parallel()
@@ -67,11 +71,14 @@ func TestNewRuntimeBuildsWorkersForQueues(t *testing.T) {
 	if err := runtime.Run(context.Background()); err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	if len(factory.backends) != 2 || factory.backends[0].runCalls != 1 || factory.backends[1].runCalls != 1 {
-		t.Fatalf("backend run calls = %+v, want both queues run once", factory.backends)
+	if len(factory.backends) != 2 || factory.backends[0].receiveCalls != 1 || factory.backends[1].receiveCalls != 1 {
+		t.Fatalf("backend receive calls = %+v, want both queues receive once", factory.backends)
 	}
 	if registrar.calls != 2 {
 		t.Fatalf("registrar calls = %d, want 2", registrar.calls)
+	}
+	if factory.backends[0].closeCalls != 1 || factory.backends[1].closeCalls != 1 {
+		t.Fatalf("backend close calls = %d,%d; want 1,1", factory.backends[0].closeCalls, factory.backends[1].closeCalls)
 	}
 }
 

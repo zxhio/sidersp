@@ -2,32 +2,22 @@ package response
 
 import (
 	"context"
-	"encoding/binary"
+	"errors"
 	"fmt"
-	"io"
 
 	"github.com/sirupsen/logrus"
 )
-
-const XSKMetadataSize = 8
-
-// XSKMetadata mirrors BPF struct xsk_meta.
-type XSKMetadata struct {
-	RuleID   uint32
-	Action   uint16
-	Reserved uint16
-}
 
 type XSKRegistrar interface {
 	RegisterXSKSocket(queueID int, fd uint32) error
 }
 
-// XSKFrameHandler processes a single XSK frame.
+// XSKFrameHandler processes a single metadata-prefixed XSK frame.
 type XSKFrameHandler func(ctx context.Context, frame []byte) error
 
 type XSKSocket interface {
 	FD() uint32
-	Run(context.Context, func(context.Context, []byte) error) error
+	Receive(context.Context) ([]byte, error)
 }
 
 type XSKWorker struct {
@@ -36,10 +26,9 @@ type XSKWorker struct {
 	registrar XSKRegistrar
 	socket    XSKSocket
 	handler   XSKFrameHandler
-	closer    io.Closer
 }
 
-func NewXSKWorker(ifindex, queueID int, registrar XSKRegistrar, socket XSKSocket, handler XSKFrameHandler, closer io.Closer) (*XSKWorker, error) {
+func NewXSKWorker(ifindex, queueID int, registrar XSKRegistrar, socket XSKSocket, handler XSKFrameHandler) (*XSKWorker, error) {
 	if registrar == nil {
 		return nil, fmt.Errorf("create xsk worker: registrar is required")
 	}
@@ -48,9 +37,6 @@ func NewXSKWorker(ifindex, queueID int, registrar XSKRegistrar, socket XSKSocket
 	}
 	if handler == nil {
 		return nil, fmt.Errorf("create xsk worker: frame handler is required")
-	}
-	if closer == nil {
-		return nil, fmt.Errorf("create xsk worker: closer is required")
 	}
 	if queueID < 0 {
 		return nil, fmt.Errorf("create xsk worker: queue %d out of range", queueID)
@@ -61,7 +47,6 @@ func NewXSKWorker(ifindex, queueID int, registrar XSKRegistrar, socket XSKSocket
 		registrar: registrar,
 		socket:    socket,
 		handler:   handler,
-		closer:    closer,
 	}, nil
 }
 
@@ -69,7 +54,6 @@ func (w *XSKWorker) Run(ctx context.Context) error {
 	if w == nil {
 		return fmt.Errorf("run xsk worker: nil worker")
 	}
-	defer w.closer.Close()
 
 	if err := w.registrar.RegisterXSKSocket(w.queueID, w.socket.FD()); err != nil {
 		return err
@@ -80,18 +64,26 @@ func (w *XSKWorker) Run(ctx context.Context) error {
 		"queue":   w.queueID,
 	}).Info("Started xsk worker")
 
-	return w.socket.Run(ctx, w.handler)
-}
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil
+		}
 
-func DecodeXSKMetadata(frame []byte) (XSKMetadata, []byte, error) {
-	if len(frame) < XSKMetadataSize {
-		return XSKMetadata{}, nil, fmt.Errorf("xsk frame too short: %d", len(frame))
+		frame, err := w.socket.Receive(ctx)
+		if err != nil {
+			if ctx.Err() != nil || errors.Is(err, context.Canceled) {
+				return nil
+			}
+			return err
+		}
+		if len(frame) == 0 {
+			continue
+		}
+		if err := w.handler(ctx, frame); err != nil {
+			logrus.WithFields(logrus.Fields{
+				"ifindex": w.ifindex,
+				"queue":   w.queueID,
+			}).WithError(err).Debug("XSK frame handler error")
+		}
 	}
-
-	meta := XSKMetadata{
-		RuleID:   binary.LittleEndian.Uint32(frame[0:4]),
-		Action:   binary.LittleEndian.Uint16(frame[4:6]),
-		Reserved: binary.LittleEndian.Uint16(frame[6:8]),
-	}
-	return meta, frame[XSKMetadataSize:], nil
 }
