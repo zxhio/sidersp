@@ -1,60 +1,117 @@
-# 旁路分析与主动响应服务
+# sidersp
 
-一个面向镜像流量场景的前置裁决与响应编排服务。
+Lightweight side-path traffic pre-decision and active response service.
 
-## 定位
+[中文](README.zh-CN.md) | English
 
-作为旁路流量入口侧的前置裁决层，负责在后端分析之前完成识别、分类、分流、事件提取和主动响应触发。  
-低延迟 TCP reset 由 XDP 同步 TX 直接响应；其他 spoof 响应经 XSK 交给用户态执行。
+## Features
 
-## 特性
+- XDP-based ingress handling for mirrored traffic
+- Lightweight rule loading, validation, and synchronization
+- Synchronous TCP reset response via XDP_TX
+- XSK redirect path for future user-space spoof responses
+- Ringbuf observation event output
+- Basic Web console for status, rules, and statistics
 
-- 入口侧前置裁决
-- 轻量规则驱动
-- 流量分类与分流
-- 统一事件输出
-- TCP reset 同步 TX response
-- ICMP/ARP/TCP handshake XSK redirect path for user-space response execution
-- 基础状态可视化
-
-## 架构
+## Architecture
 
 ```mermaid
-flowchart BT
-    A[镜像流量]
-    B[独立流量镜像网卡]
+flowchart LR
+    subgraph dp["dataplane"]
+        subgraph fast["fast-path"]
+            match["parse / match"]
+            tx["XDP_TX"]
+        end
 
-    subgraph Service[旁路分析与主动响应服务]
-        C[数据面模块]
-        D[观测事件]
-        K[XSK TX 响应通道]
-        E[深度分析接入模块]
-        G[响应执行模块]
-        I[控制面模块]
-        J[管理与展示模块]
+        subgraph xsk["xsk-worker planned"]
+            redirect["XDP_REDIRECT"]
+        end
     end
 
-    F[后端分析系统]
-    H[主动响应]
-
-    A --> B --> C
-    C --> D
-    C --> K --> G
-    D --> E --> F
-    C -.TCP reset XDP_TX.-> H
-    G --> H
-
-    I -.规则 / 配置 / 策略下发.-> C
-    I -.规则快照 / 响应配置.-> G
-    I -.分析接入配置.-> E
-    J <--> I
+    mirror["mirrored traffic"] --> match
+    match --> |reset pkt| tx
+    match --> |pkt content|redirect
+    match -->|events / stats| cp["controlplane"]
+    cp -->|rules| match
+    console["console / web"] --> cp
 ```
 
-## 环境
+- `dataplane`: XDP packet parsing, rule matching, action execution, event output, and XSK redirect.
+- `controlplane`: rule/config loading, runtime state, statistics aggregation, and coordination.
+- `console` / `web`: REST API and lightweight management UI.
+- `config`, `rule`, and `model`: shared local configuration, rule schema, and data models used by the active modules.
+- `specs/`: system contracts for modules, rules, events, and response semantics.
 
-- OS
-  - Ubuntu 22.04+
-  - Debian 11+
-  - RHEL 9+
-- NIC
-  - 独立流量镜像网卡
+## Requirements
+
+- Linux with XDP/eBPF support
+- Go `1.25.5+`
+- `clang` / LLVM for rebuilding BPF objects
+- Root or equivalent capabilities for loading BPF and attaching XDP
+- A dedicated mirrored-traffic network interface
+
+## Quick Start
+
+Edit the interface in `configs/config.example.yaml` first:
+
+```yaml
+dataplane:
+  interface: eth0
+  attach_mode: generic
+```
+
+Build and run:
+
+```bash
+make build-all
+sudo ./build/sidersp -config configs/config.example.yaml
+```
+
+Or use the Makefile shortcut:
+
+```bash
+sudo make run CONFIG=./configs/config.example.yaml
+```
+
+Run unit tests:
+
+```bash
+make test
+```
+
+Run BPF tests on a suitable Linux environment:
+
+```bash
+make test-bpf
+```
+
+## Layout
+
+```text
+cmd/        service entrypoint
+internal/   Go implementation modules
+bpf/        XDP/BPF C sources
+configs/    example and local configs
+specs/      system contracts
+docs/       technical notes
+web/        management UI
+skills/     local agent guidance
+```
+
+## Scope
+
+Current focus:
+
+- Mirrored-traffic ingress handling
+- Rule-driven classification and action selection
+- TCP reset response
+- Event/statistics visibility
+- Basic management UI
+
+Not included yet:
+
+- Full AF_XDP user-space TX worker
+- Deep analysis backend integration
+- Persistent database storage
+- Distributed deployment or clustering
+- Production-grade policy orchestration
