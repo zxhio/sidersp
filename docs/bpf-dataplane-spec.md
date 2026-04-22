@@ -74,7 +74,8 @@ SYN-ACK spoof require full original-packet context and are handled through XSK.
 7. Execute the action behavior fixed in BPF code
 8. For `ACTION_TCP_RESET`: rewrite packet as TCP RST and return `XDP_TX`
 9. For spoof actions: prepend `xsk_meta` and submit the original packet to `xsks_map[ctx->rx_queue_index]`
-10. Emit optional ringbuf observation event
+10. If XSK metadata prepend or redirect fails, increment `xsk_failed` and return `XDP_PASS`
+11. Emit optional ringbuf observation event
 
 ### 3.2 Condition Bits
 
@@ -278,6 +279,8 @@ If no XSK socket is installed for the queue, the fallback action is `XDP_PASS`.
 | 4 | ringbuf_dropped | Events dropped due to full ringbuf |
 | 5 | xdp_tx | Synchronous responses transmitted with `XDP_TX` |
 | 6 | xsk_tx | Packets submitted to XSK for user-space TX |
+| 7 | tx_failed | Failed synchronous `XDP_TX` response attempts |
+| 8 | xsk_failed | Failed XSK metadata prepend or redirect attempts |
 
 Values are `per-CPU uint64` — sum across CPUs for total.
 
@@ -339,6 +342,13 @@ BPF match -> prepend xsk_meta -> XSK RX
 XSK worker -> read xsk_meta -> parse full packet -> build response -> XSK TX
 ```
 
-User-space reads `rule_id` and `action` from the XSK frame headroom metadata.
-Response construction uses the original packet bytes from XSK and does not
-depend on ringbuf delivery.
+User-space reads `rule_id` and `action` from the XSK frame headroom metadata,
+strips the 8-byte metadata prefix, and parses the remaining original Ethernet
+frame. Response construction uses the original packet bytes from XSK and does
+not depend on ringbuf delivery.
+
+`xsk_tx` and `verdict=xsk` only mean BPF returned `XDP_REDIRECT`. The response
+worker reports whether a user-space response was actually sent.
+
+For `ACTION_TCP_SYN_ACK`, BPF redirects only initial SYN packets. Packets with
+SYN plus ACK, RST, or FIN are passed without XSK redirect.

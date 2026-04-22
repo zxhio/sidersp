@@ -23,6 +23,7 @@ type Stats struct {
 	XDPTX          uint64               `json:"xdp_tx"`
 	XskTX          uint64               `json:"xsk_tx"`
 	TXFailed       uint64               `json:"tx_failed"`
+	XskFailed      uint64               `json:"xsk_failed"`
 	Histories      []StatsHistorySeries `json:"histories"`
 }
 
@@ -45,6 +46,7 @@ type StatsPoint struct {
 	XDPTX          uint64    `json:"xdp_tx"`
 	XskTX          uint64    `json:"xsk_tx"`
 	TXFailed       uint64    `json:"tx_failed"`
+	XskFailed      uint64    `json:"xsk_failed"`
 }
 
 func buildStatsRetention(plan []config.ParsedStatsHistoryWindow) (time.Duration, time.Duration, int) {
@@ -78,6 +80,7 @@ func newStats(rules rule.RuleSet, dpStats model.DataplaneStats) Stats {
 		XDPTX:          dpStats.XDPTX,
 		XskTX:          dpStats.XskTX,
 		TXFailed:       dpStats.TXFailed,
+		XskFailed:      dpStats.XskFailed,
 	}
 }
 
@@ -94,6 +97,7 @@ func newStatsPoint(ts time.Time, item Stats) StatsPoint {
 		XDPTX:          item.XDPTX,
 		XskTX:          item.XskTX,
 		TXFailed:       item.TXFailed,
+		XskFailed:      item.XskFailed,
 	}
 }
 

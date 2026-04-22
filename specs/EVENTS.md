@@ -74,7 +74,7 @@ The ringbuf ABI stores `action` and `verdict` as numeric codes. Presentation lay
 |------|------|-----------|
 | `0` | `observe` | Observation event; packet continues with `XDP_PASS` |
 | `1` | `tx` | BPF synchronous TX succeeded |
-| `2` | `xsk` | Packet was redirected to XSK |
+| `2` | `xsk` | Packet was submitted to XSK; user-space response execution is tracked separately |
 
 These names describe platform-level outcomes, not raw Linux XDP return constants.
 

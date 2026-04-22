@@ -223,6 +223,10 @@ func (r *Runtime) readKernelStats() (kernelStats, error) {
 	if err != nil {
 		return kernelStats{}, fmt.Errorf("lookup tx_failed: %w", err)
 	}
+	xskFailed, err := readPerCPUCounter(r.objs.StatsMap, statXskFailed)
+	if err != nil {
+		return kernelStats{}, fmt.Errorf("lookup xsk_failed: %w", err)
+	}
 
 	return kernelStats{
 		RXPackets:      rxPackets,
@@ -233,6 +237,7 @@ func (r *Runtime) readKernelStats() (kernelStats, error) {
 		XDPTX:          xdpTX,
 		XskTX:          xskTX,
 		TXFailed:       txFailed,
+		XskFailed:      xskFailed,
 	}, nil
 }
 
@@ -251,6 +256,7 @@ func (r *Runtime) ReadStats() (model.DataplaneStats, error) {
 		XDPTX:          stats.XDPTX,
 		XskTX:          stats.XskTX,
 		TXFailed:       stats.TXFailed,
+		XskFailed:      stats.XskFailed,
 	}, nil
 }
 

@@ -247,6 +247,123 @@ func boolPtr(v bool) *bool {
 	return &v
 }
 
+func TestLoadRulesRejectsIncompatibleXSKActions(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		ruleYAML string
+		want     string
+	}{
+		{
+			name: "icmp echo reply requires icmp echo request",
+			ruleYAML: `match:
+      protocol: icmp
+      icmp:
+        type: echo_reply
+    response:
+      action: icmp_echo_reply`,
+			want: "requires match.icmp.type echo_request",
+		},
+		{
+			name: "arp reply requires arp request",
+			ruleYAML: `match:
+      protocol: arp
+      arp:
+        operation: reply
+    response:
+      action: arp_reply`,
+			want: "requires match.arp.operation request",
+		},
+		{
+			name: "tcp syn ack requires tcp syn",
+			ruleYAML: `match:
+      protocol: tcp
+      tcp_flags:
+        ack: true
+    response:
+      action: tcp_syn_ack`,
+			want: "requires match.tcp_flags.syn true",
+		},
+		{
+			name: "tcp syn ack requires tcp protocol",
+			ruleYAML: `match:
+      protocol: udp
+    response:
+      action: tcp_syn_ack`,
+			want: "requires match.protocol tcp",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			path := writeRulesFile(t, `rules:
+  - id: 1001
+    name: bad
+    enabled: true
+    priority: 100
+    `+tc.ruleYAML+`
+`)
+
+			_, err := LoadRules(path)
+			if err == nil {
+				t.Fatal("LoadRules() error = nil, want validation error")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("LoadRules() error = %q, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestLoadRulesAcceptsCompatibleXSKActions(t *testing.T) {
+	t.Parallel()
+
+	path := writeRulesFile(t, `rules:
+  - id: 1001
+    name: icmp
+    enabled: true
+    priority: 100
+    match:
+      protocol: icmp
+      icmp:
+        type: echo_request
+    response:
+      action: icmp_echo_reply
+  - id: 1002
+    name: arp
+    enabled: true
+    priority: 110
+    match:
+      protocol: arp
+      arp:
+        operation: request
+    response:
+      action: arp_reply
+  - id: 1003
+    name: syn
+    enabled: true
+    priority: 120
+    match:
+      protocol: tcp
+      tcp_flags:
+        syn: true
+    response:
+      action: tcp_syn_ack
+`)
+
+	set, err := LoadRules(path)
+	if err != nil {
+		t.Fatalf("LoadRules() error = %v", err)
+	}
+	if len(set.Rules) != 3 {
+		t.Fatalf("len(Rules) = %d, want 3", len(set.Rules))
+	}
+}
+
 func TestLoadRulesRejectsDuplicateID(t *testing.T) {
 	t.Parallel()
 

@@ -158,6 +158,7 @@ enum stat_idx {
     STAT_XDP_TX,
     STAT_XSK_TX,
     STAT_TX_FAILED,
+    STAT_XSK_FAILED,
     STAT_COUNT,
 };
 

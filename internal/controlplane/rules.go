@@ -175,15 +175,45 @@ func normalizeRule(r *rule.Rule) error {
 	if _, ok := allowedActions[action]; !ok {
 		return fmt.Errorf("response.action %q is not allowed", action)
 	}
+	r.Match.Protocol = protocol
+	if err := validateActionMatch(action, r); err != nil {
+		return err
+	}
 
 	r.Match.VLANs = vlans
 	r.Match.SrcPrefixes = srcPrefixes
 	r.Match.DstPrefixes = dstPrefixes
 	r.Match.SrcPorts = srcPorts
 	r.Match.DstPorts = dstPorts
-	r.Match.Protocol = protocol
 	r.Response.Action = action
 
+	return nil
+}
+
+func validateActionMatch(action string, r *rule.Rule) error {
+	switch action {
+	case "icmp_echo_reply":
+		if r.Match.Protocol != "icmp" {
+			return fmt.Errorf("response.action icmp_echo_reply requires match.protocol icmp")
+		}
+		if r.Match.ICMP == nil || r.Match.ICMP.Type != "echo_request" {
+			return fmt.Errorf("response.action icmp_echo_reply requires match.icmp.type echo_request")
+		}
+	case "arp_reply":
+		if r.Match.Protocol != "arp" {
+			return fmt.Errorf("response.action arp_reply requires match.protocol arp")
+		}
+		if r.Match.ARP == nil || r.Match.ARP.Operation != "request" {
+			return fmt.Errorf("response.action arp_reply requires match.arp.operation request")
+		}
+	case "tcp_syn_ack":
+		if r.Match.Protocol != "tcp" {
+			return fmt.Errorf("response.action tcp_syn_ack requires match.protocol tcp")
+		}
+		if r.Match.TCPFlags.SYN == nil || !*r.Match.TCPFlags.SYN {
+			return fmt.Errorf("response.action tcp_syn_ack requires match.tcp_flags.syn true")
+		}
+	}
 	return nil
 }
 

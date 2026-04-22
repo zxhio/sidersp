@@ -92,6 +92,17 @@ Execution path is not exposed as a rule field. The control plane validates `resp
 
 External rules must not expose implementation details such as `xdp`, `xsk`, or `user_space` as fields.
 
+## Action Compatibility
+
+The control plane rejects XSK TX actions whose match conditions do not select
+the packet type required to construct the response:
+
+| Action | Required match conditions |
+|--------|---------------------------|
+| `icmp_echo_reply` | `protocol: icmp` and `icmp.type: echo_request` |
+| `arp_reply` | `protocol: arp` and `arp.operation: request` |
+| `tcp_syn_ack` | `protocol: tcp` and `tcp_flags.syn: true` |
+
 ## Match Semantics
 
 - A rule matches only when all configured positive conditions match.
@@ -108,6 +119,7 @@ The control plane must:
 - Reject missing `id`, empty `name`, missing `response.action`, or negative `priority`
 - Normalize action and protocol names to lower case
 - Validate protocol, action, ICMP type, and ARP operation values
+- Reject XSK TX actions without compatible match conditions
 - Validate VLAN, port, and IPv4 CIDR ranges
 - Reject negative TCP flag conditions
 - Filter `enabled=false` rules before dataplane loading

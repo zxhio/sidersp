@@ -43,6 +43,7 @@ const (
 	statXDPTX
 	statXskTX
 	statTXFailed
+	statXskFailed
 )
 
 var tcpFlagBits = map[string]uint32{

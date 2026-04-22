@@ -60,6 +60,13 @@ XSK worker -> read xsk_meta -> parse full original packet -> build response -> X
 
 XSK TX is for actions that need full original packet context. Ringbuf must not be used to carry packet fields required for response construction.
 
+`xsk_tx` dataplane statistics and `verdict=xsk` observation events mean BPF
+successfully submitted the packet to XSK. They do not mean the user-space
+response packet was transmitted.
+
+`tcp_syn_ack` is guarded in BPF and only redirects initial SYN packets. SYN
+packets that also carry ACK, RST, or FIN pass without XSK redirect.
+
 ## XSK Metadata
 
 BPF prepends an 8-byte metadata header before redirecting a frame to XSK:
@@ -71,6 +78,10 @@ u16 reserved
 ```
 
 `xsk_meta` carries only dispatch metadata. The XSK worker must parse the redirected original packet for MAC, ARP, ICMP, TCP sequence, ACK, option, and payload context.
+
+The XSK worker must strip these 8 bytes before parsing the original Ethernet
+frame. If BPF cannot prepend metadata or cannot submit the redirect, the packet
+falls back to `XDP_PASS` and the XSK failure counter is incremented.
 
 ## Response Result
 

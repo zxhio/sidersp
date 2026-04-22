@@ -225,6 +225,10 @@ func TestStatsReturnsRuntimeAndDataplaneCounters(t *testing.T) {
 			RuleCandidates: 40,
 			MatchedRules:   7,
 			RingbufDropped: 1,
+			XDPTX:          3,
+			XskTX:          4,
+			TXFailed:       5,
+			XskFailed:      6,
 		},
 	})
 	r.rules = rule.RuleSet{
@@ -243,6 +247,9 @@ func TestStatsReturnsRuntimeAndDataplaneCounters(t *testing.T) {
 	}
 	if got.RXPackets != 100 || got.MatchedRules != 7 {
 		t.Fatalf("dataplane stats = %+v, want rx=100 matched=7", got)
+	}
+	if got.XskFailed != 6 {
+		t.Fatalf("xsk_failed = %d, want 6", got.XskFailed)
 	}
 	if len(got.Histories) != 1 {
 		t.Fatalf("histories len = %d, want 1", len(got.Histories))

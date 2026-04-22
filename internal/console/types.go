@@ -61,6 +61,7 @@ type StatsResponse struct {
 	XDPTX          uint64                 `json:"xdp_tx"`
 	XskTX          uint64                 `json:"xsk_tx"`
 	TXFailed       uint64                 `json:"tx_failed"`
+	XskFailed      uint64                 `json:"xsk_failed"`
 	Histories      []StatsHistoryResponse `json:"histories"`
 }
 
@@ -83,4 +84,5 @@ type StatsPointResponse struct {
 	XDPTX          uint64 `json:"xdp_tx"`
 	XskTX          uint64 `json:"xsk_tx"`
 	TXFailed       uint64 `json:"tx_failed"`
+	XskFailed      uint64 `json:"xsk_failed"`
 }

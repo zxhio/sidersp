@@ -299,14 +299,18 @@ static __always_inline int redirect_xsk_with_meta(struct xdp_md *xdp,
     struct xsk_meta *meta;
     int redir;
 
-    if (bpf_xdp_adjust_head(xdp, -(int)sizeof(*meta)))
+    if (bpf_xdp_adjust_head(xdp, -(int)sizeof(*meta))) {
+        stat_inc(STAT_XSK_FAILED);
         return XDP_PASS;
+    }
 
     data = (void *)(long)xdp->data;
     data_end = (void *)(long)xdp->data_end;
     meta = data;
-    if ((void *)(meta + 1) > data_end)
+    if ((void *)(meta + 1) > data_end) {
+        stat_inc(STAT_XSK_FAILED);
         goto rollback;
+    }
 
     meta->rule_id = rule->rule_id;
     meta->action = rule->action;
@@ -316,10 +320,17 @@ static __always_inline int redirect_xsk_with_meta(struct xdp_md *xdp,
     if (redir == XDP_REDIRECT)
         return XDP_REDIRECT;
 
+    stat_inc(STAT_XSK_FAILED);
+
 rollback:
     if (bpf_xdp_adjust_head(xdp, sizeof(*meta)))
         return XDP_DROP;
     return XDP_PASS;
+}
+
+static __always_inline int can_tcp_syn_ack(const struct pkt_ctx *ctx)
+{
+    return (ctx->tcp_flags & (TCP_FLAG_SYN | TCP_FLAG_ACK | TCP_FLAG_RST | TCP_FLAG_FIN)) == TCP_FLAG_SYN;
 }
 
 static parse_err_t parse_udp(struct pkt_ctx *ctx, void *data, void *data_end, __u32 l4_len)
@@ -608,7 +619,10 @@ int xdp_sidersp(struct xdp_md *xdp)
     case ACTION_ICMP_ECHO_REPLY:
     case ACTION_ARP_REPLY:
     case ACTION_TCP_SYN_ACK: {
-        int redir = redirect_xsk_with_meta(xdp, &best_rule);
+        int redir;
+        if (best_rule.action == ACTION_TCP_SYN_ACK && !can_tcp_syn_ack(&ctx))
+            return XDP_PASS;
+        redir = redirect_xsk_with_meta(xdp, &best_rule);
         if (redir == XDP_REDIRECT) {
             stat_inc(STAT_XSK_TX);
             emit_event(&ctx, &best_rule, pkt_conds, VERDICT_XSK);
@@ -616,9 +630,11 @@ int xdp_sidersp(struct xdp_md *xdp)
         }
         return redir;
     }
+    case ACTION_ALERT:
+        emit_event(&ctx, &best_rule, pkt_conds, VERDICT_OBSERVE);
+        return XDP_PASS;
+    case ACTION_NONE:
     default:
-        if (best_rule.action != ACTION_NONE)
-            emit_event(&ctx, &best_rule, pkt_conds, VERDICT_OBSERVE);
         return XDP_PASS;
     }
 }

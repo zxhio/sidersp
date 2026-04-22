@@ -46,7 +46,7 @@ Owns:
 - Lightweight rule matching
 - XDP verdict selection
 - Synchronous TX actions such as `tcp_reset`
-- XSK redirect for actions that need full packet context
+- XSK redirect and XSK fd registration for actions that need full packet context
 - Observation event output
 
 Does not own:
@@ -121,7 +121,7 @@ Planned module for active response execution.
 Owns:
 
 - User-space TX response execution
-- XSK TX packet handling
+- AF_XDP RX/TX worker loops and XSK TX packet handling
 - Response result recording
 - Failure feedback
 
