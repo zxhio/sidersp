@@ -121,8 +121,10 @@ Planned module for active response execution.
 Current implementation status: package skeleton, XSK metadata decoding, worker
 registration boundary, and pure response packet builders exist. The builders
 reject VLAN-tagged frames and TCP SYN payloads until those response semantics
-are implemented. AF_XDP socket IO and response result streaming are still
-planned.
+are implemented. A response execution core and bounded in-memory response
+result buffer exist, and the worker boundary dispatches metadata-prefixed XSK
+frames into that execution core. AF_XDP socket IO and management-plane response
+result streaming are still planned.
 
 Owns:
 

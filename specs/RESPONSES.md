@@ -90,7 +90,13 @@ falls back to `XDP_PASS` and the XSK failure counter is incremented.
 
 ## Response Result
 
-Full user-space response results are planned for the XSK worker. The current active implementation emits ringbuf observation events with numeric verdict codes for `observe`, `tx`, and `xsk`.
+Full user-space response results are owned by the XSK worker path. The current
+implementation provides a response result model, bounded in-memory result
+buffer, and response execution core that records build/TX outcomes. AF_XDP
+backend IO still needs to be implemented, but the worker boundary already passes
+metadata-prefixed XSK frames to the execution core. Dataplane ringbuf events
+remain observation events with numeric verdict codes for `observe`, `tx`, and
+`xsk`.
 
 Planned response result shape:
 
@@ -111,6 +117,9 @@ Planned response result shape:
 }
 ```
 
+`sip` and `dip` are IPv4 addresses stored as host-order `u32` values, matching
+the dataplane event ABI representation.
+
 Result values:
 
 | Result | Semantics |
@@ -118,6 +127,11 @@ Result values:
 | `sent` | Response frame was transmitted |
 | `skipped` | Worker intentionally skipped response execution |
 | `failed` | Worker attempted execution and failed |
+
+The in-memory result buffer is a local process buffer. It stores the newest
+records up to its configured capacity and evicts the oldest records when full.
+Durable response result storage and management-plane query APIs are planned
+separate changes.
 
 ## Module Boundaries
 

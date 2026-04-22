@@ -21,9 +21,13 @@ type XSKRegistrar interface {
 	RegisterXSKSocket(queueID int, fd uint32) error
 }
 
+type XSKFrameHandler interface {
+	ExecuteXSKFrame(context.Context, []byte) error
+}
+
 type XSKSocket interface {
 	FD() uint32
-	Run(context.Context) error
+	Run(context.Context, XSKFrameHandler) error
 }
 
 type XSKWorker struct {
@@ -31,14 +35,18 @@ type XSKWorker struct {
 	queueID   int
 	registrar XSKRegistrar
 	socket    XSKSocket
+	handler   XSKFrameHandler
 }
 
-func NewXSKWorker(ifindex, queueID int, registrar XSKRegistrar, socket XSKSocket) (*XSKWorker, error) {
+func NewXSKWorker(ifindex, queueID int, registrar XSKRegistrar, socket XSKSocket, handler XSKFrameHandler) (*XSKWorker, error) {
 	if registrar == nil {
 		return nil, fmt.Errorf("create xsk worker: registrar is required")
 	}
 	if socket == nil {
 		return nil, fmt.Errorf("create xsk worker: socket is required")
+	}
+	if handler == nil {
+		return nil, fmt.Errorf("create xsk worker: frame handler is required")
 	}
 	if queueID < 0 {
 		return nil, fmt.Errorf("create xsk worker: queue %d out of range", queueID)
@@ -48,6 +56,7 @@ func NewXSKWorker(ifindex, queueID int, registrar XSKRegistrar, socket XSKSocket
 		queueID:   queueID,
 		registrar: registrar,
 		socket:    socket,
+		handler:   handler,
 	}, nil
 }
 
@@ -64,7 +73,7 @@ func (w *XSKWorker) Run(ctx context.Context) error {
 		"queue":   w.queueID,
 	}).Info("Started xsk worker")
 
-	return w.socket.Run(ctx)
+	return w.socket.Run(ctx, w.handler)
 }
 
 func DecodeXSKMetadata(frame []byte) (XSKMetadata, []byte, error) {
