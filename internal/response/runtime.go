@@ -6,6 +6,12 @@ import (
 	"net"
 )
 
+type UnsupportedBackendFactory struct{}
+
+func (UnsupportedBackendFactory) NewXSKBackend(int) (XSKBackend, error) {
+	return nil, fmt.Errorf("AF_XDP response backend is not implemented")
+}
+
 type XSKBackend interface {
 	XSKSocket
 	ResponseTransmitter

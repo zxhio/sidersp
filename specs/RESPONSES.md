@@ -152,7 +152,9 @@ response:
 
 `hardware_addr` is reserved for ARP reply source hardware address selection.
 `tcp_seq` is reserved for the TCP SYN-ACK response sequence seed. AF_XDP socket
-startup and response runtime wiring are still planned.
+startup is still planned. If response is enabled before a concrete AF_XDP
+backend is configured, startup fails with an explicit unsupported-backend error
+instead of silently ignoring response actions.
 
 ## Module Boundaries
 
