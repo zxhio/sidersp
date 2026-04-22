@@ -1,5 +1,14 @@
 package rule
 
+const (
+	ActionNone uint16 = iota
+	ActionAlert
+	ActionTCPReset
+	ActionICMPEchoReply
+	ActionARPReply
+	ActionTCPSynAck
+)
+
 type RuleSet struct {
 	Rules []Rule `json:"rules" yaml:"rules"`
 }

@@ -1,6 +1,10 @@
 package dataplane
 
-import "time"
+import (
+	"time"
+
+	"sidersp/internal/rule"
+)
 
 const (
 	maxRuleSlots     = 1024
@@ -26,12 +30,12 @@ const (
 	condARPReply        = 1 << 17
 	condL4Payload       = 1 << 18
 
-	actionNone          uint16 = 0
-	actionAlert         uint16 = 1
-	actionTCPReset      uint16 = 2
-	actionICMPEchoReply uint16 = 3
-	actionARPReply      uint16 = 4
-	actionTCPSynAck     uint16 = 5
+	actionNone          = rule.ActionNone
+	actionAlert         = rule.ActionAlert
+	actionTCPReset      = rule.ActionTCPReset
+	actionICMPEchoReply = rule.ActionICMPEchoReply
+	actionARPReply      = rule.ActionARPReply
+	actionTCPSynAck     = rule.ActionTCPSynAck
 )
 
 const (

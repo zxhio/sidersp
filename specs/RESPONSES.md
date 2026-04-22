@@ -11,9 +11,9 @@ Rules reference responses through `response.action`. The control plane validates
 | `none` | `0` | dataplane pass | active | Match silently and continue with `XDP_PASS` |
 | `alert` | `1` | dataplane observe | active | Emit an observation event and continue with `XDP_PASS` |
 | `tcp_reset` | `2` | BPF synchronous TX | active | Build TCP RST in BPF and return `XDP_TX` |
-| `icmp_echo_reply` | `3` | XSK TX | planned worker | Redirect the original packet to XSK; user space builds ICMP echo reply |
-| `arp_reply` | `4` | XSK TX | planned worker | Redirect the original packet to XSK; user space builds ARP reply |
-| `tcp_syn_ack` | `5` | XSK TX | planned worker | Redirect the original packet to XSK; user space builds TCP SYN-ACK |
+| `icmp_echo_reply` | `3` | XSK TX | builder implemented, worker planned | Redirect the original packet to XSK; user space builds ICMP echo reply |
+| `arp_reply` | `4` | XSK TX | builder implemented, worker planned | Redirect the original packet to XSK; user space builds ARP reply |
+| `tcp_syn_ack` | `5` | XSK TX | builder implemented, worker planned | Redirect the original packet to XSK; user space builds TCP SYN-ACK |
 
 Action names are stable snake-case API values. Numeric codes are the dataplane ABI and must stay synchronized with BPF definitions.
 
@@ -66,6 +66,11 @@ response packet was transmitted.
 
 `tcp_syn_ack` is guarded in BPF and only redirects initial SYN packets. SYN
 packets that also carry ACK, RST, or FIN pass without XSK redirect.
+
+The current user-space response builders reject VLAN-tagged frames until VLAN
+tag preservation is implemented for response TX. The `tcp_syn_ack` builder also
+rejects SYN payloads until TCP Fast Open style payload ACK semantics are
+implemented.
 
 ## XSK Metadata
 

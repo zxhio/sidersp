@@ -279,34 +279,3 @@ func TestKernelStatsFields(t *testing.T) {
 		t.Fatalf("len(fields) = %d, want %d", len(fields), 9)
 	}
 }
-
-func TestDecodeXSKMeta(t *testing.T) {
-	t.Parallel()
-
-	frame := []byte{
-		0x04, 0x03, 0x02, 0x01,
-		0x05, 0x00,
-		0x00, 0x00,
-		0xaa, 0xbb,
-	}
-
-	meta, payload, err := decodeXSKMeta(frame)
-	if err != nil {
-		t.Fatalf("decodeXSKMeta() error = %v", err)
-	}
-	if meta.RuleID != 0x01020304 || meta.Action != 5 || meta.Reserved != 0 {
-		t.Fatalf("meta = %+v, want rule_id=0x01020304 action=5 reserved=0", meta)
-	}
-	if len(payload) != 2 || payload[0] != 0xaa || payload[1] != 0xbb {
-		t.Fatalf("payload = %x, want aabb", payload)
-	}
-}
-
-func TestDecodeXSKMetaRejectsShortFrame(t *testing.T) {
-	t.Parallel()
-
-	_, _, err := decodeXSKMeta([]byte{0x01, 0x02})
-	if err == nil {
-		t.Fatal("decodeXSKMeta() error = nil, want short frame error")
-	}
-}

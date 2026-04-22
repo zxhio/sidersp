@@ -13,7 +13,7 @@ This document defines the system module contract. For the short agent-facing sum
 | `model` | `internal/model/` | active | Shared data models used across modules |
 | `rule` | `internal/rule/` | active | Shared rule schema used by controlplane, console, and dataplane compilation |
 | `analysis` | `internal/analysis/` | planned | Deep analysis task submission and result ingestion |
-| `response` | `internal/response/` | planned | User-space response execution and result feedback |
+| `response` | `internal/response/` | skeleton | User-space response execution and result feedback |
 
 ## Dependency Rules
 
@@ -117,6 +117,12 @@ Does not own:
 ## Response
 
 Planned module for active response execution.
+
+Current implementation status: package skeleton, XSK metadata decoding, worker
+registration boundary, and pure response packet builders exist. The builders
+reject VLAN-tagged frames and TCP SYN payloads until those response semantics
+are implemented. AF_XDP socket IO and response result streaming are still
+planned.
 
 Owns:
 
