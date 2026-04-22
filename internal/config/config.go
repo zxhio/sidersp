@@ -38,6 +38,13 @@ type ResponseConfig struct {
 	ResultBufferSize int    `yaml:"result_buffer_size"`
 	HardwareAddr     string `yaml:"hardware_addr"`
 	TCPSeq           uint32 `yaml:"tcp_seq"`
+
+	// XSK socket settings.
+	FrameSize uint32 `yaml:"frame_size"`
+	FillSize  uint32 `yaml:"fill_size"`
+	CompSize  uint32 `yaml:"comp_size"`
+	RxSize    uint32 `yaml:"rx_size"`
+	TxSize    uint32 `yaml:"tx_size"`
 }
 
 type StatsHistoryConfig struct {

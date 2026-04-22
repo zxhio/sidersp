@@ -120,6 +120,22 @@ func buildResponseRuntime(cfg config.Config, registrar response.XSKRegistrar) (*
 	xskCfg.IfIndex = iface.Index
 	xskCfg.BindFlags = uint16(unix.XDP_COPY)
 
+	if v := cfg.Response.FrameSize; v != 0 {
+		xskCfg.FrameSize = v
+	}
+	if v := cfg.Response.FillSize; v != 0 {
+		xskCfg.FillSize = v
+	}
+	if v := cfg.Response.CompSize; v != 0 {
+		xskCfg.CompSize = v
+	}
+	if v := cfg.Response.RxSize; v != 0 {
+		xskCfg.RxSize = v
+	}
+	if v := cfg.Response.TxSize; v != 0 {
+		xskCfg.TxSize = v
+	}
+
 	newBackend := func(queueID int) (response.XSKBackend, error) {
 		return xsk.NewSocket(xskCfg, queueID)
 	}
