@@ -109,7 +109,7 @@ static int pick_best_rule(const mask_t *candidates, __u32 pkt_conds,
                 continue;
             if (!rule_matches(rule, pkt_conds))
                 continue;
-            /* First match = best priority (control plane pre-sorted). */
+            /* First match = best priority (dataplane sync pre-sorted). */
             *best_rule = *rule;
             return 1;
         }

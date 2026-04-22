@@ -6,7 +6,7 @@
  *   parse_packet() → index pre-filter
  *       → pick best rule → execute action → emit event
  *
- * See docs/xdp-flow.md for the full flow diagram.
+ * See docs/bpf-dataplane-spec.md for the full flow diagram.
  */
 #ifndef SIDERSP_BPF_RULE_H
 #define SIDERSP_BPF_RULE_H
@@ -102,7 +102,7 @@ struct pkt_ctx {
 
 /*
  * Per-slot rule metadata (stored in rule_index_map, written by control plane).
- * Control plane guarantees slot order reflects priority.
+ * Dataplane sync guarantees slot order reflects priority.
  *
  * Final match check:
  *   (pkt_conds & rule->required_mask) == rule->required_mask
