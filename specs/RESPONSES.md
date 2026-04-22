@@ -1,0 +1,120 @@
+# Responses
+
+This document defines the active response action contract and execution paths.
+
+Rules reference responses through `response.action`. The control plane validates the action name. The dataplane sync path encodes it as the action code defined in `RULES.md`.
+
+## Action Contract
+
+| Action | Code | Path | Current Status | Semantics |
+|--------|------|------|----------------|-----------|
+| `none` | `0` | dataplane pass | active | Match silently and continue with `XDP_PASS` |
+| `alert` | `1` | dataplane observe | active | Emit an observation event and continue with `XDP_PASS` |
+| `tcp_reset` | `2` | BPF synchronous TX | active | Build TCP RST in BPF and return `XDP_TX` |
+| `icmp_echo_reply` | `3` | XSK TX | planned worker | Redirect the original packet to XSK; user space builds ICMP echo reply |
+| `arp_reply` | `4` | XSK TX | planned worker | Redirect the original packet to XSK; user space builds ARP reply |
+| `tcp_syn_ack` | `5` | XSK TX | planned worker | Redirect the original packet to XSK; user space builds TCP SYN-ACK |
+
+Action names are stable snake-case API values. Numeric codes are the dataplane ABI and must stay synchronized with BPF definitions.
+
+## Execution Paths
+
+### Dataplane Pass
+
+Used by `none`.
+
+```text
+packet -> BPF parse/match -> XDP_PASS
+```
+
+No response packet is generated and no observation event is required.
+
+### Dataplane Observe
+
+Used by `alert`.
+
+```text
+packet -> BPF parse/match -> ringbuf event -> XDP_PASS
+```
+
+The ringbuf event is only for observation, statistics, and audit.
+
+### BPF Synchronous TX
+
+Used by `tcp_reset`.
+
+```text
+packet -> BPF parse/match -> build TCP RST in-place -> ringbuf event -> XDP_TX
+```
+
+Synchronous TX does not depend on ringbuf consumption or user-space response execution. If TX construction fails, the packet falls back to `XDP_PASS` and the TX failure counter is incremented.
+
+### XSK TX
+
+Used by `icmp_echo_reply`, `arp_reply`, and `tcp_syn_ack`.
+
+```text
+packet -> BPF parse/match -> prepend xsk_meta -> XDP_REDIRECT to XSK
+XSK worker -> read xsk_meta -> parse full original packet -> build response -> XSK_TX
+```
+
+XSK TX is for actions that need full original packet context. Ringbuf must not be used to carry packet fields required for response construction.
+
+## XSK Metadata
+
+BPF prepends an 8-byte metadata header before redirecting a frame to XSK:
+
+```text
+u32 rule_id
+u16 action
+u16 reserved
+```
+
+`xsk_meta` carries only dispatch metadata. The XSK worker must parse the redirected original packet for MAC, ARP, ICMP, TCP sequence, ACK, option, and payload context.
+
+## Response Result
+
+Full user-space response results are planned for the XSK worker. The current active implementation emits ringbuf observation events with numeric verdict codes for `observe`, `tx`, and `xsk`.
+
+Planned response result shape:
+
+```json
+{
+  "timestamp_ns": 1713000000000000000,
+  "rule_id": 1001,
+  "action": "icmp_echo_reply",
+  "result": "sent",
+  "ifindex": 2,
+  "rx_queue": 0,
+  "sip": 167837962,
+  "dip": 3232235796,
+  "sport": 52345,
+  "dport": 80,
+  "ip_proto": 1,
+  "error": ""
+}
+```
+
+Result values:
+
+| Result | Semantics |
+|--------|-----------|
+| `sent` | Response frame was transmitted |
+| `skipped` | Worker intentionally skipped response execution |
+| `failed` | Worker attempted execution and failed |
+
+## Module Boundaries
+
+- The control plane validates `response.action`.
+- The dataplane sync path encodes `response.action` into the numeric BPF action code.
+- BPF owns `none`, `alert`, and `tcp_reset` execution.
+- BPF only redirects XSK TX actions and writes `xsk_meta`; it does not build complex spoof responses.
+- The XSK worker owns user-space TX response construction and result reporting.
+- The XSK worker must not decide whether a response should happen; that decision comes from the matched rule action.
+- Ringbuf is an observation channel, not a packet construction data channel.
+
+## Related Contracts
+
+- Rule action model: `RULES.md`
+- Event structure: `EVENTS.md`
+- Module boundaries: `MODULES.md`

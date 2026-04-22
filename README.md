@@ -14,7 +14,7 @@
 - 流量分类与分流
 - 统一事件输出
 - TCP reset 同步 TX response
-- ICMP/ARP/TCP handshake XSK TX response
+- ICMP/ARP/TCP handshake XSK redirect path for user-space response execution
 - 基础状态可视化
 
 ## 架构

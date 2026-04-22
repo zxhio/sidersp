@@ -222,7 +222,7 @@ collapses this to 2-way (hit / miss), giving 2⁵ = 32 paths.
 **Principle**: A "compare and track best" pattern inside a loop creates two verifier
 paths per iteration (update / skip). Over N iterations, paths can grow exponentially.
 
-**How**: The control plane pre-sorts rules by (priority ASC, ID ASC) so that
+**How**: The dataplane sync path sorts rules by (priority ASC, ID ASC) so that
 slot order = priority order. The BPF side returns on first match, no comparison needed.
 
 **Effect**: Per-iteration insns drop from ~35 to ~28, and the priority-comparison

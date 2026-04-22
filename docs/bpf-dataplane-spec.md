@@ -105,8 +105,9 @@ SYN-ACK spoof require full original-packet context and are handled through XSK.
 
 ### 3.3 Priority Ordering
 
-The control plane filters disabled rules, validates rule IDs, and compiles active
-rules into slots sorted by `(priority ASC, id ASC)`. Slot 0 has the highest
+The control plane filters disabled rules and validates rule IDs. The dataplane
+sync path compiles active rules into slots sorted by `(priority ASC, id ASC)`.
+Slot 0 has the highest
 priority. First matching slot wins.
 
 `priority` and `enabled` are user-space rule lifecycle fields and are not stored
@@ -115,7 +116,7 @@ in `rule_meta`.
 ### 3.4 Wildcard / Optional Conditions
 
 When a rule does not specify a condition (e.g., no `src_prefixes`), that
-condition is treated as "match anything". The control plane marks such rules
+condition is treated as "match anything". The dataplane compiler marks such rules
 in the corresponding `*_optional_rules` bitmap so they survive the pre-filter
 stage when no index entry matches. Optional rules are also included in every
 concrete index entry's mask, so they are preserved regardless of whether the
@@ -125,20 +126,22 @@ index lookup hits or misses.
 
 The BPF LPM trie (`BPF_MAP_TYPE_LPM_TRIE`) performs a single longest-prefix-match
 lookup using `/32` as the lookup key. Each prefix entry's value is a cumulative
-bitmap: the control plane includes every rule whose **broader** prefix covers that
+bitmap: the dataplane compiler includes every rule whose **broader** prefix covers that
 entry's network address. For example, a `/24` entry's mask includes rules with
 matching `/24`, `/23`, `/16`, or `/0` prefixes — all prefixes that contain the
 `/24` subnet.
 
-### 3.6 Control Plane Responsibilities
+### 3.6 Rule Sync Responsibilities
 
-The control plane performs all high-level validation and compilation before
-writing BPF maps:
+The control plane performs high-level validation before dataplane sync:
 
 - Filter out `enabled=false` rules.
 - Reject duplicate rule IDs.
 - Reject unsupported negative match conditions.
 - Reject unsupported match fields and action names.
+
+The dataplane sync path compiles active rules before writing BPF maps:
+
 - Sort active rules by `(priority ASC, id ASC)`.
 - Compile concrete values into index maps.
 - Compile positive semantic requirements into `required_mask`.
@@ -168,7 +171,7 @@ is delivered.
 | 24 | 2 | action | Action code (see §6) |
 | 26 | 2 | sport | Source port, **host byte order** (bpf_ntohs) |
 | 28 | 2 | dport | Destination port, **host byte order** (bpf_ntohs) |
-| 30 | 1 | verdict | Data-plane verdict: observe / xdp_tx / xsk |
+| 30 | 1 | verdict | Data-plane verdict: observe / tx / xsk |
 | 31 | 1 | ip_proto | IP protocol: 1=ICMP, 6=TCP, 17=UDP |
 
 ### Guarantees
@@ -284,14 +287,15 @@ Values are `per-CPU uint64` — sum across CPUs for total.
 |--------|------|--------|----------|
 | ACTION_NONE | 0 | active | No response |
 | ACTION_ALERT | 1 | active | Observation only |
-| ACTION_TCP_RESET | 2 | tx | Build TCP RST in BPF and return `XDP_TX` |
-| ACTION_ICMP_ECHO_REPLY | 3 | tx | Submit original packet to XSK for user-space TX |
-| ACTION_ARP_REPLY | 4 | tx | Submit original packet to XSK for user-space TX |
-| ACTION_TCP_SYN_ACK | 5 | tx | Submit original packet to XSK for user-space TX |
+| ACTION_TCP_RESET | 2 | active | Build TCP RST in BPF and return `XDP_TX` |
+| ACTION_ICMP_ECHO_REPLY | 3 | BPF redirect active, worker planned | Submit original packet to XSK for user-space TX |
+| ACTION_ARP_REPLY | 4 | BPF redirect active, worker planned | Submit original packet to XSK for user-space TX |
+| ACTION_TCP_SYN_ACK | 5 | BPF redirect active, worker planned | Submit original packet to XSK for user-space TX |
 
-Control plane validation rules:
+Rule sync rules:
 
-- The control plane compiles only the action code; there is no separate path field.
+- The control plane validates action names; there is no separate path field.
+- The dataplane sync path compiles action names into numeric action codes.
 - The concrete TX path is fixed in BPF code: `tcp_reset` uses synchronous
   `XDP_TX`; spoof actions use XSK and user-space TX.
 - Rule YAML uses snake_case action strings; BPF maps use numeric action codes.
@@ -327,7 +331,8 @@ Sequence/acknowledgement rule:
 ## 8. XSK TX Response
 
 Spoof actions do not require expanding ringbuf events with packet fields. The
-original packet is submitted to AF_XDP:
+BPF path redirects the original packet to AF_XDP; full user-space TX response
+construction is planned behind the XSK worker boundary:
 
 ```text
 BPF match -> prepend xsk_meta -> XSK RX
