@@ -9,7 +9,7 @@ export default function Sparkline({ data, color, labels, width, height }) {
   // Draw base chart and save snapshot + layout info
   useEffect(() => {
     const canvas = canvasRef.current
-    if (!canvas || !data || data.length < 2) return
+    if (!canvas || !data || data.length < 1) return
 
     const dpr = window.devicePixelRatio || 1
     const w = width || canvas.parentElement.clientWidth
@@ -35,8 +35,10 @@ export default function Sparkline({ data, color, labels, width, height }) {
     const max = Math.max(...data)
     const range = max - min || 1
 
+    const singlePoint = data.length === 1
+
     function xPos(i) {
-      return padLeft + (i / (data.length - 1)) * plotW
+      return singlePoint ? padLeft + plotW / 2 : padLeft + (i / (data.length - 1)) * plotW
     }
     function yPos(v) {
       return padTop + plotH - ((v - min) / range) * plotH
@@ -64,50 +66,73 @@ export default function Sparkline({ data, color, labels, width, height }) {
     }
 
     // X-axis labels
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'top'
-    const labelInterval = Math.max(1, Math.floor(data.length / 6))
-    for (let i = 0; i < data.length; i += labelInterval) {
-      ctx.fillText(labels ? labels[i] : '', xPos(i), padTop + plotH + 8)
+    if (!singlePoint) {
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'top'
+      const labelInterval = Math.max(1, Math.floor(data.length / 6))
+      for (let i = 0; i < data.length; i += labelInterval) {
+        ctx.fillText(labels ? labels[i] : '', xPos(i), padTop + plotH + 8)
+      }
+      if ((data.length - 1) % labelInterval !== 0) {
+        ctx.fillText(labels ? labels[data.length - 1] : '', xPos(data.length - 1), padTop + plotH + 8)
+      }
+    } else if (labels && labels[0]) {
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'top'
+      ctx.fillStyle = '#94a3b8'
+      ctx.font = '11px -apple-system, sans-serif'
+      ctx.fillText(labels[0], xPos(0), padTop + plotH + 8)
     }
-    if ((data.length - 1) % labelInterval !== 0) {
-      ctx.fillText(labels ? labels[data.length - 1] : '', xPos(data.length - 1), padTop + plotH + 8)
+
+    if (singlePoint) {
+      // Single dot + value
+      const px = xPos(0)
+      const py = yPos(data[0])
+      ctx.beginPath()
+      ctx.arc(px, py, 3, 0, Math.PI * 2)
+      ctx.fillStyle = color
+      ctx.fill()
+      ctx.fillStyle = color
+      ctx.font = '600 12px -apple-system, sans-serif'
+      ctx.textAlign = 'left'
+      ctx.textBaseline = 'bottom'
+      ctx.fillText(formatNum(data[0]), px + 6, py - 2)
+    } else {
+      // Area fill
+      ctx.beginPath()
+      ctx.moveTo(xPos(0), yPos(data[0]))
+      for (let i = 1; i < data.length; i++) ctx.lineTo(xPos(i), yPos(data[i]))
+      ctx.lineTo(xPos(data.length - 1), padTop + plotH)
+      ctx.lineTo(xPos(0), padTop + plotH)
+      ctx.closePath()
+      const grad = ctx.createLinearGradient(0, padTop, 0, padTop + plotH)
+      grad.addColorStop(0, color + '20')
+      grad.addColorStop(1, color + '05')
+      ctx.fillStyle = grad
+      ctx.fill()
+
+      // Line
+      ctx.beginPath()
+      ctx.moveTo(xPos(0), yPos(data[0]))
+      for (let i = 1; i < data.length; i++) ctx.lineTo(xPos(i), yPos(data[i]))
+      ctx.strokeStyle = color
+      ctx.lineWidth = 1.5
+      ctx.lineJoin = 'round'
+      ctx.stroke()
+
+      // Last point dot + value
+      const lastX = xPos(data.length - 1)
+      const lastY = yPos(data[data.length - 1])
+      ctx.beginPath()
+      ctx.arc(lastX, lastY, 3, 0, Math.PI * 2)
+      ctx.fillStyle = color
+      ctx.fill()
+      ctx.fillStyle = color
+      ctx.font = '600 12px -apple-system, sans-serif'
+      ctx.textAlign = 'left'
+      ctx.textBaseline = 'bottom'
+      ctx.fillText(formatNum(data[data.length - 1]), lastX + 6, lastY - 2)
     }
-
-    // Area fill
-    ctx.beginPath()
-    ctx.moveTo(xPos(0), yPos(data[0]))
-    for (let i = 1; i < data.length; i++) ctx.lineTo(xPos(i), yPos(data[i]))
-    ctx.lineTo(xPos(data.length - 1), padTop + plotH)
-    ctx.lineTo(xPos(0), padTop + plotH)
-    ctx.closePath()
-    const grad = ctx.createLinearGradient(0, padTop, 0, padTop + plotH)
-    grad.addColorStop(0, color + '20')
-    grad.addColorStop(1, color + '05')
-    ctx.fillStyle = grad
-    ctx.fill()
-
-    // Line
-    ctx.beginPath()
-    ctx.moveTo(xPos(0), yPos(data[0]))
-    for (let i = 1; i < data.length; i++) ctx.lineTo(xPos(i), yPos(data[i]))
-    ctx.strokeStyle = color
-    ctx.lineWidth = 1.5
-    ctx.lineJoin = 'round'
-    ctx.stroke()
-
-    // Last point dot + value
-    const lastX = xPos(data.length - 1)
-    const lastY = yPos(data[data.length - 1])
-    ctx.beginPath()
-    ctx.arc(lastX, lastY, 3, 0, Math.PI * 2)
-    ctx.fillStyle = color
-    ctx.fill()
-    ctx.fillStyle = color
-    ctx.font = '600 12px -apple-system, sans-serif'
-    ctx.textAlign = 'left'
-    ctx.textBaseline = 'bottom'
-    ctx.fillText(formatNum(data[data.length - 1]), lastX + 6, lastY - 2)
 
     // Save base image and layout
     baseRef.current = ctx.getImageData(0, 0, canvas.width, canvas.height)
@@ -119,7 +144,7 @@ export default function Sparkline({ data, color, labels, width, height }) {
     const canvas = canvasRef.current
     const base = baseRef.current
     const layout = layoutRef.current
-    if (!canvas || !base || !layout || !data || data.length < 2) return
+    if (!canvas || !base || !layout || !data || data.length < 1) return
 
     const ctx = canvas.getContext('2d')
     const { dpr, w, padLeft, padRight, plotW, plotH, padTop, min, range } = layout
@@ -129,7 +154,7 @@ export default function Sparkline({ data, color, labels, width, height }) {
 
     if (hover == null || hover < 0 || hover >= data.length) return
 
-    function xPos(i) { return padLeft + (i / (data.length - 1)) * plotW }
+    function xPos(i) { return data.length === 1 ? padLeft + plotW / 2 : padLeft + (i / (data.length - 1)) * plotW }
     function yPos(v) { return padTop + plotH - ((v - min) / range) * plotH }
 
     const hx = xPos(hover)
@@ -151,7 +176,7 @@ export default function Sparkline({ data, color, labels, width, height }) {
 
   const handleMouseMove = useCallback((e) => {
     const layout = layoutRef.current
-    if (!layout || !data || data.length < 2) return
+    if (!layout || !data || data.length < 1) return
     const canvas = canvasRef.current
     const rect = canvas.getBoundingClientRect()
     const mx = e.clientX - rect.left
@@ -163,7 +188,7 @@ export default function Sparkline({ data, color, labels, width, height }) {
 
   const handleMouseLeave = useCallback(() => setHover(null), [])
 
-  return <canvas ref={canvasRef} onMouseMove={handleMouseMove} onMouseLeave={handleMouseLeave} />
+  return <canvas ref={canvasRef} onMouseMove={handleMouseMove} onMouseLeave={handleMouseLeave} style={{ maxWidth: '100%' }} />
 }
 
 function formatNum(n) {

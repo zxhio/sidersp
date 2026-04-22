@@ -18,7 +18,8 @@ const RULE_METRICS = [
 const DEFAULT_WINDOWS = ['10min']
 
 function computeDeltas(points, key) {
-  if (!points || points.length < 2) return { deltas: [], timestamps: [] }
+  if (!points || points.length < 1) return { deltas: [], timestamps: [] }
+  if (points.length === 1) return { deltas: [points[0][key]], timestamps: [points[0].timestamp] }
   const deltas = []
   const timestamps = []
   for (let i = 1; i < points.length; i++) {
@@ -30,7 +31,8 @@ function computeDeltas(points, key) {
 }
 
 function extractValues(points, key) {
-  if (!points || points.length < 2) return { deltas: [], timestamps: [] }
+  if (!points || points.length < 1) return { deltas: [], timestamps: [] }
+  if (points.length === 1) return { deltas: [points[0][key]], timestamps: [points[0].timestamp] }
   const deltas = []
   const timestamps = []
   for (let i = 1; i < points.length; i++) {
@@ -97,7 +99,7 @@ export default function StatsPage() {
   const histories = stats.histories || []
   const series = histories.length > 0 ? histories[0] : null
   const points = series?.points || []
-  const hasHistory = points.length >= 2
+  const hasHistory = points.length >= 1
 
   const activeWindow = window || (series?.name || '')
 
@@ -138,7 +140,7 @@ export default function StatsPage() {
           <>
             {METRICS.map(m => {
               const { deltas, timestamps } = computeDeltas(points, m.key)
-              if (deltas.length < 2) return null
+              if (deltas.length < 1) return null
               return (
                 <div className="section" key={m.key}>
                   <div className="section-title">{m.label}（增量/采样间隔）</div>
@@ -154,7 +156,7 @@ export default function StatsPage() {
             })}
             {RULE_METRICS.map(m => {
               const { deltas, timestamps } = extractValues(points, m.key)
-              if (deltas.length < 2) return null
+              if (deltas.length < 1) return null
               return (
                 <div className="section" key={m.key}>
                   <div className="section-title">{m.label}</div>
@@ -173,7 +175,7 @@ export default function StatsPage() {
           <div className="section">
             <div className="section-title">趋势图</div>
             <div style={{ color: 'var(--c-text-placeholder)', fontSize: 13, padding: '16px 0' }}>
-              历史数据不足，至少需要 2 个采样点才能绘制趋势图
+              暂无历史数据
             </div>
           </div>
         )}

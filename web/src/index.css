@@ -643,6 +643,7 @@ tr:last-child td {
   border-radius: var(--radius);
   padding: 12px;
   box-shadow: var(--c-shadow);
+  overflow: hidden;
 }
 
 /* ===== Window Selector ===== */
