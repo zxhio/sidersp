@@ -123,8 +123,9 @@ registration boundary, and pure response packet builders exist. The builders
 reject VLAN-tagged frames and TCP SYN payloads until those response semantics
 are implemented. A response execution core and bounded in-memory response
 result buffer exist, and the worker boundary dispatches metadata-prefixed XSK
-frames into that execution core. AF_XDP socket IO and management-plane response
-result streaming are still planned.
+frames into that execution core. Response owns worker-group lifecycle for
+queue-scoped workers. AF_XDP socket IO and management-plane response result
+streaming are still planned.
 
 Owns:
 

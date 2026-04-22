@@ -94,9 +94,10 @@ Full user-space response results are owned by the XSK worker path. The current
 implementation provides a response result model, bounded in-memory result
 buffer, and response execution core that records build/TX outcomes. AF_XDP
 backend IO still needs to be implemented, but the worker boundary already passes
-metadata-prefixed XSK frames to the execution core. Dataplane ringbuf events
-remain observation events with numeric verdict codes for `observe`, `tx`, and
-`xsk`.
+metadata-prefixed XSK frames to the execution core. The response package also
+owns worker-group lifecycle for queue-scoped XSK workers. Dataplane ringbuf
+events remain observation events with numeric verdict codes for `observe`,
+`tx`, and `xsk`.
 
 Planned response result shape:
 
