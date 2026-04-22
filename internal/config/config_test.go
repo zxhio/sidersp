@@ -176,6 +176,126 @@ console:
 	}
 }
 
+func TestLoadResponseConfig(t *testing.T) {
+	t.Parallel()
+
+	path := writeConfigFile(t, `controlplane:
+  rules_path: configs/rules.example.yaml
+
+dataplane:
+  interface: eth0
+
+response:
+  enabled: true
+  queues: [0, 1]
+  result_buffer_size: 2048
+  hardware_addr: 02:aa:bb:cc:dd:ee
+  tcp_seq: 1000
+
+console:
+  listen_addr: 127.0.0.1:8080
+`)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if !cfg.Response.Enabled {
+		t.Fatal("Response.Enabled = false, want true")
+	}
+	if got := cfg.Response.WorkerQueues(); len(got) != 2 || got[0] != 0 || got[1] != 1 {
+		t.Fatalf("WorkerQueues() = %+v, want [0 1]", got)
+	}
+	if cfg.Response.ResultBufferCapacity() != 2048 {
+		t.Fatalf("ResultBufferCapacity() = %d, want 2048", cfg.Response.ResultBufferCapacity())
+	}
+	if cfg.Response.HardwareAddr != "02:aa:bb:cc:dd:ee" || cfg.Response.TCPSeq != 1000 {
+		t.Fatalf("Response = %+v, want hardware/tcp_seq populated", cfg.Response)
+	}
+}
+
+func TestResponseConfigDefaults(t *testing.T) {
+	t.Parallel()
+
+	cfg := ResponseConfig{}
+	queues := cfg.WorkerQueues()
+	if len(queues) != 1 || queues[0] != 0 {
+		t.Fatalf("WorkerQueues() = %+v, want [0]", queues)
+	}
+	queues[0] = 10
+	if next := cfg.WorkerQueues(); next[0] != 0 {
+		t.Fatalf("WorkerQueues() returned mutable default, got %+v", next)
+	}
+	if cfg.ResultBufferCapacity() != 1024 {
+		t.Fatalf("ResultBufferCapacity() = %d, want 1024", cfg.ResultBufferCapacity())
+	}
+}
+
+func TestLoadRejectsInvalidResponseConfig(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "negative queue",
+			body: "queues: [-1]",
+			want: "response: queue -1 out of range",
+		},
+		{
+			name: "duplicate queue",
+			body: "queues: [0, 0]",
+			want: "response: duplicate queue 0",
+		},
+		{
+			name: "negative result buffer",
+			body: "result_buffer_size: -1",
+			want: "response: result_buffer_size must be >= 0",
+		},
+		{
+			name: "invalid hardware address",
+			body: "hardware_addr: nope",
+			want: "response: hardware_addr",
+		},
+		{
+			name: "non ethernet hardware address",
+			body: "hardware_addr: 02:aa:bb:cc:dd:ee:ff:00",
+			want: "response: hardware_addr must be a 6-byte ethernet address",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			path := writeConfigFile(t, `controlplane:
+  rules_path: configs/rules.example.yaml
+
+dataplane:
+  interface: eth0
+
+response:
+  `+tc.body+`
+
+console:
+  listen_addr: 127.0.0.1:8080
+`)
+
+			_, err := Load(path)
+			if err == nil {
+				t.Fatal("Load() error = nil, want response validation error")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Load() error = %q, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
 func TestLoadRejectsInvalidStatsHistoryWindow(t *testing.T) {
 	t.Parallel()
 

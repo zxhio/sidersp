@@ -3,6 +3,7 @@ package config
 import (
 	"bytes"
 	"fmt"
+	"net"
 	"os"
 	"strings"
 	"time"
@@ -14,6 +15,7 @@ type Config struct {
 	Dataplane    DataplaneConfig    `yaml:"dataplane"`
 	ControlPlane ControlPlaneConfig `yaml:"controlplane"`
 	Console      ConsoleConfig      `yaml:"console"`
+	Response     ResponseConfig     `yaml:"response"`
 }
 
 type ControlPlaneConfig struct {
@@ -28,6 +30,14 @@ type DataplaneConfig struct {
 type ConsoleConfig struct {
 	ListenAddr   string             `yaml:"listen_addr"`
 	StatsHistory StatsHistoryConfig `yaml:"stats_history"`
+}
+
+type ResponseConfig struct {
+	Enabled          bool   `yaml:"enabled"`
+	Queues           []int  `yaml:"queues"`
+	ResultBufferSize int    `yaml:"result_buffer_size"`
+	HardwareAddr     string `yaml:"hardware_addr"`
+	TCPSeq           uint32 `yaml:"tcp_seq"`
 }
 
 type StatsHistoryConfig struct {
@@ -83,6 +93,9 @@ func (c Config) validate() error {
 	if _, err := c.Console.ParsedStatsHistoryWindows(); err != nil {
 		return fmt.Errorf("console.stats_history: %w", err)
 	}
+	if err := c.Response.validate(); err != nil {
+		return fmt.Errorf("response: %w", err)
+	}
 
 	return nil
 }
@@ -94,6 +107,46 @@ func validateAttachMode(raw string) error {
 	default:
 		return fmt.Errorf("dataplane.attach_mode %q is not valid", raw)
 	}
+}
+
+func (c ResponseConfig) WorkerQueues() []int {
+	if len(c.Queues) == 0 {
+		return []int{0}
+	}
+	return append([]int(nil), c.Queues...)
+}
+
+func (c ResponseConfig) ResultBufferCapacity() int {
+	if c.ResultBufferSize <= 0 {
+		return 1024
+	}
+	return c.ResultBufferSize
+}
+
+func (c ResponseConfig) validate() error {
+	if c.ResultBufferSize < 0 {
+		return fmt.Errorf("result_buffer_size must be >= 0")
+	}
+	seenQueues := make(map[int]struct{}, len(c.Queues))
+	for _, queue := range c.Queues {
+		if queue < 0 {
+			return fmt.Errorf("queue %d out of range", queue)
+		}
+		if _, ok := seenQueues[queue]; ok {
+			return fmt.Errorf("duplicate queue %d", queue)
+		}
+		seenQueues[queue] = struct{}{}
+	}
+	if strings.TrimSpace(c.HardwareAddr) != "" {
+		hw, err := net.ParseMAC(c.HardwareAddr)
+		if err != nil {
+			return fmt.Errorf("hardware_addr: %w", err)
+		}
+		if len(hw) != 6 {
+			return fmt.Errorf("hardware_addr must be a 6-byte ethernet address")
+		}
+	}
+	return nil
 }
 
 func DefaultStatsHistoryWindows() []StatsHistoryWindowConfig {

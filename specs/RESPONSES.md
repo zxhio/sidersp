@@ -134,6 +134,26 @@ records up to its configured capacity and evicts the oldest records when full.
 Durable response result storage and management-plane query APIs are planned
 separate changes.
 
+## Runtime Configuration
+
+The top-level `response` config block is parsed by the config layer. Response
+execution remains disabled unless `response.enabled` is true. Worker queues
+default to queue `0` when omitted, and the local result buffer defaults to
+capacity `1024` when `result_buffer_size` is omitted or zero.
+
+```yaml
+response:
+  enabled: false
+  queues: [0]
+  result_buffer_size: 1024
+  hardware_addr: ""
+  tcp_seq: 1
+```
+
+`hardware_addr` is reserved for ARP reply source hardware address selection.
+`tcp_seq` is reserved for the TCP SYN-ACK response sequence seed. AF_XDP socket
+startup and response runtime wiring are still planned.
+
 ## Module Boundaries
 
 - The control plane validates `response.action`.
