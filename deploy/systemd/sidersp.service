@@ -1,0 +1,19 @@
+[Unit]
+Description=SideSP side-path traffic analysis and active response service
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/sidersp/config.yaml
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/etc/sidersp
+ExecStart=/usr/local/bin/sidersp -config /etc/sidersp/config.yaml
+Restart=on-failure
+RestartSec=3s
+KillSignal=SIGTERM
+TimeoutStopSec=15s
+
+[Install]
+WantedBy=multi-user.target

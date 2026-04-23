@@ -15,6 +15,12 @@ This document defines the system module contract. For the short agent-facing sum
 | `analysis` | `internal/analysis/` | planned | Deep analysis task submission and result ingestion |
 | `response` | `internal/response/` | active | User-space response execution and result feedback |
 
+Deployment artifacts under `deploy/`, `scripts/`, and deployment documents are
+repository operations assets, not runtime modules. They may install binaries,
+configuration, rule files, and service manager metadata, but they must not own
+rule matching, analysis decisions, response decisions, or core pipeline
+orchestration.
+
 ## Dependency Rules
 
 Allowed direction:

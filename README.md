@@ -79,6 +79,23 @@ Run unit tests:
 make test
 ```
 
+Build a release package:
+
+```bash
+make package VERSION=0.1.0
+```
+
+Install from the extracted release package on the target host:
+
+```bash
+tar -xzf sidersp-0.1.0-linux-amd64.tar.gz
+cd sidersp-0.1.0-linux-amd64
+sudo scripts/install-systemd.sh
+```
+
+See [docs/deployment.md](docs/deployment.md) for upgrade, rollback, uninstall,
+logs, and attach-mode notes.
+
 Run BPF tests on a suitable Linux environment:
 
 ```bash

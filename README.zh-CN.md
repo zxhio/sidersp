@@ -79,6 +79,23 @@ sudo make run CONFIG=./configs/config.example.yaml
 make test
 ```
 
+打发布包：
+
+```bash
+make package VERSION=0.1.0
+```
+
+在目标机器解压发布包后安装：
+
+```bash
+tar -xzf sidersp-0.1.0-linux-amd64.tar.gz
+cd sidersp-0.1.0-linux-amd64
+sudo scripts/install-systemd.sh
+```
+
+升级、回滚、卸载、日志和 attach mode 说明见
+[docs/deployment.md](docs/deployment.md)。
+
 在合适的 Linux 环境运行 BPF 测试：
 
 ```bash

@@ -2,10 +2,11 @@ APP := sidersp
 MAIN := ./cmd/sidersp
 BIN := ./build/$(APP)
 CONFIG ?= ./configs/config.example.yaml
+VERSION ?= dev
 GOOS := linux
 GOARCH := amd64
 
-.PHONY: build build-all build-xdp run clean test test-unit test-bpf
+.PHONY: build build-all build-xdp package run clean test test-unit test-bpf
 
 build:
 	CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) go build -trimpath -ldflags="-s -w" -o $(BIN) $(MAIN)
@@ -16,6 +17,9 @@ build-xdp:
 build-all:
 	$(MAKE) build-xdp
 	$(MAKE) build
+
+package: build-all
+	VERSION=$(VERSION) GOOS=$(GOOS) GOARCH=$(GOARCH) scripts/package-release.sh
 
 run: build-all
 	$(BIN) -config $(CONFIG)
