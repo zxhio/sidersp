@@ -2,7 +2,9 @@ package dataplane
 
 import (
 	"encoding/binary"
+	"fmt"
 	"net/netip"
+	"strings"
 	"testing"
 
 	"github.com/cilium/ebpf/link"
@@ -211,7 +213,11 @@ func TestFormatMaskBits(t *testing.T) {
 	setMaskBit(&mask, 65)
 
 	got := formatMaskBits(mask)
-	want := "[0x0000000000000001,0x0000000000000002,0x0000000000000000,0x0000000000000000,0x0000000000000000,0x0000000000000000,0x0000000000000000,0x0000000000000000,0x0000000000000000,0x0000000000000000,0x0000000000000000,0x0000000000000000,0x0000000000000000,0x0000000000000000,0x0000000000000000,0x0000000000000000]"
+	words := make([]string, 0, len(mask.Bits))
+	for _, word := range mask.Bits {
+		words = append(words, fmt.Sprintf("0x%016x", word))
+	}
+	want := "[" + strings.Join(words, ",") + "]"
 	if got != want {
 		t.Fatalf("formatMaskBits() = %q, want %q", got, want)
 	}
