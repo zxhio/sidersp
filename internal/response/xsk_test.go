@@ -168,7 +168,7 @@ func TestXSKWorkerDispatchesSocketFrames(t *testing.T) {
 	}
 }
 
-func TestXSKWorkerLogsAndContinuesAfterFrameHandlerError(t *testing.T) {
+func TestXSKWorkerContinuesAfterFrameHandlerError(t *testing.T) {
 	t.Parallel()
 
 	wantErr := errors.New("handle failed")

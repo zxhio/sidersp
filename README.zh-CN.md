@@ -93,7 +93,7 @@ cd sidersp-0.1.0-linux-amd64
 sudo scripts/install-systemd.sh
 ```
 
-升级、回滚、卸载、日志和 attach mode 说明见
+升级、回滚、卸载、日志、动态日志等级和 attach mode 说明见
 [docs/deployment.md](docs/deployment.md)。
 
 在合适的 Linux 环境运行 BPF 测试：

@@ -15,6 +15,7 @@ import (
 	"sidersp/internal/console"
 	"sidersp/internal/controlplane"
 	"sidersp/internal/dataplane"
+	applogging "sidersp/internal/logging"
 	"sidersp/internal/response"
 	"sidersp/internal/response/afxdp"
 )
@@ -41,6 +42,16 @@ func main() {
 		logrus.WithError(err).WithField("config_path", *configPath).Fatal("Fail to load config")
 	}
 
+	logManager, err := applogging.NewManager(cfg.Logging)
+	if err != nil {
+		logrus.WithError(err).Fatal("Fail to configure logging")
+	}
+	defer func() {
+		if err := logManager.Close(); err != nil {
+			logrus.WithError(err).Error("Fail to close logger")
+		}
+	}()
+
 	dp, err := dataplane.Open(dataplane.Options{
 		Interface:  cfg.Dataplane.Interface,
 		AttachMode: cfg.Dataplane.AttachMode,
@@ -55,7 +66,7 @@ func main() {
 	}()
 
 	cp := controlplane.NewRuntime(cfg, dp, dp, dp)
-	consoleServer := console.NewServer(cfg.Console.ListenAddr, cp)
+	consoleServer := console.NewServer(cfg.Console.ListenAddr, cp, logManager)
 	responseRuntime, err := buildResponseRuntime(cfg, dp)
 	if err != nil {
 		logrus.WithError(err).Fatal("Fail to build response runtime")

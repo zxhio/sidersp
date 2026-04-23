@@ -26,16 +26,26 @@ type RuleService interface {
 	SetRuleEnabled(id int, enabled bool) (rule.Rule, error)
 }
 
-type Server struct {
-	addr    string
-	service RuleService
+type LogService interface {
+	Level() string
+	SetLevel(level string) (string, error)
 }
 
-func NewServer(addr string, service RuleService) *Server {
+type Server struct {
+	addr       string
+	service    RuleService
+	logService LogService
+}
+
+func NewServer(addr string, service RuleService, logServices ...LogService) *Server {
 	if service == nil {
 		panic("console: service is required")
 	}
-	return &Server{addr: addr, service: service}
+	var logService LogService
+	if len(logServices) > 0 {
+		logService = logServices[0]
+	}
+	return &Server{addr: addr, service: service, logService: logService}
 }
 
 func (s *Server) Run(ctx context.Context) error {
@@ -73,9 +83,11 @@ func (s *Server) newRouter() *gin.Engine {
 	router := gin.New()
 	router.Use(gin.Recovery())
 
-	handler := Handler{service: s.service}
+	handler := Handler{service: s.service, logService: s.logService}
 	v1 := router.Group("/api/v1")
 	v1.GET("/status", handler.getStatus)
+	v1.GET("/logging/level", handler.getLogLevel)
+	v1.PUT("/logging/level", handler.setLogLevel)
 	v1.GET("/stats", handler.getStats)
 	v1.GET("/stats/windows", handler.listStatsWindows)
 	v1.GET("/rules", handler.listRules)

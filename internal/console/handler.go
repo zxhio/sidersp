@@ -16,11 +16,42 @@ import (
 )
 
 type Handler struct {
-	service RuleService
+	service    RuleService
+	logService LogService
 }
 
 func (h Handler) getStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, dataEnvelope{Data: newStatusResponse(h.service.Status())})
+}
+
+func (h Handler) getLogLevel(c *gin.Context) {
+	if h.logService == nil {
+		writeError(c, http.StatusNotFound, "NOT_FOUND", "logging service not configured")
+		return
+	}
+
+	c.JSON(http.StatusOK, dataEnvelope{Data: LogLevelResponse{Level: h.logService.Level()}})
+}
+
+func (h Handler) setLogLevel(c *gin.Context) {
+	if h.logService == nil {
+		writeError(c, http.StatusNotFound, "NOT_FOUND", "logging service not configured")
+		return
+	}
+
+	var req LogLevelRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeError(c, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
+		return
+	}
+
+	level, err := h.logService.SetLevel(req.Level)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
+		return
+	}
+
+	c.JSON(http.StatusOK, dataEnvelope{Data: LogLevelResponse{Level: level}})
 }
 
 func (h Handler) getStats(c *gin.Context) {

@@ -20,6 +20,14 @@ response:
   tx_ring_size: 2048
   tx_frame_reserve: 256
 
+logging:
+  level: info
+  file_path: /var/log/sidersp/sidersp.log
+  max_size_mb: 100
+  max_backups: 7
+  max_age_days: 30
+  compress: true
+
 console:
   listen_addr: 127.0.0.1:8080
   stats_history:

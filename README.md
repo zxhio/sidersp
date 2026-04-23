@@ -94,7 +94,7 @@ sudo scripts/install-systemd.sh
 ```
 
 See [docs/deployment.md](docs/deployment.md) for upgrade, rollback, uninstall,
-logs, and attach-mode notes.
+logs, dynamic log-level changes, and attach-mode notes.
 
 Run BPF tests on a suitable Linux environment:
 

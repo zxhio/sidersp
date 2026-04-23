@@ -10,6 +10,7 @@ This document defines the system module contract. For the short agent-facing sum
 | `controlplane` | `internal/controlplane/` | active | Rule loading, rule validation, runtime state, statistics aggregation, workflow orchestration |
 | `console` | `internal/console/`, `web/` | active | REST API, status display, statistics view, rule CRUD |
 | `config` | `internal/config/` | active | Local configuration loading and validation |
+| `logging` | `internal/logging/` | active | Runtime log output setup, file rotation, and log-level management |
 | `model` | `internal/model/` | active | Shared data models used across modules |
 | `rule` | `internal/rule/` | active | Shared rule schema used by controlplane, console, and dataplane compilation |
 | `analysis` | `internal/analysis/` | planned | Deep analysis task submission and result ingestion |
@@ -28,6 +29,7 @@ Allowed direction:
 ```text
 console/web -> controlplane -> dataplane
 console/controlplane/dataplane -> rule
+cmd/console -> logging
 controlplane -> analysis
 controlplane -> response
 dataplane -> event output / XSK redirect
@@ -40,6 +42,7 @@ Hard rules:
 - `console` / `web` must not perform rule matching, analysis decisions, or response decisions
 - `analysis` must not manage rules or execute responses
 - `response` must not decide whether a response should happen
+- `logging` must not perform rule matching, analysis decisions, response decisions, or pipeline orchestration
 
 ## Dataplane
 

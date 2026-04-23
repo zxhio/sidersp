@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
 )
 
@@ -16,6 +17,7 @@ type Config struct {
 	ControlPlane ControlPlaneConfig `yaml:"controlplane"`
 	Console      ConsoleConfig      `yaml:"console"`
 	Response     ResponseConfig     `yaml:"response"`
+	Logging      LoggingConfig      `yaml:"logging"`
 }
 
 type ControlPlaneConfig struct {
@@ -49,6 +51,15 @@ type ResponseConfig struct {
 	TXFrameReserve     uint32 `yaml:"tx_frame_reserve"`
 }
 
+type LoggingConfig struct {
+	Level      string `yaml:"level"`
+	FilePath   string `yaml:"file_path"`
+	MaxSizeMB  int    `yaml:"max_size_mb"`
+	MaxBackups int    `yaml:"max_backups"`
+	MaxAgeDays int    `yaml:"max_age_days"`
+	Compress   bool   `yaml:"compress"`
+}
+
 type StatsHistoryConfig struct {
 	Windows []StatsHistoryWindowConfig `yaml:"windows"`
 }
@@ -80,12 +91,18 @@ func Load(path string) (Config, error) {
 		return Config{}, fmt.Errorf("parse config file: %w", err)
 	}
 
+	cfg.applyDefaults()
 	if err := cfg.validate(); err != nil {
 		return Config{}, err
 	}
 
 	return cfg, nil
 }
+
+func (c *Config) applyDefaults() {
+	c.Logging.applyDefaults()
+}
+
 func (c Config) validate() error {
 	if strings.TrimSpace(c.Dataplane.Interface) == "" {
 		return fmt.Errorf("dataplane.interface is required")
@@ -104,6 +121,9 @@ func (c Config) validate() error {
 	}
 	if err := c.Response.validate(); err != nil {
 		return fmt.Errorf("response: %w", err)
+	}
+	if err := c.Logging.validate(); err != nil {
+		return fmt.Errorf("logging: %w", err)
 	}
 
 	return nil
@@ -154,6 +174,43 @@ func (c ResponseConfig) validate() error {
 		if len(hw) != 6 {
 			return fmt.Errorf("hardware_addr must be a 6-byte ethernet address")
 		}
+	}
+	return nil
+}
+
+func (c *LoggingConfig) applyDefaults() {
+	if strings.TrimSpace(c.Level) == "" {
+		c.Level = "info"
+	}
+	if strings.TrimSpace(c.FilePath) == "" {
+		c.FilePath = "/var/log/sidersp/sidersp.log"
+	}
+	if c.MaxSizeMB == 0 {
+		c.MaxSizeMB = 100
+	}
+	if c.MaxBackups == 0 {
+		c.MaxBackups = 7
+	}
+	if c.MaxAgeDays == 0 {
+		c.MaxAgeDays = 30
+	}
+}
+
+func (c LoggingConfig) validate() error {
+	if _, err := logrus.ParseLevel(c.Level); err != nil {
+		return fmt.Errorf("level %q is not valid", c.Level)
+	}
+	if strings.TrimSpace(c.FilePath) == "" {
+		return fmt.Errorf("file_path is required")
+	}
+	if c.MaxSizeMB < 0 {
+		return fmt.Errorf("max_size_mb must be >= 0")
+	}
+	if c.MaxBackups < 0 {
+		return fmt.Errorf("max_backups must be >= 0")
+	}
+	if c.MaxAgeDays < 0 {
+		return fmt.Errorf("max_age_days must be >= 0")
 	}
 	return nil
 }

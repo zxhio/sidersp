@@ -86,3 +86,11 @@ type StatsPointResponse struct {
 	TXFailed       uint64 `json:"tx_failed"`
 	XskFailed      uint64 `json:"xsk_failed"`
 }
+
+type LogLevelRequest struct {
+	Level string `json:"level"`
+}
+
+type LogLevelResponse struct {
+	Level string `json:"level"`
+}
