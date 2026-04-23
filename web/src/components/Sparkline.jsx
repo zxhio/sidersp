@@ -31,9 +31,9 @@ export default function Sparkline({ data, color, labels, width, height }) {
     const plotW = w - padLeft - padRight
     const plotH = h - padTop - padBottom
 
-    const min = Math.min(...data)
-    const max = Math.max(...data)
-    const range = max - min || 1
+    const min = 0
+    const max = Math.max(Math.max(...data), 1)
+    const range = max - min
 
     const singlePoint = data.length === 1
 
@@ -119,19 +119,6 @@ export default function Sparkline({ data, color, labels, width, height }) {
       ctx.lineWidth = 1.5
       ctx.lineJoin = 'round'
       ctx.stroke()
-
-      // Last point dot + value
-      const lastX = xPos(data.length - 1)
-      const lastY = yPos(data[data.length - 1])
-      ctx.beginPath()
-      ctx.arc(lastX, lastY, 3, 0, Math.PI * 2)
-      ctx.fillStyle = color
-      ctx.fill()
-      ctx.fillStyle = color
-      ctx.font = '600 12px -apple-system, sans-serif'
-      ctx.textAlign = 'left'
-      ctx.textBaseline = 'bottom'
-      ctx.fillText(formatNum(data[data.length - 1]), lastX + 6, lastY - 2)
     }
 
     // Save base image and layout
