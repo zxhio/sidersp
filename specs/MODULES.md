@@ -131,15 +131,16 @@ Module for active user-space response execution.
 
 Current implementation status: XSK metadata decoding, response packet builders,
 response execution, bounded in-memory response result buffering, worker-group
-lifecycle, runtime assembly, and Linux AF_XDP socket IO exist. The
-builders reject VLAN-tagged frames and TCP SYN payloads until those response
-semantics are implemented. Management-plane response result streaming is still
-planned.
+lifecycle, runtime assembly, Linux AF_XDP ingress socket IO, and shared TX
+backend selection exist. Same-interface builders still reject VLAN-tagged
+frames and TCP SYN payloads until those response semantics are implemented.
+Management-plane response result streaming is still planned.
 
 Owns:
 
 - User-space TX response execution
-- AF_XDP RX/TX worker loops and XSK TX packet handling
+- AF_XDP RX worker loops, same-interface XSK TX handling, and alternate-egress
+  TX backend selection for supported actions
 - Response result recording
 - Failure feedback
 

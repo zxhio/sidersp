@@ -10,15 +10,19 @@ import (
 	"github.com/google/gopacket/layers"
 )
 
-type ResponseTransmitter interface {
+type frameTransmitter interface {
 	Transmit(context.Context, []byte) error
+}
+
+type actionTransmitter interface {
+	Transmit(context.Context, XSKMetadata, []byte, BuildOptions) error
 }
 
 type ResponseExecutor struct {
 	ifindex int
 	queueID int
 	opts    BuildOptions
-	tx      ResponseTransmitter
+	tx      actionTransmitter
 	results *ResultBuffer
 }
 
@@ -26,7 +30,7 @@ type ResponseExecutorConfig struct {
 	IfIndex int
 	QueueID int
 	Options BuildOptions
-	TX      ResponseTransmitter
+	TX      actionTransmitter
 	Results *ResultBuffer
 }
 
@@ -60,12 +64,7 @@ func (e *ResponseExecutor) Execute(ctx context.Context, meta XSKMetadata, frame 
 	}
 
 	result := e.newResult(meta, action, frame)
-	responseFrame, err := BuildResponseFrame(meta, frame, e.opts)
-	if err != nil {
-		e.recordFailure(result, err)
-		return err
-	}
-	if err := e.tx.Transmit(ctx, responseFrame); err != nil {
+	if err := e.tx.Transmit(ctx, meta, frame, e.opts); err != nil {
 		err = fmt.Errorf("transmit response frame: %w", err)
 		e.recordFailure(result, err)
 		return err

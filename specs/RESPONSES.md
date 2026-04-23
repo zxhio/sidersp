@@ -11,8 +11,8 @@ Rules reference responses through `response.action`. The control plane validates
 | `none` | `0` | dataplane pass | active | Match silently and continue with `XDP_PASS` |
 | `alert` | `1` | dataplane observe | active | Emit an observation event and continue with `XDP_PASS` |
 | `tcp_reset` | `2` | BPF kernel TX | active | Build TCP RST in BPF and send by same-interface `XDP_TX` or configured egress-interface `XDP_REDIRECT` |
-| `icmp_echo_reply` | `3` | XSK TX | Linux AF_XDP socket implemented, integration pending | Redirect the original packet to XSK; user space builds ICMP echo reply |
-| `arp_reply` | `4` | XSK TX | Linux AF_XDP socket implemented, integration pending | Redirect the original packet to XSK; user space builds ARP reply |
+| `icmp_echo_reply` | `3` | XSK RX + user-space TX | active | Redirect the original packet to XSK; user space builds ICMP echo reply and transmits through same-interface XSK TX or configured shared TX egress |
+| `arp_reply` | `4` | XSK RX + user-space TX | active | Redirect the original packet to XSK; user space builds ARP reply and transmits through same-interface XSK TX or configured shared TX egress |
 | `tcp_syn_ack` | `5` | XSK TX | Linux AF_XDP socket implemented, integration pending | Redirect the original packet to XSK; user space builds TCP SYN-ACK |
 
 Action names are stable snake-case API values. Numeric codes are the dataplane ABI and must stay synchronized with BPF definitions.
@@ -62,13 +62,13 @@ If TX construction, VLAN stripping, FIB lookup, or redirect preparation fails,
 the dataplane increments the corresponding failure counter and returns the
 configured failure verdict: `XDP_PASS` or `XDP_DROP`.
 
-### XSK TX
+### XSK RX + User-Space TX
 
 Used by `icmp_echo_reply`, `arp_reply`, and `tcp_syn_ack`.
 
 ```text
 packet -> BPF parse/match -> prepend xsk_meta -> XDP_REDIRECT to XSK
-XSK worker -> read xsk_meta -> parse full original packet -> build response -> XSK_TX
+XSK worker -> read xsk_meta -> parse full original packet -> build response -> same-interface XSK_TX or configured user-space egress TX
 ```
 
 XSK TX is for actions that need full original packet context. Ringbuf must not be used to carry packet fields required for response construction.
@@ -80,8 +80,16 @@ response packet was transmitted.
 `tcp_syn_ack` is guarded in BPF and only redirects initial SYN packets. SYN
 packets that also carry ACK, RST, or FIN pass without XSK redirect.
 
-The current user-space response builders reject VLAN-tagged frames until VLAN
-tag preservation is implemented for response TX. The `tcp_syn_ack` builder also
+`icmp_echo_reply` and `arp_reply` use the shared `response.tx.*` policy
+surface. With `response.tx.egress_interface: ""`, replies are transmitted
+through the same AF_XDP socket bound to the ingress interface. With a non-empty
+`response.tx.egress_interface`, the worker still receives and parses the packet
+from ingress XSK, but transmits supported replies through the configured egress
+interface in user space instead of assuming the ingress interface is also the
+transmit interface.
+
+The current same-interface response builders reject VLAN-tagged frames until
+VLAN tag preservation is implemented for XSK TX. The `tcp_syn_ack` builder also
 rejects SYN payloads until TCP Fast Open style payload ACK semantics are
 implemented.
 
@@ -179,16 +187,15 @@ response:
 
 `response.tx` config fields:
 
-- `egress_interface`: `""` means same-interface `XDP_TX` from the ingress
-  interface. A non-empty interface name means BPF redirects the response through
-  that egress interface.
-- `vlan_mode`: `preserve` keeps one 802.1Q tag on the response frame. `access`
-  strips one 802.1Q tag before egress.
-- `failure_verdict`: `pass` lets the original packet continue for failures
-  detected before the packet is rewritten, such as egress FIB lookup failure.
-  `drop` consumes the original packet. After the packet has been rewritten, any
-  later TX failure is dropped to avoid passing a synthetic RST into the host
-  stack. Pure mirror-port deployments should normally use `drop`.
+- `egress_interface`: shared TX egress policy. `""` keeps same-interface TX.
+  For `tcp_reset`, a non-empty interface name enables BPF redirect TX. For
+  `icmp_echo_reply` and `arp_reply`, a non-empty interface name enables
+  user-space alternate egress TX after the packet is received from ingress XSK.
+- `vlan_mode`: shared TX VLAN policy for actions that support alternate egress
+  transmission, starting with `tcp_reset`, `icmp_echo_reply`, and `arp_reply`.
+- `failure_verdict`: shared TX failure policy surface for actions that support
+  alternate egress transmission, starting with `tcp_reset`,
+  `icmp_echo_reply`, and `arp_reply`.
 
 `response.arp_reply.hardware_addr` selects the ARP reply source hardware
 address when configured.
@@ -208,7 +215,8 @@ exceed `frame_count`.
 - BPF owns `none`, `alert`, and `tcp_reset` execution, including lightweight
   egress-interface redirect for `tcp_reset`.
 - BPF only redirects XSK TX actions and writes `xsk_meta`; it does not build complex spoof responses.
-- The XSK worker owns user-space TX response construction and result reporting.
+- The XSK worker owns user-space TX response construction, TX backend
+  selection, and result reporting.
 - The XSK worker must not decide whether a response should happen; that decision comes from the matched rule action.
 - Ringbuf is an observation channel, not a packet construction data channel.
 

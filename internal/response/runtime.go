@@ -5,12 +5,13 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strings"
 )
 
 type XSKBackend interface {
 	FD() uint32
 	Receive(context.Context) ([]byte, error)
-	ResponseTransmitter
+	frameTransmitter
 	io.Closer
 }
 
@@ -23,6 +24,7 @@ type RuntimeConfig struct {
 	ResultBufferCapacity int
 	HardwareAddr         net.HardwareAddr
 	TCPSeq               uint32
+	EgressInterface      string
 	Registrar            XSKRegistrar
 	NewXSKBackend        NewXSKBackendFunc
 }
@@ -31,6 +33,7 @@ type Runtime struct {
 	group    *WorkerGroup
 	results  *ResultBuffer
 	backends []XSKBackend
+	closers  []io.Closer
 }
 
 func NewRuntime(config RuntimeConfig) (*Runtime, error) {
@@ -56,13 +59,36 @@ func NewRuntime(config RuntimeConfig) (*Runtime, error) {
 	}
 	workerSpecs := make([]WorkerSpec, 0, len(queues))
 	backends := make([]XSKBackend, 0, len(queues))
+	closers := make([]io.Closer, 0, 2)
+	actionOverrides := make(map[uint16]actionTransmitter)
+	if strings.TrimSpace(config.EgressInterface) != "" {
+		icmpTX, err := newICMPEgressSender(config.EgressInterface)
+		if err != nil {
+			return nil, fmt.Errorf("create icmp egress transmitter: %w", err)
+		}
+		closers = append(closers, icmpTX)
+		actionOverrides[ActionICMPEchoReply] = &icmpEgressTX{tx: icmpTX}
+
+		arpTX, err := newFrameEgressSender(config.EgressInterface)
+		if err != nil {
+			closeClosers(closers)
+			return nil, fmt.Errorf("create arp egress transmitter: %w", err)
+		}
+		closers = append(closers, arpTX)
+		actionOverrides[ActionARPReply] = &arpEgressTX{tx: arpTX}
+	}
 	for _, queueID := range queues {
 		backend, err := config.NewXSKBackend(queueID)
 		if err != nil {
 			closeBackends(backends)
+			closeClosers(closers)
 			return nil, fmt.Errorf("create xsk backend queue %d: %w", queueID, err)
 		}
 		backends = append(backends, backend)
+		var actionTX actionTransmitter = &sameInterfaceTX{tx: backend}
+		if len(actionOverrides) != 0 {
+			actionTX = &actionTXMux{defaultTX: actionTX, overrides: actionOverrides}
+		}
 		executor, err := NewResponseExecutor(ResponseExecutorConfig{
 			IfIndex: config.IfIndex,
 			QueueID: queueID,
@@ -70,16 +96,18 @@ func NewRuntime(config RuntimeConfig) (*Runtime, error) {
 				HardwareAddr: append(net.HardwareAddr(nil), config.HardwareAddr...),
 				TCPSeq:       config.TCPSeq,
 			},
-			TX:      backend,
+			TX:      actionTX,
 			Results: results,
 		})
 		if err != nil {
 			closeBackends(backends)
+			closeClosers(closers)
 			return nil, err
 		}
 		worker, err := NewXSKWorker(config.IfIndex, queueID, config.Registrar, backend, executor.ExecuteXSKFrame)
 		if err != nil {
 			closeBackends(backends)
+			closeClosers(closers)
 			return nil, err
 		}
 		workerSpecs = append(workerSpecs, WorkerSpec{QueueID: queueID, Worker: worker})
@@ -88,9 +116,10 @@ func NewRuntime(config RuntimeConfig) (*Runtime, error) {
 	group, err := NewWorkerGroup(workerSpecs)
 	if err != nil {
 		closeBackends(backends)
+		closeClosers(closers)
 		return nil, err
 	}
-	return &Runtime{group: group, results: results, backends: backends}, nil
+	return &Runtime{group: group, results: results, backends: backends, closers: closers}, nil
 }
 
 func (r *Runtime) Run(ctx context.Context) error {
@@ -112,6 +141,12 @@ func (r *Runtime) Close() error {
 		}
 	}
 	r.backends = nil
+	for _, closer := range r.closers {
+		if err := closer.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	r.closers = nil
 	return firstErr
 }
 
@@ -125,5 +160,11 @@ func (r *Runtime) Results() []ResponseResult {
 func closeBackends(backends []XSKBackend) {
 	for _, backend := range backends {
 		_ = backend.Close()
+	}
+}
+
+func closeClosers(closers []io.Closer) {
+	for _, closer := range closers {
+		_ = closer.Close()
 	}
 }

@@ -44,6 +44,26 @@ func TestBuildICMPEchoReply(t *testing.T) {
 	}
 }
 
+func TestBuildICMPEchoReplyIPv4(t *testing.T) {
+	t.Parallel()
+
+	reply, err := BuildICMPEchoReplyIPv4(buildTestICMPEchoRequest(t))
+	if err != nil {
+		t.Fatalf("BuildICMPEchoReplyIPv4() error = %v", err)
+	}
+
+	packet := gopacket.NewPacket(reply, layers.LayerTypeIPv4, gopacket.Default)
+	ip4 := packet.Layer(layers.LayerTypeIPv4).(*layers.IPv4)
+	icmp := packet.Layer(layers.LayerTypeICMPv4).(*layers.ICMPv4)
+
+	if ip4.SrcIP.String() != "10.0.0.2" || ip4.DstIP.String() != "10.0.0.1" {
+		t.Fatalf("ip = %s -> %s, want swapped", ip4.SrcIP, ip4.DstIP)
+	}
+	if icmp.TypeCode.Type() != layers.ICMPv4TypeEchoReply || icmp.Id != 7 || icmp.Seq != 9 {
+		t.Fatalf("icmp = type %d id %d seq %d, want echo_reply id=7 seq=9", icmp.TypeCode.Type(), icmp.Id, icmp.Seq)
+	}
+}
+
 func TestBuildARPReply(t *testing.T) {
 	t.Parallel()
 

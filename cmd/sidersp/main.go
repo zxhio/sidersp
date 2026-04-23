@@ -161,6 +161,7 @@ func buildResponseRuntime(cfg config.Config, registrar response.XSKRegistrar) (*
 		ResultBufferCapacity: cfg.Response.ResultBufferCapacity(),
 		HardwareAddr:         hardwareAddr,
 		TCPSeq:               cfg.Response.TCPSynAck.TCPSeq,
+		EgressInterface:      cfg.Response.TX.EgressInterface,
 		Registrar:            registrar,
 		NewXSKBackend:        newBackend,
 	})

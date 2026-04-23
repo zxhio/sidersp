@@ -134,11 +134,12 @@ workers are enabled, verify queue IDs, NIC support, UMEM sizing, and source
 hardware address settings before starting the service. AF_XDP setup failures
 will fail service startup and systemd will restart according to the unit policy.
 
-## TCP Reset Egress Interface
+## Shared Response TX Egress
 
 For a pure switch mirror/SPAN destination port, do not rely on same-port
-`XDP_TX` for active responses. Set `response.tx.egress_interface` to send the RST
-from a separate interface that participates in normal switching/routing:
+transmission for active responses. Set `response.tx.egress_interface` to send
+supported responses from a separate interface that participates in normal
+switching or routing:
 
 ```yaml
 response:
@@ -150,9 +151,19 @@ response:
 
 Use `vlan_mode: access` when the response interface is an access port. Use
 `vlan_mode: preserve` when the response interface is a trunk that should carry
-the original single 802.1Q tag. When `egress_interface` is non-empty, BPF uses
-the kernel FIB lookup; ensure the host has a valid route and neighbor entry for
-the response destination through the configured egress interface.
+the original single 802.1Q tag.
+
+Current shared-TX behavior:
+
+- `tcp_reset` uses BPF/kernel redirect TX through the configured egress
+  interface.
+- `icmp_echo_reply` keeps ingress RX on AF_XDP, then transmits the reply through
+  the configured egress interface in user space.
+- `arp_reply` keeps ingress RX on AF_XDP, then transmits the reply frame through
+  the configured egress interface in user space.
+
+When `egress_interface` is non-empty, ensure the host has a valid route for the
+response destination through the configured egress interface.
 
 ## Operate
 

@@ -34,6 +34,33 @@ func BuildResponseFrame(meta XSKMetadata, frame []byte, opts BuildOptions) ([]by
 	}
 }
 
+func BuildICMPEchoReplyIPv4(frame []byte) ([]byte, error) {
+	ip4, icmp, err := parseICMPIPv4Packet(frame)
+	if err != nil {
+		return nil, err
+	}
+	if icmp.TypeCode.Type() != layers.ICMPv4TypeEchoRequest || icmp.TypeCode.Code() != 0 {
+		return nil, fmt.Errorf("build icmp echo reply: packet is not echo request")
+	}
+
+	outIP := layers.IPv4{
+		Version:  4,
+		IHL:      5,
+		TTL:      64,
+		Id:       ip4.Id,
+		Protocol: layers.IPProtocolICMPv4,
+		SrcIP:    append(net.IP(nil), ip4.DstIP...),
+		DstIP:    append(net.IP(nil), ip4.SrcIP...),
+	}
+	outICMP := layers.ICMPv4{
+		TypeCode: layers.CreateICMPv4TypeCode(layers.ICMPv4TypeEchoReply, 0),
+		Id:       icmp.Id,
+		Seq:      icmp.Seq,
+	}
+
+	return serializeLayers(&outIP, &outICMP, gopacket.Payload(append([]byte(nil), icmp.Payload...)))
+}
+
 func buildICMPEchoReply(frame []byte) ([]byte, error) {
 	eth, ip4, icmp, err := parseICMPFrame(frame)
 	if err != nil {
@@ -179,6 +206,26 @@ func parseICMPFrame(frame []byte) (*layers.Ethernet, *layers.IPv4, *layers.ICMPv
 		return nil, nil, nil, fmt.Errorf("build icmp echo reply: unexpected icmp layer")
 	}
 	return eth, ip4, icmp, nil
+}
+
+func parseICMPIPv4Packet(frame []byte) (*layers.IPv4, *layers.ICMPv4, error) {
+	packet := gopacket.NewPacket(frame, layers.LayerTypeEthernet, gopacket.Default)
+	if errLayer := packet.ErrorLayer(); errLayer != nil {
+		return nil, nil, fmt.Errorf("parse ethernet frame: %v", errLayer.Error())
+	}
+	ip4, err := requireIPv4(packet, "build icmp echo reply")
+	if err != nil {
+		return nil, nil, err
+	}
+	icmpLayer := packet.Layer(layers.LayerTypeICMPv4)
+	if icmpLayer == nil {
+		return nil, nil, fmt.Errorf("build icmp echo reply: icmp layer missing")
+	}
+	icmp, ok := icmpLayer.(*layers.ICMPv4)
+	if !ok {
+		return nil, nil, fmt.Errorf("build icmp echo reply: unexpected icmp layer")
+	}
+	return ip4, icmp, nil
 }
 
 func parseARPFrame(frame []byte) (*layers.Ethernet, *layers.ARP, error) {

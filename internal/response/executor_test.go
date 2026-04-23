@@ -178,14 +178,14 @@ func TestResponseExecutorRejectsShortXSKFrame(t *testing.T) {
 	}
 }
 
-func newTestExecutor(t *testing.T, tx ResponseTransmitter, results *ResultBuffer, opts BuildOptions) *ResponseExecutor {
+func newTestExecutor(t *testing.T, tx frameTransmitter, results *ResultBuffer, opts BuildOptions) *ResponseExecutor {
 	t.Helper()
 
 	executor, err := NewResponseExecutor(ResponseExecutorConfig{
 		IfIndex: 7,
 		QueueID: 3,
 		Options: opts,
-		TX:      tx,
+		TX:      &sameInterfaceTX{tx: tx},
 		Results: results,
 	})
 	if err != nil {
