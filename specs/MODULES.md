@@ -57,6 +57,8 @@ Owns:
 - Synchronous TX actions such as `tcp_reset`
 - XSK redirect and XSK fd registration for actions that need full packet context
 - Observation event output
+- Dataplane interface setup required for packet capture, including promiscuous
+  mode
 
 Does not own:
 

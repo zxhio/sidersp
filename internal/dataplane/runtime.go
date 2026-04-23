@@ -21,10 +21,11 @@ import (
 )
 
 type Runtime struct {
-	objs    siderspObjects
-	xdpLink link.Link
-	iface   string
-	opts    Options
+	objs       siderspObjects
+	xdpLink    link.Link
+	iface      string
+	opts       Options
+	promiscSet bool
 }
 
 type Options struct {
@@ -50,14 +51,27 @@ func Open(opts Options) (*Runtime, error) {
 }
 
 func (r *Runtime) Close() error {
+	var closeErr error
 	if r.xdpLink != nil {
 		if err := r.xdpLink.Close(); err != nil {
-			_ = r.objs.Close()
-			return fmt.Errorf("detach xdp from %s: %w", r.iface, err)
+			closeErr = fmt.Errorf("detach xdp from %s: %w", r.iface, err)
 		}
 	}
 
-	return r.objs.Close()
+	if r.promiscSet {
+		if err := setInterfacePromisc(r.iface, false); err != nil {
+			logrus.WithError(err).WithField("interface", r.iface).Warn("Fail to restore interface promiscuous mode")
+			if closeErr == nil {
+				closeErr = fmt.Errorf("restore promiscuous mode on %s: %w", r.iface, err)
+			}
+		}
+	}
+
+	if err := r.objs.Close(); err != nil && closeErr == nil {
+		closeErr = err
+	}
+
+	return closeErr
 }
 
 func (r *Runtime) RunEventStream(ctx context.Context) error {
@@ -128,12 +142,40 @@ func (r *Runtime) attachOnce() error {
 		return nil
 	}
 
+	if err := r.configurePromisc(); err != nil {
+		return err
+	}
+
 	xdpLink, err := attachXDP(r.objs.XdpSidersp, r.opts)
 	if err != nil {
+		if r.promiscSet {
+			if restoreErr := setInterfacePromisc(r.iface, false); restoreErr != nil {
+				logrus.WithError(restoreErr).WithField("interface", r.iface).Warn("Fail to restore interface promiscuous mode")
+			}
+			r.promiscSet = false
+		}
 		return err
 	}
 
 	r.xdpLink = xdpLink
+	return nil
+}
+
+func (r *Runtime) configurePromisc() error {
+	enabled, err := interfacePromisc(r.iface)
+	if err != nil {
+		return fmt.Errorf("read promiscuous mode on %s: %w", r.iface, err)
+	}
+	if enabled {
+		logrus.WithField("interface", r.iface).Info("Interface promiscuous mode already enabled")
+		return nil
+	}
+
+	if err := setInterfacePromisc(r.iface, true); err != nil {
+		return fmt.Errorf("enable promiscuous mode on %s: %w", r.iface, err)
+	}
+	r.promiscSet = true
+	logrus.WithField("interface", r.iface).Info("Enabled interface promiscuous mode")
 	return nil
 }
 

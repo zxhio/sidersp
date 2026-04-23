@@ -117,6 +117,16 @@ native XDP support.
 Use `dataplane.attach_mode: offload` only when the NIC supports hardware
 offload and the deployment has been validated for that driver and firmware.
 
+SideSP enables promiscuous mode on the dataplane interface during startup. This
+is required for mirrored traffic where frames are not addressed to the interface
+MAC.
+
+Verify runtime interface flags with:
+
+```bash
+ip link show <interface>
+```
+
 ## Response AF_XDP Notes
 
 The default example config keeps `response.enabled: false`. If AF_XDP response
