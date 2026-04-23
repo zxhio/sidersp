@@ -8,7 +8,7 @@ dataplane:
 
 response:
   enabled: false
-  tcp_reset:
+  tx:
     # Values: "" for same-interface XDP_TX, or an interface name for egress XDP_REDIRECT.
     egress_interface: ""
     # Values: preserve, access. preserve keeps one 802.1Q tag; access strips it.
@@ -17,15 +17,18 @@ response:
     failure_verdict: pass
   queues: [0]
   result_buffer_size: 1024
-  hardware_addr: ""
-  tcp_seq: 1
-  frame_size: 4096
-  frame_count: 4096
-  fill_ring_size: 2048
-  completion_ring_size: 2048
-  rx_ring_size: 2048
-  tx_ring_size: 2048
-  tx_frame_reserve: 256
+  arp_reply:
+    hardware_addr: ""
+  tcp_syn_ack:
+    tcp_seq: 1
+  afxdp:
+    frame_size: 4096
+    frame_count: 4096
+    fill_ring_size: 2048
+    completion_ring_size: 2048
+    rx_ring_size: 2048
+    tx_ring_size: 2048
+    tx_frame_reserve: 256
 
 logging:
   level: info

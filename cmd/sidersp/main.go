@@ -52,7 +52,7 @@ func main() {
 		}
 	}()
 
-	tcpResetTX, err := buildTCPResetTXOptions(cfg.Response.TCPReset)
+	tcpResetTX, err := buildTCPResetTXOptions(cfg.Response.TX)
 	if err != nil {
 		logrus.WithError(err).Fatal("Fail to configure tcp_reset TX")
 	}
@@ -114,7 +114,7 @@ func main() {
 	}
 }
 
-func buildTCPResetTXOptions(cfg config.TCPResetConfig) (dataplane.TCPResetTXOptions, error) {
+func buildTCPResetTXOptions(cfg config.ResponseTXConfig) (dataplane.TCPResetTXOptions, error) {
 	var egressIfIndex int
 	if cfg.TXPath() == "egress-interface" {
 		iface, err := net.InterfaceByName(cfg.EgressInterface)
@@ -142,8 +142,8 @@ func buildResponseRuntime(cfg config.Config, registrar response.XSKRegistrar) (*
 	}
 
 	var hardwareAddr net.HardwareAddr
-	if cfg.Response.HardwareAddr != "" {
-		hardwareAddr, err = net.ParseMAC(cfg.Response.HardwareAddr)
+	if cfg.Response.ARPReply.HardwareAddr != "" {
+		hardwareAddr, err = net.ParseMAC(cfg.Response.ARPReply.HardwareAddr)
 		if err != nil {
 			return nil, fmt.Errorf("parse response hardware address: %w", err)
 		}
@@ -160,7 +160,7 @@ func buildResponseRuntime(cfg config.Config, registrar response.XSKRegistrar) (*
 		Queues:               cfg.Response.WorkerQueues(),
 		ResultBufferCapacity: cfg.Response.ResultBufferCapacity(),
 		HardwareAddr:         hardwareAddr,
-		TCPSeq:               cfg.Response.TCPSeq,
+		TCPSeq:               cfg.Response.TCPSynAck.TCPSeq,
 		Registrar:            registrar,
 		NewXSKBackend:        newBackend,
 	})
@@ -170,25 +170,25 @@ func buildAFXDPConfig(cfg config.ResponseConfig, ifindex int) afxdp.SocketConfig
 	afxdpCfg := afxdp.DefaultSocketConfig()
 	afxdpCfg.IfIndex = ifindex
 
-	if v := cfg.FrameSize; v != 0 {
+	if v := cfg.AFXDP.FrameSize; v != 0 {
 		afxdpCfg.FrameSize = v
 	}
-	if v := cfg.FrameCount; v != 0 {
+	if v := cfg.AFXDP.FrameCount; v != 0 {
 		afxdpCfg.FrameCount = v
 	}
-	if v := cfg.FillRingSize; v != 0 {
+	if v := cfg.AFXDP.FillRingSize; v != 0 {
 		afxdpCfg.FillRingSize = v
 	}
-	if v := cfg.CompletionRingSize; v != 0 {
+	if v := cfg.AFXDP.CompletionRingSize; v != 0 {
 		afxdpCfg.CompletionRingSize = v
 	}
-	if v := cfg.RXRingSize; v != 0 {
+	if v := cfg.AFXDP.RXRingSize; v != 0 {
 		afxdpCfg.RXRingSize = v
 	}
-	if v := cfg.TXRingSize; v != 0 {
+	if v := cfg.AFXDP.TXRingSize; v != 0 {
 		afxdpCfg.TXRingSize = v
 	}
-	if v := cfg.TXFrameReserve; v != 0 {
+	if v := cfg.AFXDP.TXFrameReserve; v != 0 {
 		afxdpCfg.TXFrameReserve = v
 	}
 

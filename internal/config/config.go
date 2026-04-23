@@ -35,14 +35,30 @@ type ConsoleConfig struct {
 }
 
 type ResponseConfig struct {
-	Enabled          bool           `yaml:"enabled"`
-	Queues           []int          `yaml:"queues"`
-	ResultBufferSize int            `yaml:"result_buffer_size"`
-	HardwareAddr     string         `yaml:"hardware_addr"`
-	TCPSeq           uint32         `yaml:"tcp_seq"`
-	TCPReset         TCPResetConfig `yaml:"tcp_reset"`
+	Enabled          bool             `yaml:"enabled"`
+	Queues           []int            `yaml:"queues"`
+	ResultBufferSize int              `yaml:"result_buffer_size"`
+	TX               ResponseTXConfig `yaml:"tx"`
+	ARPReply         ARPReplyConfig   `yaml:"arp_reply"`
+	TCPSynAck        TCPSynAckConfig  `yaml:"tcp_syn_ack"`
+	AFXDP            AFXDPConfig      `yaml:"afxdp"`
+}
 
-	// AF_XDP socket settings.
+type ResponseTXConfig struct {
+	EgressInterface string `yaml:"egress_interface"`
+	VLANMode        string `yaml:"vlan_mode"`
+	FailureVerdict  string `yaml:"failure_verdict"`
+}
+
+type ARPReplyConfig struct {
+	HardwareAddr string `yaml:"hardware_addr"`
+}
+
+type TCPSynAckConfig struct {
+	TCPSeq uint32 `yaml:"tcp_seq"`
+}
+
+type AFXDPConfig struct {
 	FrameSize          uint32 `yaml:"frame_size"`
 	FrameCount         uint32 `yaml:"frame_count"`
 	FillRingSize       uint32 `yaml:"fill_ring_size"`
@@ -50,12 +66,6 @@ type ResponseConfig struct {
 	RXRingSize         uint32 `yaml:"rx_ring_size"`
 	TXRingSize         uint32 `yaml:"tx_ring_size"`
 	TXFrameReserve     uint32 `yaml:"tx_frame_reserve"`
-}
-
-type TCPResetConfig struct {
-	EgressInterface string `yaml:"egress_interface"`
-	VLANMode        string `yaml:"vlan_mode"`
-	FailureVerdict  string `yaml:"failure_verdict"`
 }
 
 type LoggingConfig struct {
@@ -159,14 +169,14 @@ func (c ResponseConfig) ResultBufferCapacity() int {
 	return c.ResultBufferSize
 }
 
-func (c TCPResetConfig) TXPath() string {
+func (c ResponseTXConfig) TXPath() string {
 	if strings.TrimSpace(c.EgressInterface) == "" {
 		return "same-interface"
 	}
 	return "egress-interface"
 }
 
-func (c TCPResetConfig) NormalizedVLANMode() string {
+func (c ResponseTXConfig) NormalizedVLANMode() string {
 	mode := strings.ToLower(strings.TrimSpace(c.VLANMode))
 	if mode == "" {
 		return "preserve"
@@ -174,7 +184,7 @@ func (c TCPResetConfig) NormalizedVLANMode() string {
 	return mode
 }
 
-func (c TCPResetConfig) NormalizedFailureVerdict() string {
+func (c ResponseTXConfig) NormalizedFailureVerdict() string {
 	verdict := strings.ToLower(strings.TrimSpace(c.FailureVerdict))
 	if verdict == "" {
 		return "pass"
@@ -196,8 +206,8 @@ func (c ResponseConfig) validate() error {
 		}
 		seenQueues[queue] = struct{}{}
 	}
-	if strings.TrimSpace(c.HardwareAddr) != "" {
-		hw, err := net.ParseMAC(c.HardwareAddr)
+	if strings.TrimSpace(c.ARPReply.HardwareAddr) != "" {
+		hw, err := net.ParseMAC(c.ARPReply.HardwareAddr)
 		if err != nil {
 			return fmt.Errorf("hardware_addr: %w", err)
 		}
@@ -205,13 +215,13 @@ func (c ResponseConfig) validate() error {
 			return fmt.Errorf("hardware_addr must be a 6-byte ethernet address")
 		}
 	}
-	if err := c.TCPReset.validate(); err != nil {
-		return fmt.Errorf("tcp_reset: %w", err)
+	if err := c.TX.validate(); err != nil {
+		return fmt.Errorf("tx: %w", err)
 	}
 	return nil
 }
 
-func (c TCPResetConfig) validate() error {
+func (c ResponseTXConfig) validate() error {
 	switch c.NormalizedVLANMode() {
 	case "preserve", "access":
 	default:

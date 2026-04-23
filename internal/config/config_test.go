@@ -189,12 +189,17 @@ response:
   enabled: true
   queues: [0, 1]
   result_buffer_size: 2048
-  hardware_addr: 02:aa:bb:cc:dd:ee
-  tcp_seq: 1000
-  tcp_reset:
+  tx:
     egress_interface: eth1
     vlan_mode: access
     failure_verdict: drop
+  arp_reply:
+    hardware_addr: 02:aa:bb:cc:dd:ee
+  tcp_syn_ack:
+    tcp_seq: 1000
+  afxdp:
+    frame_size: 4096
+    tx_frame_reserve: 256
 
 console:
   listen_addr: 127.0.0.1:8080
@@ -214,14 +219,17 @@ console:
 	if cfg.Response.ResultBufferCapacity() != 2048 {
 		t.Fatalf("ResultBufferCapacity() = %d, want 2048", cfg.Response.ResultBufferCapacity())
 	}
-	if cfg.Response.HardwareAddr != "02:aa:bb:cc:dd:ee" || cfg.Response.TCPSeq != 1000 {
-		t.Fatalf("Response = %+v, want hardware/tcp_seq populated", cfg.Response)
+	if cfg.Response.ARPReply.HardwareAddr != "02:aa:bb:cc:dd:ee" || cfg.Response.TCPSynAck.TCPSeq != 1000 {
+		t.Fatalf("Response = %+v, want arp_reply/tcp_syn_ack populated", cfg.Response)
 	}
-	if cfg.Response.TCPReset.TXPath() != "egress-interface" ||
-		cfg.Response.TCPReset.EgressInterface != "eth1" ||
-		cfg.Response.TCPReset.NormalizedVLANMode() != "access" ||
-		cfg.Response.TCPReset.NormalizedFailureVerdict() != "drop" {
-		t.Fatalf("TCPReset = %+v, want egress-interface/access/drop", cfg.Response.TCPReset)
+	if cfg.Response.TX.TXPath() != "egress-interface" ||
+		cfg.Response.TX.EgressInterface != "eth1" ||
+		cfg.Response.TX.NormalizedVLANMode() != "access" ||
+		cfg.Response.TX.NormalizedFailureVerdict() != "drop" {
+		t.Fatalf("TX = %+v, want egress-interface/access/drop", cfg.Response.TX)
+	}
+	if cfg.Response.AFXDP.FrameSize != 4096 || cfg.Response.AFXDP.TXFrameReserve != 256 {
+		t.Fatalf("AFXDP = %+v, want frame_size=4096 tx_frame_reserve=256", cfg.Response.AFXDP)
 	}
 }
 
@@ -240,14 +248,17 @@ func TestResponseConfigDefaults(t *testing.T) {
 	if cfg.ResultBufferCapacity() != 1024 {
 		t.Fatalf("ResultBufferCapacity() = %d, want 1024", cfg.ResultBufferCapacity())
 	}
-	if cfg.TCPReset.TXPath() != "same-interface" {
-		t.Fatalf("TCPReset TXPath() = %q, want same-interface", cfg.TCPReset.TXPath())
+	if cfg.TX.TXPath() != "same-interface" {
+		t.Fatalf("TXPath() = %q, want same-interface", cfg.TX.TXPath())
 	}
-	if cfg.TCPReset.NormalizedVLANMode() != "preserve" {
-		t.Fatalf("TCPReset vlan mode = %q, want preserve", cfg.TCPReset.NormalizedVLANMode())
+	if cfg.TX.NormalizedVLANMode() != "preserve" {
+		t.Fatalf("tx vlan mode = %q, want preserve", cfg.TX.NormalizedVLANMode())
 	}
-	if cfg.TCPReset.NormalizedFailureVerdict() != "pass" {
-		t.Fatalf("TCPReset failure verdict = %q, want pass", cfg.TCPReset.NormalizedFailureVerdict())
+	if cfg.TX.NormalizedFailureVerdict() != "pass" {
+		t.Fatalf("tx failure verdict = %q, want pass", cfg.TX.NormalizedFailureVerdict())
+	}
+	if cfg.TCPSynAck.TCPSeq != 0 {
+		t.Fatalf("tcp_syn_ack.tcp_seq = %d, want 0 zero-value", cfg.TCPSynAck.TCPSeq)
 	}
 }
 
@@ -276,28 +287,48 @@ func TestLoadRejectsInvalidResponseConfig(t *testing.T) {
 		},
 		{
 			name: "invalid hardware address",
-			body: "hardware_addr: nope",
+			body: "arp_reply:\n    hardware_addr: nope",
 			want: "response: hardware_addr",
 		},
 		{
 			name: "non ethernet hardware address",
-			body: "hardware_addr: 02:aa:bb:cc:dd:ee:ff:00",
+			body: "arp_reply:\n    hardware_addr: 02:aa:bb:cc:dd:ee:ff:00",
 			want: "response: hardware_addr must be a 6-byte ethernet address",
 		},
 		{
-			name: "tcp reset mode is not supported",
-			body: "tcp_reset:\n    mode: egress-interface",
+			name: "tx mode is not supported",
+			body: "tx:\n    mode: egress-interface",
 			want: "field mode not found",
 		},
 		{
-			name: "bad tcp reset vlan mode",
-			body: "tcp_reset:\n    vlan_mode: tagged",
-			want: `response: tcp_reset: vlan_mode "tagged" is not valid`,
+			name: "bad tx vlan mode",
+			body: "tx:\n    vlan_mode: tagged",
+			want: `response: tx: vlan_mode "tagged" is not valid`,
 		},
 		{
-			name: "bad tcp reset failure verdict",
-			body: "tcp_reset:\n    failure_verdict: reject",
-			want: `response: tcp_reset: failure_verdict "reject" is not valid`,
+			name: "bad tx failure verdict",
+			body: "tx:\n    failure_verdict: reject",
+			want: `response: tx: failure_verdict "reject" is not valid`,
+		},
+		{
+			name: "reject old tcp_reset block",
+			body: "tcp_reset:\n    egress_interface: eth1",
+			want: "field tcp_reset not found",
+		},
+		{
+			name: "reject old top level hardware address",
+			body: "hardware_addr: nope",
+			want: "field hardware_addr not found",
+		},
+		{
+			name: "reject old top level tcp seq",
+			body: "tcp_seq: 1000",
+			want: "field tcp_seq not found",
+		},
+		{
+			name: "reject old flat afxdp field",
+			body: "frame_count: 4096",
+			want: "field frame_count not found",
 		},
 	}
 

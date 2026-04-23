@@ -157,24 +157,27 @@ capacity `1024` when `result_buffer_size` is omitted or zero.
 ```yaml
 response:
   enabled: false
-  tcp_reset:
+  queues: [0]
+  result_buffer_size: 1024
+  tx:
     egress_interface: ""
     vlan_mode: preserve
     failure_verdict: pass
-  queues: [0]
-  result_buffer_size: 1024
-  hardware_addr: ""
-  tcp_seq: 1
-  frame_size: 4096
-  frame_count: 4096
-  fill_ring_size: 2048
-  completion_ring_size: 2048
-  rx_ring_size: 2048
-  tx_ring_size: 2048
-  tx_frame_reserve: 256
+  arp_reply:
+    hardware_addr: ""
+  tcp_syn_ack:
+    tcp_seq: 1
+  afxdp:
+    frame_size: 4096
+    frame_count: 4096
+    fill_ring_size: 2048
+    completion_ring_size: 2048
+    rx_ring_size: 2048
+    tx_ring_size: 2048
+    tx_frame_reserve: 256
 ```
 
-`tcp_reset` config fields:
+`response.tx` config fields:
 
 - `egress_interface`: `""` means same-interface `XDP_TX` from the ingress
   interface. A non-empty interface name means BPF redirects the response through
@@ -187,12 +190,16 @@ response:
   later TX failure is dropped to avoid passing a synthetic RST into the host
   stack. Pure mirror-port deployments should normally use `drop`.
 
-`hardware_addr` selects the ARP reply source hardware address when configured.
-`tcp_seq` sets the TCP SYN-ACK response sequence seed. AF_XDP socket startup is
-Linux-only and requires an attached XDP program plus configured queues that match
-the redirected RX queues. `frame_count` covers both RX fill frames and
-TX-reserved frames; `fill_ring_size + tx_frame_reserve` must not exceed
-`frame_count`.
+`response.arp_reply.hardware_addr` selects the ARP reply source hardware
+address when configured.
+
+`response.tcp_syn_ack.tcp_seq` sets the TCP SYN-ACK response sequence seed.
+
+`response.afxdp.*` contains AF_XDP socket and UMEM sizing. AF_XDP socket
+startup is Linux-only and requires an attached XDP program plus configured
+queues that match the redirected RX queues. `frame_count` covers both RX fill
+frames and TX-reserved frames; `fill_ring_size + tx_frame_reserve` must not
+exceed `frame_count`.
 
 ## Module Boundaries
 

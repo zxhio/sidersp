@@ -137,12 +137,12 @@ will fail service startup and systemd will restart according to the unit policy.
 ## TCP Reset Egress Interface
 
 For a pure switch mirror/SPAN destination port, do not rely on same-port
-`XDP_TX` for active responses. Set `tcp_reset.egress_interface` to send the RST
+`XDP_TX` for active responses. Set `response.tx.egress_interface` to send the RST
 from a separate interface that participates in normal switching/routing:
 
 ```yaml
 response:
-  tcp_reset:
+  tx:
     egress_interface: eth1
     vlan_mode: access
     failure_verdict: drop
