@@ -81,6 +81,22 @@ enum dataplane_verdict {
     VERDICT_OBSERVE = 0,
     VERDICT_TX      = 1,
     VERDICT_XSK     = 2,
+    VERDICT_REDIRECT_TX = 3,
+};
+
+enum tcp_reset_tx_mode {
+    TCP_RESET_TX_MODE_XDP_TX   = 0,
+    TCP_RESET_TX_MODE_REDIRECT = 1,
+};
+
+enum tcp_reset_vlan_mode {
+    TCP_RESET_VLAN_PRESERVE = 0,
+    TCP_RESET_VLAN_ACCESS   = 1,
+};
+
+enum tcp_reset_failure_verdict {
+    TCP_RESET_FAILURE_PASS = 0,
+    TCP_RESET_FAILURE_DROP = 1,
 };
 
 /* Per-packet parsing result (stack-only, never shared with userspace). */
@@ -123,6 +139,13 @@ struct global_cfg {
     mask_t dst_prefix_optional_rules;
 };
 
+struct tx_config {
+    __u32 tcp_reset_mode;
+    __u32 tcp_reset_egress_ifindex;
+    __u32 tcp_reset_vlan_mode;
+    __u32 tcp_reset_failure_verdict;
+};
+
 struct ipv4_lpm_key {
     __u32 prefixlen;
     __be32 addr;
@@ -159,6 +182,9 @@ enum stat_idx {
     STAT_XSK_TX,
     STAT_TX_FAILED,
     STAT_XSK_FAILED,
+    STAT_REDIRECT_TX,
+    STAT_REDIRECT_FAILED,
+    STAT_FIB_LOOKUP_FAILED,
     STAT_COUNT,
 };
 

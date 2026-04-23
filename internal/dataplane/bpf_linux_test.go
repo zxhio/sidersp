@@ -205,6 +205,39 @@ func buildVLANTCPPkt(srcIP, dstIP netip.Addr, srcPort, dstPort uint16, vlan uint
 	return buf.Bytes()
 }
 
+func buildTCPPkt(srcIP, dstIP netip.Addr, srcPort, dstPort uint16, flags uint8, seq, ack uint32, payload []byte) []byte {
+	eth := &layers.Ethernet{SrcMAC: macSrc, DstMAC: macDst, EthernetType: layers.EthernetTypeIPv4}
+	ip4 := &layers.IPv4{
+		Version: 4, IHL: 5, TTL: 64,
+		SrcIP: srcIP.AsSlice(), DstIP: dstIP.AsSlice(),
+		Protocol: layers.IPProtocolTCP,
+	}
+	tcp := &layers.TCP{
+		SrcPort: layers.TCPPort(srcPort),
+		DstPort: layers.TCPPort(dstPort),
+		Seq:     seq,
+		Ack:     ack,
+		FIN:     flags&0x01 != 0,
+		SYN:     flags&0x02 != 0,
+		RST:     flags&0x04 != 0,
+		PSH:     flags&0x08 != 0,
+		ACK:     flags&0x10 != 0,
+		Window:  65535,
+	}
+	_ = tcp.SetNetworkLayerForChecksum(ip4)
+
+	buf := gopacket.NewSerializeBuffer()
+	opts := gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: true}
+	layersToSerialize := []gopacket.SerializableLayer{eth, ip4, tcp}
+	if len(payload) > 0 {
+		layersToSerialize = append(layersToSerialize, gopacket.Payload(payload))
+	}
+	if err := gopacket.SerializeLayers(buf, opts, layersToSerialize...); err != nil {
+		panic(err)
+	}
+	return buf.Bytes()
+}
+
 // ---- Malformed / special packet constructors ----
 
 const (
@@ -446,6 +479,57 @@ func mustReadEvent(t *testing.T, reader *ringbuf.Reader) ruleEvent {
 func ipv4ToUint32(addr netip.Addr) uint32 {
 	a := addr.As4()
 	return uint32(a[0])<<24 | uint32(a[1])<<16 | uint32(a[2])<<8 | uint32(a[3])
+}
+
+func internetChecksum(data []byte) uint16 {
+	var sum uint32
+	for len(data) > 1 {
+		sum += uint32(binary.BigEndian.Uint16(data[:2]))
+		data = data[2:]
+	}
+	if len(data) == 1 {
+		sum += uint32(data[0]) << 8
+	}
+	for sum>>16 != 0 {
+		sum = (sum & 0xffff) + (sum >> 16)
+	}
+	return ^uint16(sum)
+}
+
+func tcpChecksumValid(pkt []byte, l3Off int) bool {
+	ip4 := pkt[l3Off : l3Off+ipv4HeaderLen]
+	tcp := pkt[l3Off+ipv4HeaderLen:]
+	pseudo := make([]byte, 0, 12+len(tcp))
+	pseudo = append(pseudo, ip4[12:16]...)
+	pseudo = append(pseudo, ip4[16:20]...)
+	pseudo = append(pseudo, 0, ip4[9])
+	pseudo = binary.BigEndian.AppendUint16(pseudo, uint16(len(tcp)))
+	pseudo = append(pseudo, tcp...)
+	return internetChecksum(pseudo) == 0
+}
+
+func assertTCPResetFrame(t *testing.T, out []byte, orig []byte, wantFlags uint8, wantSeq, wantAck uint32) {
+	t.Helper()
+	frameLen := ethHeaderLen + ipv4HeaderLen + 20
+	frame := out[:frameLen]
+
+	require.Equal(t, orig[6:12], frame[0:6], "ethernet dst")
+	require.Equal(t, orig[0:6], frame[6:12], "ethernet src")
+	require.Equal(t, uint16(40), binary.BigEndian.Uint16(frame[ethHeaderLen+2:ethHeaderLen+4]), "ipv4 total length")
+	require.Equal(t, uint8(5), frame[ethHeaderLen]&0x0f, "ipv4 ihl")
+	require.Equal(t, orig[ethHeaderLen+16:ethHeaderLen+20], frame[ethHeaderLen+12:ethHeaderLen+16], "ipv4 src")
+	require.Equal(t, orig[ethHeaderLen+12:ethHeaderLen+16], frame[ethHeaderLen+16:ethHeaderLen+20], "ipv4 dst")
+	require.Equal(t, uint16(0), internetChecksum(frame[ethHeaderLen:ethHeaderLen+ipv4HeaderLen]), "ipv4 checksum")
+
+	tcpOff := ethHeaderLen + ipv4HeaderLen
+	require.Equal(t, orig[tcpOff+2:tcpOff+4], frame[tcpOff:tcpOff+2], "tcp source port")
+	require.Equal(t, orig[tcpOff:tcpOff+2], frame[tcpOff+2:tcpOff+4], "tcp destination port")
+	require.Equal(t, wantSeq, binary.BigEndian.Uint32(frame[tcpOff+4:tcpOff+8]), "tcp seq")
+	require.Equal(t, wantAck, binary.BigEndian.Uint32(frame[tcpOff+8:tcpOff+12]), "tcp ack")
+	require.Equal(t, uint8(5), frame[tcpOff+12]>>4, "tcp data offset")
+	require.Equal(t, wantFlags, frame[tcpOff+13]&0x1f, "tcp flags")
+	require.Equal(t, uint16(0), binary.BigEndian.Uint16(frame[tcpOff+14:tcpOff+16]), "tcp window")
+	require.True(t, tcpChecksumValid(frame, ethHeaderLen), "tcp checksum")
 }
 
 // toRefPacket converts a test case description to a refPacket for the reference matcher.
@@ -862,6 +946,102 @@ func TestBPFBoundaryPackets(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBPFTCPResetTXSemantics(t *testing.T) {
+	requireBPFTestEnv(t)
+	rules := []rule.Rule{
+		{
+			ID:       2001,
+			Name:     "reset_tcp_to_port80",
+			Enabled:  true,
+			Priority: 100,
+			Match: rule.RuleMatch{
+				Protocol:    "tcp",
+				DstPorts:    []int{80},
+				DstPrefixes: []string{"10.0.5.2/32"},
+			},
+			Response: rule.RuleResponse{Action: "tcp_reset"},
+		},
+	}
+	objs, reader := setupBPFRuntime(t, rules)
+	defer reader.Close()
+	defer objs.Close()
+
+	tests := []struct {
+		name      string
+		flags     uint8
+		seq       uint32
+		ack       uint32
+		payload   []byte
+		wantFlags uint8
+		wantSeq   uint32
+		wantAck   uint32
+	}{
+		{name: "syn_refuses_connection_with_rst_ack", flags: 0x02, seq: 1000, wantFlags: 0x14, wantAck: 1001},
+		{name: "ack_forces_disconnect_with_rst", flags: 0x10, seq: 2000, ack: 3000, payload: []byte("data"), wantFlags: 0x04, wantSeq: 3000},
+		{name: "psh_ack_forces_disconnect_with_rst", flags: 0x18, seq: 4000, ack: 5000, payload: []byte("payload"), wantFlags: 0x04, wantSeq: 5000},
+		{name: "fin_ack_forces_disconnect_with_rst", flags: 0x11, seq: 6000, ack: 7000, wantFlags: 0x04, wantSeq: 7000},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			pkt := buildTCPPkt(ip("10.0.1.100"), ip("10.0.5.2"), 54321, 80, tc.flags, tc.seq, tc.ack, tc.payload)
+			beforeTX := readStat(t, objs, statXDPTX)
+			beforeFail := readStat(t, objs, statTXFailed)
+
+			ret, out, err := objs.XdpSidersp.Test(pkt)
+			require.NoError(t, err, "prog.Test()")
+
+			require.Equal(t, uint32(xdpTX), ret, "XDP retval")
+			require.Equal(t, beforeTX+1, readStat(t, objs, statXDPTX), "xdp_tx")
+			require.Equal(t, beforeFail, readStat(t, objs, statTXFailed), "tx_failed")
+			evt := mustReadEvent(t, reader)
+			require.Equal(t, uint32(2001), evt.RuleID, "event rule_id")
+			require.Equal(t, uint16(actionTCPReset), evt.Action, "event action")
+			require.Equal(t, uint8(1), evt.Verdict, "event verdict")
+			assertTCPResetFrame(t, out, pkt, tc.wantFlags, tc.wantSeq, tc.wantAck)
+		})
+	}
+
+	t.Run("rst_does_not_reply", func(t *testing.T) {
+		pkt := buildTCPPkt(ip("10.0.1.100"), ip("10.0.5.2"), 54321, 80, 0x14, 8000, 9000, nil)
+		beforeTX := readStat(t, objs, statXDPTX)
+		beforeFail := readStat(t, objs, statTXFailed)
+
+		ret, _, err := objs.XdpSidersp.Test(pkt)
+		require.NoError(t, err, "prog.Test()")
+
+		require.Equal(t, uint32(xdpPass), ret, "XDP retval")
+		require.Equal(t, beforeTX, readStat(t, objs, statXDPTX), "xdp_tx")
+		require.Equal(t, beforeFail, readStat(t, objs, statTXFailed), "tx_failed")
+		_, found := tryReadEvent(t, reader)
+		require.False(t, found, "unexpected event for rst input")
+	})
+
+	t.Run("redirect_preflight_failure_passes_original_packet", func(t *testing.T) {
+		pkt := buildTCPPkt(ip("10.0.1.100"), ip("10.0.5.2"), 54321, 80, 0x02, 1000, 0, nil)
+		require.NoError(t, objs.TxConfigMap.Put(uint32(0), siderspTxConfig{
+			TcpResetMode:           tcpResetTXModeRedirect,
+			TcpResetEgressIfindex:  0,
+			TcpResetVlanMode:       tcpResetVLANPreserve,
+			TcpResetFailureVerdict: tcpResetFailurePass,
+		}), "write tx config")
+		beforeTX := readStat(t, objs, statXDPTX)
+		beforeFail := readStat(t, objs, statTXFailed)
+		beforeRedirectFail := readStat(t, objs, statRedirectFailed)
+
+		ret, out, err := objs.XdpSidersp.Test(pkt)
+		require.NoError(t, err, "prog.Test()")
+
+		require.Equal(t, uint32(xdpPass), ret, "XDP retval")
+		require.Equal(t, pkt, out[:len(pkt)], "packet should not be rewritten before redirect preflight succeeds")
+		require.Equal(t, beforeTX, readStat(t, objs, statXDPTX), "xdp_tx")
+		require.Equal(t, beforeFail+1, readStat(t, objs, statTXFailed), "tx_failed")
+		require.Equal(t, beforeRedirectFail+1, readStat(t, objs, statRedirectFailed), "redirect_failed")
+		_, found := tryReadEvent(t, reader)
+		require.False(t, found, "unexpected event for failed redirect preflight")
+	})
 }
 
 // ---------------------------------------------------------------------------

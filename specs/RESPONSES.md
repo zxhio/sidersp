@@ -10,7 +10,7 @@ Rules reference responses through `response.action`. The control plane validates
 |--------|------|------|----------------|-----------|
 | `none` | `0` | dataplane pass | active | Match silently and continue with `XDP_PASS` |
 | `alert` | `1` | dataplane observe | active | Emit an observation event and continue with `XDP_PASS` |
-| `tcp_reset` | `2` | BPF synchronous TX | active | Build TCP RST in BPF and return `XDP_TX` |
+| `tcp_reset` | `2` | BPF kernel TX | active | Build TCP RST in BPF and send by same-interface `XDP_TX` or configured egress-interface `XDP_REDIRECT` |
 | `icmp_echo_reply` | `3` | XSK TX | Linux AF_XDP socket implemented, integration pending | Redirect the original packet to XSK; user space builds ICMP echo reply |
 | `arp_reply` | `4` | XSK TX | Linux AF_XDP socket implemented, integration pending | Redirect the original packet to XSK; user space builds ARP reply |
 | `tcp_syn_ack` | `5` | XSK TX | Linux AF_XDP socket implemented, integration pending | Redirect the original packet to XSK; user space builds TCP SYN-ACK |
@@ -39,15 +39,28 @@ packet -> BPF parse/match -> ringbuf event -> XDP_PASS
 
 The ringbuf event is only for observation, statistics, and audit.
 
-### BPF Synchronous TX
+### BPF Kernel TX
 
 Used by `tcp_reset`.
 
 ```text
 packet -> BPF parse/match -> build TCP RST in-place -> ringbuf event -> XDP_TX
+packet -> BPF parse/match -> build TCP RST in-place -> bpf_fib_lookup -> ringbuf event -> XDP_REDIRECT
 ```
 
-Synchronous TX does not depend on ringbuf consumption or user-space response execution. If TX construction fails, the packet falls back to `XDP_PASS` and the TX failure counter is incremented.
+Kernel TX does not depend on ringbuf consumption or user-space response
+execution. Same-interface mode returns `XDP_TX`. Redirect mode uses
+`bpf_fib_lookup` with the configured egress interface and returns
+`XDP_REDIRECT` after updating Ethernet source and destination addresses.
+
+Redirect mode supports two VLAN policies for a single 802.1Q tag:
+
+- `preserve`: keep the original VLAN tag, for trunk egress ports.
+- `access`: strip the VLAN tag before redirecting, for access egress ports.
+
+If TX construction, VLAN stripping, FIB lookup, or redirect preparation fails,
+the dataplane increments the corresponding failure counter and returns the
+configured failure verdict: `XDP_PASS` or `XDP_DROP`.
 
 ### XSK TX
 
@@ -96,7 +109,8 @@ buffer, response execution core, worker lifecycle, runtime assembly, and Linux
 AF_XDP socket IO. The XSK worker receives metadata-prefixed frames from the
 AF_XDP RX ring, passes them to the execution core, and transmits built response
 frames through the AF_XDP TX ring. Dataplane ringbuf events remain observation
-events with numeric verdict codes for `observe`, `tx`, and `xsk`.
+events with numeric verdict codes for `observe`, `tx`, `xsk`, and
+`redirect_tx`.
 
 Planned response result shape:
 
@@ -143,6 +157,10 @@ capacity `1024` when `result_buffer_size` is omitted or zero.
 ```yaml
 response:
   enabled: false
+  tcp_reset:
+    egress_interface: ""
+    vlan_mode: preserve
+    failure_verdict: pass
   queues: [0]
   result_buffer_size: 1024
   hardware_addr: ""
@@ -156,6 +174,19 @@ response:
   tx_frame_reserve: 256
 ```
 
+`tcp_reset` config fields:
+
+- `egress_interface`: `""` means same-interface `XDP_TX` from the ingress
+  interface. A non-empty interface name means BPF redirects the response through
+  that egress interface.
+- `vlan_mode`: `preserve` keeps one 802.1Q tag on the response frame. `access`
+  strips one 802.1Q tag before egress.
+- `failure_verdict`: `pass` lets the original packet continue for failures
+  detected before the packet is rewritten, such as egress FIB lookup failure.
+  `drop` consumes the original packet. After the packet has been rewritten, any
+  later TX failure is dropped to avoid passing a synthetic RST into the host
+  stack. Pure mirror-port deployments should normally use `drop`.
+
 `hardware_addr` selects the ARP reply source hardware address when configured.
 `tcp_seq` sets the TCP SYN-ACK response sequence seed. AF_XDP socket startup is
 Linux-only and requires an attached XDP program plus configured queues that match
@@ -167,7 +198,8 @@ TX-reserved frames; `fill_ring_size + tx_frame_reserve` must not exceed
 
 - The control plane validates `response.action`.
 - The dataplane sync path encodes `response.action` into the numeric BPF action code.
-- BPF owns `none`, `alert`, and `tcp_reset` execution.
+- BPF owns `none`, `alert`, and `tcp_reset` execution, including lightweight
+  egress-interface redirect for `tcp_reset`.
 - BPF only redirects XSK TX actions and writes `xsk_meta`; it does not build complex spoof responses.
 - The XSK worker owns user-space TX response construction and result reporting.
 - The XSK worker must not decide whether a response should happen; that decision comes from the matched rule action.

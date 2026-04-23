@@ -47,13 +47,15 @@ The program returns one of three outcomes:
 
 | Return | Meaning |
 |--------|---------|
-| `XDP_PASS` | No match, parse failure, unsupported response path, or TX fallback |
-| `XDP_TX` | Synchronous response was built in-place and transmitted from XDP |
-| `XDP_REDIRECT` | Packet was submitted to XSK for user-space TX handling |
+| `XDP_PASS` | No match, parse failure, unsupported response path, or configured TX fallback |
+| `XDP_DROP` | Configured failure verdict for pure mirror-port deployments |
+| `XDP_TX` | `tcp_reset` response was built in-place and transmitted from the ingress interface |
+| `XDP_REDIRECT` | Packet was submitted to XSK or to a configured `tcp_reset` egress interface |
 
-Response behavior is fixed by action code. `tcp_reset` is the synchronous
-`XDP_TX` action. ICMP echo reply, ARP reply, and TCP
-SYN-ACK spoof require full original-packet context and are handled through XSK.
+Response behavior is fixed by action code plus local runtime configuration.
+`tcp_reset` is built in BPF and can use same-interface `XDP_TX` or configured
+egress-interface redirect. ICMP echo reply, ARP reply, and TCP SYN-ACK spoof
+require full original-packet context and are handled through XSK.
 
 ## 3. Rule Matching Semantics
 
@@ -72,7 +74,8 @@ SYN-ACK spoof require full original-packet context and are handled through XSK.
 5. Detect positive packet conditions (set bits in `pkt_conds`)
 6. Iterate candidate slots 0..N; first slot where `(pkt_conds & required_mask) == required_mask` wins
 7. Execute the action behavior fixed in BPF code
-8. For `ACTION_TCP_RESET`: rewrite packet as TCP RST and return `XDP_TX`
+8. For `ACTION_TCP_RESET`: rewrite packet as TCP RST and return `XDP_TX` or
+   `XDP_REDIRECT` according to `tx_config_map`
 9. For spoof actions: prepend `xsk_meta` and submit the original packet to `xsks_map[ctx->rx_queue_index]`
 10. If XSK metadata prepend or redirect fails, increment `xsk_failed` and return `XDP_PASS`
 11. Emit optional ringbuf observation event
@@ -255,6 +258,17 @@ the lookup key with `prefixlen=32` and the raw `__be32` value from the packet
 ensures the `addr` bytes in the Go struct match the network-order bytes the BPF
 side will look up, so the kernel's byte-wise prefix comparison works correctly.
 
+### `tx_config_map` — ARRAY
+
+Key `0` stores `tx_config` for BPF-owned response TX:
+
+| Field | Meaning |
+|-------|---------|
+| `tcp_reset_mode` | `0=xdp_tx`, `1=redirect` |
+| `tcp_reset_egress_ifindex` | Egress ifindex for egress-interface mode |
+| `tcp_reset_vlan_mode` | `0=preserve`, `1=access` |
+| `tcp_reset_failure_verdict` | `0=pass`, `1=drop` |
+
 ### `xsks_map` — XSKMAP
 
 Key: `uint32` RX queue index (`ctx->rx_queue_index`)
@@ -277,10 +291,13 @@ If no XSK socket is installed for the queue, the fallback action is `XDP_PASS`.
 | 2 | rule_candidates | Packets with non-empty candidate set |
 | 3 | matched_rules | Packets that matched a rule |
 | 4 | ringbuf_dropped | Events dropped due to full ringbuf |
-| 5 | xdp_tx | Synchronous responses transmitted with `XDP_TX` |
+| 5 | xdp_tx | Same-interface TCP reset responses transmitted with `XDP_TX` |
 | 6 | xsk_tx | Packets submitted to XSK for user-space TX |
-| 7 | tx_failed | Failed synchronous `XDP_TX` response attempts |
+| 7 | tx_failed | Failed TCP reset TX attempts |
 | 8 | xsk_failed | Failed XSK metadata prepend or redirect attempts |
+| 9 | redirect_tx | TCP reset packets submitted to the configured egress interface |
+| 10 | redirect_failed | Failed TCP reset redirect preparation attempts |
+| 11 | fib_lookup_failed | Failed `bpf_fib_lookup` attempts for TCP reset redirect |
 
 Values are `per-CPU uint64` — sum across CPUs for total.
 
@@ -290,7 +307,7 @@ Values are `per-CPU uint64` — sum across CPUs for total.
 |--------|------|--------|----------|
 | ACTION_NONE | 0 | active | No response |
 | ACTION_ALERT | 1 | active | Observation only |
-| ACTION_TCP_RESET | 2 | active | Build TCP RST in BPF and return `XDP_TX` |
+| ACTION_TCP_RESET | 2 | active | Build TCP RST in BPF and send by configured kernel TX mode |
 | ACTION_ICMP_ECHO_REPLY | 3 | BPF redirect active, worker planned | Submit original packet to XSK for user-space TX |
 | ACTION_ARP_REPLY | 4 | BPF redirect active, worker planned | Submit original packet to XSK for user-space TX |
 | ACTION_TCP_SYN_ACK | 5 | BPF redirect active, worker planned | Submit original packet to XSK for user-space TX |
@@ -299,13 +316,13 @@ Rule sync rules:
 
 - The control plane validates action names; there is no separate path field.
 - The dataplane sync path compiles action names into numeric action codes.
-- The concrete TX path is fixed in BPF code: `tcp_reset` uses synchronous
-  `XDP_TX`; spoof actions use XSK and user-space TX.
+- `tcp_reset` uses local runtime config to choose same-interface `XDP_TX` or
+  egress-interface redirect; spoof actions use XSK and user-space TX.
 - Rule YAML uses snake_case action strings; BPF maps use numeric action codes.
 
-## 7. TCP Reset Synchronous TX
+## 7. TCP Reset Kernel TX
 
-`ACTION_TCP_RESET` is the synchronous response action.
+`ACTION_TCP_RESET` is built in BPF and sent by a configured kernel TX mode.
 
 Supported packet scope:
 
@@ -323,13 +340,27 @@ Behavior:
 5. Set sequence and acknowledgement numbers according to TCP reset rules.
 6. Set IPv4 total length to IPv4 header + TCP header.
 7. Recompute IPv4 and TCP checksums.
-8. Return `XDP_TX`.
+8. Return `XDP_TX` for same-interface mode, or perform `bpf_fib_lookup` and
+   return `XDP_REDIRECT` for egress-interface mode.
+
+Egress-interface mode:
+
+- Uses `tx_config_map[0].tcp_reset_egress_ifindex` as the egress interface.
+- Uses `bpf_fib_lookup` to select L2 source/destination MAC addresses.
+- Emits `verdict=redirect_tx` and increments `redirect_tx` after redirect is
+  submitted.
+- Supports single-tag VLAN `preserve` and `access` modes. `access` strips the
+  802.1Q header before redirect.
+- On VLAN strip, FIB lookup, or redirect preparation failure, increments the
+  corresponding failure counter and returns configured `XDP_PASS` or `XDP_DROP`.
 
 Sequence/acknowledgement rule:
 
 - If the original packet has ACK set: `rst.seq = original.ack_seq`, flags = `RST`.
 - Otherwise: `rst.ack_seq = original.seq + payload_len + syn_inc + fin_inc`,
   flags = `RST|ACK`.
+- If the original packet has RST set: do not send another reset; return
+  `XDP_PASS` without incrementing `tx_failed`.
 
 ## 8. XSK TX Response
 

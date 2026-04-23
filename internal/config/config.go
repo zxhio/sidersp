@@ -35,11 +35,12 @@ type ConsoleConfig struct {
 }
 
 type ResponseConfig struct {
-	Enabled          bool   `yaml:"enabled"`
-	Queues           []int  `yaml:"queues"`
-	ResultBufferSize int    `yaml:"result_buffer_size"`
-	HardwareAddr     string `yaml:"hardware_addr"`
-	TCPSeq           uint32 `yaml:"tcp_seq"`
+	Enabled          bool           `yaml:"enabled"`
+	Queues           []int          `yaml:"queues"`
+	ResultBufferSize int            `yaml:"result_buffer_size"`
+	HardwareAddr     string         `yaml:"hardware_addr"`
+	TCPSeq           uint32         `yaml:"tcp_seq"`
+	TCPReset         TCPResetConfig `yaml:"tcp_reset"`
 
 	// AF_XDP socket settings.
 	FrameSize          uint32 `yaml:"frame_size"`
@@ -49,6 +50,12 @@ type ResponseConfig struct {
 	RXRingSize         uint32 `yaml:"rx_ring_size"`
 	TXRingSize         uint32 `yaml:"tx_ring_size"`
 	TXFrameReserve     uint32 `yaml:"tx_frame_reserve"`
+}
+
+type TCPResetConfig struct {
+	EgressInterface string `yaml:"egress_interface"`
+	VLANMode        string `yaml:"vlan_mode"`
+	FailureVerdict  string `yaml:"failure_verdict"`
 }
 
 type LoggingConfig struct {
@@ -152,6 +159,29 @@ func (c ResponseConfig) ResultBufferCapacity() int {
 	return c.ResultBufferSize
 }
 
+func (c TCPResetConfig) TXPath() string {
+	if strings.TrimSpace(c.EgressInterface) == "" {
+		return "same-interface"
+	}
+	return "egress-interface"
+}
+
+func (c TCPResetConfig) NormalizedVLANMode() string {
+	mode := strings.ToLower(strings.TrimSpace(c.VLANMode))
+	if mode == "" {
+		return "preserve"
+	}
+	return mode
+}
+
+func (c TCPResetConfig) NormalizedFailureVerdict() string {
+	verdict := strings.ToLower(strings.TrimSpace(c.FailureVerdict))
+	if verdict == "" {
+		return "pass"
+	}
+	return verdict
+}
+
 func (c ResponseConfig) validate() error {
 	if c.ResultBufferSize < 0 {
 		return fmt.Errorf("result_buffer_size must be >= 0")
@@ -174,6 +204,23 @@ func (c ResponseConfig) validate() error {
 		if len(hw) != 6 {
 			return fmt.Errorf("hardware_addr must be a 6-byte ethernet address")
 		}
+	}
+	if err := c.TCPReset.validate(); err != nil {
+		return fmt.Errorf("tcp_reset: %w", err)
+	}
+	return nil
+}
+
+func (c TCPResetConfig) validate() error {
+	switch c.NormalizedVLANMode() {
+	case "preserve", "access":
+	default:
+		return fmt.Errorf("vlan_mode %q is not valid", c.VLANMode)
+	}
+	switch c.NormalizedFailureVerdict() {
+	case "pass", "drop":
+	default:
+		return fmt.Errorf("failure_verdict %q is not valid", c.FailureVerdict)
 	}
 	return nil
 }

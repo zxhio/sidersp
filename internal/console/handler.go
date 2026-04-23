@@ -258,18 +258,21 @@ func newStatsResponse(item controlplane.Stats) StatsResponse {
 		points := make([]StatsPointResponse, 0, len(series.Points))
 		for _, point := range series.Points {
 			points = append(points, StatsPointResponse{
-				Timestamp:      point.Timestamp.Format(time.RFC3339),
-				TotalRules:     point.TotalRules,
-				EnabledRules:   point.EnabledRules,
-				RXPackets:      point.RXPackets,
-				ParseFailed:    point.ParseFailed,
-				RuleCandidates: point.RuleCandidates,
-				MatchedRules:   point.MatchedRules,
-				RingbufDropped: point.RingbufDropped,
-				XDPTX:          point.XDPTX,
-				XskTX:          point.XskTX,
-				TXFailed:       point.TXFailed,
-				XskFailed:      point.XskFailed,
+				Timestamp:       point.Timestamp.Format(time.RFC3339),
+				TotalRules:      point.TotalRules,
+				EnabledRules:    point.EnabledRules,
+				RXPackets:       point.RXPackets,
+				ParseFailed:     point.ParseFailed,
+				RuleCandidates:  point.RuleCandidates,
+				MatchedRules:    point.MatchedRules,
+				RingbufDropped:  point.RingbufDropped,
+				XDPTX:           point.XDPTX,
+				XskTX:           point.XskTX,
+				TXFailed:        point.TXFailed,
+				XskFailed:       point.XskFailed,
+				RedirectTX:      point.RedirectTX,
+				RedirectFailed:  point.RedirectFailed,
+				FibLookupFailed: point.FibLookupFailed,
 			})
 		}
 		histories = append(histories, StatsHistoryResponse{
@@ -281,18 +284,21 @@ func newStatsResponse(item controlplane.Stats) StatsResponse {
 	}
 
 	return StatsResponse{
-		TotalRules:     item.TotalRules,
-		EnabledRules:   item.EnabledRules,
-		RXPackets:      item.RXPackets,
-		ParseFailed:    item.ParseFailed,
-		RuleCandidates: item.RuleCandidates,
-		MatchedRules:   item.MatchedRules,
-		RingbufDropped: item.RingbufDropped,
-		XDPTX:          item.XDPTX,
-		XskTX:          item.XskTX,
-		TXFailed:       item.TXFailed,
-		XskFailed:      item.XskFailed,
-		Histories:      histories,
+		TotalRules:      item.TotalRules,
+		EnabledRules:    item.EnabledRules,
+		RXPackets:       item.RXPackets,
+		ParseFailed:     item.ParseFailed,
+		RuleCandidates:  item.RuleCandidates,
+		MatchedRules:    item.MatchedRules,
+		RingbufDropped:  item.RingbufDropped,
+		XDPTX:           item.XDPTX,
+		XskTX:           item.XskTX,
+		TXFailed:        item.TXFailed,
+		XskFailed:       item.XskFailed,
+		RedirectTX:      item.RedirectTX,
+		RedirectFailed:  item.RedirectFailed,
+		FibLookupFailed: item.FibLookupFailed,
+		Histories:       histories,
 	}
 }
 

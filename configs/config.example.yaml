@@ -8,6 +8,13 @@ dataplane:
 
 response:
   enabled: false
+  tcp_reset:
+    # Values: "" for same-interface XDP_TX, or an interface name for egress XDP_REDIRECT.
+    egress_interface: ""
+    # Values: preserve, access. preserve keeps one 802.1Q tag; access strips it.
+    vlan_mode: preserve
+    # Values: pass, drop. Mirror-port deployments commonly use drop.
+    failure_verdict: pass
   queues: [0]
   result_buffer_size: 1024
   hardware_addr: ""

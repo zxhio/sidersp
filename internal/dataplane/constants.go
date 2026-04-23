@@ -48,6 +48,24 @@ const (
 	statXskTX
 	statTXFailed
 	statXskFailed
+	statRedirectTX
+	statRedirectFailed
+	statFibLookupFailed
+)
+
+const (
+	tcpResetTXModeTX uint32 = iota
+	tcpResetTXModeRedirect
+)
+
+const (
+	tcpResetVLANPreserve uint32 = iota
+	tcpResetVLANAccess
+)
+
+const (
+	tcpResetFailurePass uint32 = iota
+	tcpResetFailureDrop
 )
 
 var tcpFlagBits = map[string]uint32{

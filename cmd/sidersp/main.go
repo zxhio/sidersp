@@ -52,9 +52,15 @@ func main() {
 		}
 	}()
 
+	tcpResetTX, err := buildTCPResetTXOptions(cfg.Response.TCPReset)
+	if err != nil {
+		logrus.WithError(err).Fatal("Fail to configure tcp_reset TX")
+	}
+
 	dp, err := dataplane.Open(dataplane.Options{
 		Interface:  cfg.Dataplane.Interface,
 		AttachMode: cfg.Dataplane.AttachMode,
+		TCPResetTX: tcpResetTX,
 	})
 	if err != nil {
 		logrus.WithError(err).Fatal("Fail to open dataplane")
@@ -106,6 +112,23 @@ func main() {
 		logrus.WithError(err).Fatal("Fail to run service")
 	case <-ctx.Done():
 	}
+}
+
+func buildTCPResetTXOptions(cfg config.TCPResetConfig) (dataplane.TCPResetTXOptions, error) {
+	var egressIfIndex int
+	if cfg.TXPath() == "egress-interface" {
+		iface, err := net.InterfaceByName(cfg.EgressInterface)
+		if err != nil {
+			return dataplane.TCPResetTXOptions{}, fmt.Errorf("lookup egress interface %s: %w", cfg.EgressInterface, err)
+		}
+		egressIfIndex = iface.Index
+	}
+
+	return dataplane.TCPResetTXOptions{
+		EgressIfIndex:  egressIfIndex,
+		VLANMode:       cfg.NormalizedVLANMode(),
+		FailureVerdict: cfg.NormalizedFailureVerdict(),
+	}, nil
 }
 
 func buildResponseRuntime(cfg config.Config, registrar response.XSKRegistrar) (*response.Runtime, error) {

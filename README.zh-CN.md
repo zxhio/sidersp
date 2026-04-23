@@ -8,7 +8,7 @@
 
 - 基于 XDP 的镜像流量入口处理
 - 轻量规则加载、校验和同步
-- TCP reset 同步 XDP_TX 响应
+- TCP reset 支持同口 XDP_TX 或配置的独立出口网卡响应
 - XSK 重定向通道，用于后续用户态 spoof 响应
 - ringbuf 观测事件输出
 - 基础状态、规则和统计 Web 管理页
@@ -20,7 +20,7 @@ flowchart LR
     subgraph dp["dataplane"]
         subgraph fast["fast-path"]
             match["parse / match"]
-            tx["XDP_TX"]
+            tx["同口 / 出口网卡"]
         end
 
         subgraph xsk["xsk-worker planned"]
@@ -36,7 +36,7 @@ flowchart LR
     console["console / web"] --> cp
 ```
 
-- `dataplane`：XDP 包解析、规则匹配、action 执行、事件输出和 XSK redirect。
+- `dataplane`：XDP 包解析、规则匹配、内核态 TX action 执行、事件输出和 XSK redirect。
 - `controlplane`：规则/配置加载、运行状态维护、统计聚合和流程协调。
 - `console` / `web`：REST API 和轻量管理页面。
 - `config`、`rule` 和 `model`：当前模块共享的本地配置、规则 schema 和数据模型。

@@ -220,15 +220,18 @@ func TestStatsReturnsRuntimeAndDataplaneCounters(t *testing.T) {
 
 	r := NewRuntime(config.Config{}, &testSyncer{}, testStreamer{}, testStatsReader{
 		stats: model.DataplaneStats{
-			RXPackets:      100,
-			ParseFailed:    2,
-			RuleCandidates: 40,
-			MatchedRules:   7,
-			RingbufDropped: 1,
-			XDPTX:          3,
-			XskTX:          4,
-			TXFailed:       5,
-			XskFailed:      6,
+			RXPackets:       100,
+			ParseFailed:     2,
+			RuleCandidates:  40,
+			MatchedRules:    7,
+			RingbufDropped:  1,
+			XDPTX:           3,
+			XskTX:           4,
+			TXFailed:        5,
+			XskFailed:       6,
+			RedirectTX:      7,
+			RedirectFailed:  8,
+			FibLookupFailed: 9,
 		},
 	})
 	r.rules = rule.RuleSet{
@@ -250,6 +253,9 @@ func TestStatsReturnsRuntimeAndDataplaneCounters(t *testing.T) {
 	}
 	if got.XskFailed != 6 {
 		t.Fatalf("xsk_failed = %d, want 6", got.XskFailed)
+	}
+	if got.RedirectTX != 7 || got.RedirectFailed != 8 || got.FibLookupFailed != 9 {
+		t.Fatalf("redirect stats = %+v, want redirect_tx=7 redirect_failed=8 fib_lookup_failed=9", got)
 	}
 	if len(got.Histories) != 1 {
 		t.Fatalf("histories len = %d, want 1", len(got.Histories))

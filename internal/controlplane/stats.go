@@ -13,18 +13,21 @@ import (
 )
 
 type Stats struct {
-	TotalRules     int                  `json:"total_rules"`
-	EnabledRules   int                  `json:"enabled_rules"`
-	RXPackets      uint64               `json:"rx_packets"`
-	ParseFailed    uint64               `json:"parse_failed"`
-	RuleCandidates uint64               `json:"rule_candidates"`
-	MatchedRules   uint64               `json:"matched_rules"`
-	RingbufDropped uint64               `json:"ringbuf_dropped"`
-	XDPTX          uint64               `json:"xdp_tx"`
-	XskTX          uint64               `json:"xsk_tx"`
-	TXFailed       uint64               `json:"tx_failed"`
-	XskFailed      uint64               `json:"xsk_failed"`
-	Histories      []StatsHistorySeries `json:"histories"`
+	TotalRules      int                  `json:"total_rules"`
+	EnabledRules    int                  `json:"enabled_rules"`
+	RXPackets       uint64               `json:"rx_packets"`
+	ParseFailed     uint64               `json:"parse_failed"`
+	RuleCandidates  uint64               `json:"rule_candidates"`
+	MatchedRules    uint64               `json:"matched_rules"`
+	RingbufDropped  uint64               `json:"ringbuf_dropped"`
+	XDPTX           uint64               `json:"xdp_tx"`
+	XskTX           uint64               `json:"xsk_tx"`
+	TXFailed        uint64               `json:"tx_failed"`
+	XskFailed       uint64               `json:"xsk_failed"`
+	RedirectTX      uint64               `json:"redirect_tx"`
+	RedirectFailed  uint64               `json:"redirect_failed"`
+	FibLookupFailed uint64               `json:"fib_lookup_failed"`
+	Histories       []StatsHistorySeries `json:"histories"`
 }
 
 type StatsHistorySeries struct {
@@ -35,18 +38,21 @@ type StatsHistorySeries struct {
 }
 
 type StatsPoint struct {
-	Timestamp      time.Time `json:"timestamp"`
-	TotalRules     int       `json:"total_rules"`
-	EnabledRules   int       `json:"enabled_rules"`
-	RXPackets      uint64    `json:"rx_packets"`
-	ParseFailed    uint64    `json:"parse_failed"`
-	RuleCandidates uint64    `json:"rule_candidates"`
-	MatchedRules   uint64    `json:"matched_rules"`
-	RingbufDropped uint64    `json:"ringbuf_dropped"`
-	XDPTX          uint64    `json:"xdp_tx"`
-	XskTX          uint64    `json:"xsk_tx"`
-	TXFailed       uint64    `json:"tx_failed"`
-	XskFailed      uint64    `json:"xsk_failed"`
+	Timestamp       time.Time `json:"timestamp"`
+	TotalRules      int       `json:"total_rules"`
+	EnabledRules    int       `json:"enabled_rules"`
+	RXPackets       uint64    `json:"rx_packets"`
+	ParseFailed     uint64    `json:"parse_failed"`
+	RuleCandidates  uint64    `json:"rule_candidates"`
+	MatchedRules    uint64    `json:"matched_rules"`
+	RingbufDropped  uint64    `json:"ringbuf_dropped"`
+	XDPTX           uint64    `json:"xdp_tx"`
+	XskTX           uint64    `json:"xsk_tx"`
+	TXFailed        uint64    `json:"tx_failed"`
+	XskFailed       uint64    `json:"xsk_failed"`
+	RedirectTX      uint64    `json:"redirect_tx"`
+	RedirectFailed  uint64    `json:"redirect_failed"`
+	FibLookupFailed uint64    `json:"fib_lookup_failed"`
 }
 
 func buildStatsRetention(plan []config.ParsedStatsHistoryWindow) (time.Duration, time.Duration, int) {
@@ -70,34 +76,40 @@ func buildStatsRetention(plan []config.ParsedStatsHistoryWindow) (time.Duration,
 
 func newStats(rules rule.RuleSet, dpStats model.DataplaneStats) Stats {
 	return Stats{
-		TotalRules:     len(rules.Rules),
-		EnabledRules:   len(enabledRuleSet(rules).Rules),
-		RXPackets:      dpStats.RXPackets,
-		ParseFailed:    dpStats.ParseFailed,
-		RuleCandidates: dpStats.RuleCandidates,
-		MatchedRules:   dpStats.MatchedRules,
-		RingbufDropped: dpStats.RingbufDropped,
-		XDPTX:          dpStats.XDPTX,
-		XskTX:          dpStats.XskTX,
-		TXFailed:       dpStats.TXFailed,
-		XskFailed:      dpStats.XskFailed,
+		TotalRules:      len(rules.Rules),
+		EnabledRules:    len(enabledRuleSet(rules).Rules),
+		RXPackets:       dpStats.RXPackets,
+		ParseFailed:     dpStats.ParseFailed,
+		RuleCandidates:  dpStats.RuleCandidates,
+		MatchedRules:    dpStats.MatchedRules,
+		RingbufDropped:  dpStats.RingbufDropped,
+		XDPTX:           dpStats.XDPTX,
+		XskTX:           dpStats.XskTX,
+		TXFailed:        dpStats.TXFailed,
+		XskFailed:       dpStats.XskFailed,
+		RedirectTX:      dpStats.RedirectTX,
+		RedirectFailed:  dpStats.RedirectFailed,
+		FibLookupFailed: dpStats.FibLookupFailed,
 	}
 }
 
 func newStatsPoint(ts time.Time, item Stats) StatsPoint {
 	return StatsPoint{
-		Timestamp:      ts,
-		TotalRules:     item.TotalRules,
-		EnabledRules:   item.EnabledRules,
-		RXPackets:      item.RXPackets,
-		ParseFailed:    item.ParseFailed,
-		RuleCandidates: item.RuleCandidates,
-		MatchedRules:   item.MatchedRules,
-		RingbufDropped: item.RingbufDropped,
-		XDPTX:          item.XDPTX,
-		XskTX:          item.XskTX,
-		TXFailed:       item.TXFailed,
-		XskFailed:      item.XskFailed,
+		Timestamp:       ts,
+		TotalRules:      item.TotalRules,
+		EnabledRules:    item.EnabledRules,
+		RXPackets:       item.RXPackets,
+		ParseFailed:     item.ParseFailed,
+		RuleCandidates:  item.RuleCandidates,
+		MatchedRules:    item.MatchedRules,
+		RingbufDropped:  item.RingbufDropped,
+		XDPTX:           item.XDPTX,
+		XskTX:           item.XskTX,
+		TXFailed:        item.TXFailed,
+		XskFailed:       item.XskFailed,
+		RedirectTX:      item.RedirectTX,
+		RedirectFailed:  item.RedirectFailed,
+		FibLookupFailed: item.FibLookupFailed,
 	}
 }
 

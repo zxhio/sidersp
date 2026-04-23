@@ -31,6 +31,13 @@ type Runtime struct {
 type Options struct {
 	Interface  string
 	AttachMode string
+	TCPResetTX TCPResetTXOptions
+}
+
+type TCPResetTXOptions struct {
+	EgressIfIndex  int
+	VLANMode       string
+	FailureVerdict string
 }
 
 func Open(opts Options) (*Runtime, error) {
@@ -43,11 +50,16 @@ func Open(opts Options) (*Runtime, error) {
 		return nil, fmt.Errorf("load dataplane objects: %w", err)
 	}
 
-	return &Runtime{
+	r := &Runtime{
 		objs:  objs,
 		iface: opts.Interface,
 		opts:  opts,
-	}, nil
+	}
+	if err := r.writeTXConfig(opts.TCPResetTX); err != nil {
+		_ = r.objs.Close()
+		return nil, err
+	}
+	return r, nil
 }
 
 func (r *Runtime) Close() error {
@@ -269,17 +281,32 @@ func (r *Runtime) readKernelStats() (kernelStats, error) {
 	if err != nil {
 		return kernelStats{}, fmt.Errorf("lookup xsk_failed: %w", err)
 	}
+	redirectTX, err := readPerCPUCounter(r.objs.StatsMap, statRedirectTX)
+	if err != nil {
+		return kernelStats{}, fmt.Errorf("lookup redirect_tx: %w", err)
+	}
+	redirectFailed, err := readPerCPUCounter(r.objs.StatsMap, statRedirectFailed)
+	if err != nil {
+		return kernelStats{}, fmt.Errorf("lookup redirect_failed: %w", err)
+	}
+	fibLookupFailed, err := readPerCPUCounter(r.objs.StatsMap, statFibLookupFailed)
+	if err != nil {
+		return kernelStats{}, fmt.Errorf("lookup fib_lookup_failed: %w", err)
+	}
 
 	return kernelStats{
-		RXPackets:      rxPackets,
-		ParseFailed:    parseFailed,
-		RuleCandidates: ruleCandidates,
-		MatchedRules:   matchedRules,
-		RingbufDropped: ringbufDropped,
-		XDPTX:          xdpTX,
-		XskTX:          xskTX,
-		TXFailed:       txFailed,
-		XskFailed:      xskFailed,
+		RXPackets:       rxPackets,
+		ParseFailed:     parseFailed,
+		RuleCandidates:  ruleCandidates,
+		MatchedRules:    matchedRules,
+		RingbufDropped:  ringbufDropped,
+		XDPTX:           xdpTX,
+		XskTX:           xskTX,
+		TXFailed:        txFailed,
+		XskFailed:       xskFailed,
+		RedirectTX:      redirectTX,
+		RedirectFailed:  redirectFailed,
+		FibLookupFailed: fibLookupFailed,
 	}, nil
 }
 
@@ -290,15 +317,18 @@ func (r *Runtime) ReadStats() (model.DataplaneStats, error) {
 	}
 
 	return model.DataplaneStats{
-		RXPackets:      stats.RXPackets,
-		ParseFailed:    stats.ParseFailed,
-		RuleCandidates: stats.RuleCandidates,
-		MatchedRules:   stats.MatchedRules,
-		RingbufDropped: stats.RingbufDropped,
-		XDPTX:          stats.XDPTX,
-		XskTX:          stats.XskTX,
-		TXFailed:       stats.TXFailed,
-		XskFailed:      stats.XskFailed,
+		RXPackets:       stats.RXPackets,
+		ParseFailed:     stats.ParseFailed,
+		RuleCandidates:  stats.RuleCandidates,
+		MatchedRules:    stats.MatchedRules,
+		RingbufDropped:  stats.RingbufDropped,
+		XDPTX:           stats.XDPTX,
+		XskTX:           stats.XskTX,
+		TXFailed:        stats.TXFailed,
+		XskFailed:       stats.XskFailed,
+		RedirectTX:      stats.RedirectTX,
+		RedirectFailed:  stats.RedirectFailed,
+		FibLookupFailed: stats.FibLookupFailed,
 	}, nil
 }
 

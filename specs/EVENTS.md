@@ -7,7 +7,9 @@ Events are emitted by BPF through ringbuf after a rule match produces an observa
 ## Event Scope
 
 - `alert` emits an observation event and returns `XDP_PASS`.
-- `tcp_reset` emits an event only after successful BPF synchronous TX and returns `XDP_TX`.
+- `tcp_reset` emits an event only after successful BPF kernel TX. It returns
+  `XDP_TX` for same-interface TX or `XDP_REDIRECT` for configured egress
+  interface TX.
 - XSK TX actions emit an event only after successful `XDP_REDIRECT` to XSK.
 - `none` does not require an event.
 - XSK worker response results are separate from dataplane observation events; see `RESPONSES.md`.
@@ -73,10 +75,13 @@ The ringbuf ABI stores `action` and `verdict` as numeric codes. Presentation lay
 | Code | Name | Semantics |
 |------|------|-----------|
 | `0` | `observe` | Observation event; packet continues with `XDP_PASS` |
-| `1` | `tx` | BPF synchronous TX succeeded |
+| `1` | `tx` | BPF same-interface TX succeeded |
 | `2` | `xsk` | Packet was submitted to XSK; user-space response execution is tracked separately |
+| `3` | `redirect_tx` | Packet was submitted to a configured egress interface with `XDP_REDIRECT` |
 
-These names describe platform-level outcomes, not raw Linux XDP return constants.
+These names describe platform-level outcomes, not raw Linux XDP return
+constants. `redirect_tx` means BPF submitted the redirect; it does not prove the
+egress NIC, switch, or destination host accepted the packet.
 
 ## Packet Conditions
 

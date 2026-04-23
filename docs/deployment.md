@@ -134,6 +134,26 @@ workers are enabled, verify queue IDs, NIC support, UMEM sizing, and source
 hardware address settings before starting the service. AF_XDP setup failures
 will fail service startup and systemd will restart according to the unit policy.
 
+## TCP Reset Egress Interface
+
+For a pure switch mirror/SPAN destination port, do not rely on same-port
+`XDP_TX` for active responses. Set `tcp_reset.egress_interface` to send the RST
+from a separate interface that participates in normal switching/routing:
+
+```yaml
+response:
+  tcp_reset:
+    egress_interface: eth1
+    vlan_mode: access
+    failure_verdict: drop
+```
+
+Use `vlan_mode: access` when the response interface is an access port. Use
+`vlan_mode: preserve` when the response interface is a trunk that should carry
+the original single 802.1Q tag. When `egress_interface` is non-empty, BPF uses
+the kernel FIB lookup; ensure the host has a valid route and neighbor entry for
+the response destination through the configured egress interface.
+
 ## Operate
 
 Check service state:

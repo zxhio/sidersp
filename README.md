@@ -8,7 +8,7 @@ Lightweight side-path traffic pre-decision and active response service.
 
 - XDP-based ingress handling for mirrored traffic
 - Lightweight rule loading, validation, and synchronization
-- Synchronous TCP reset response via XDP_TX
+- TCP reset response via same-interface XDP_TX or a configured egress interface
 - XSK redirect path for future user-space spoof responses
 - Ringbuf observation event output
 - Basic Web console for status, rules, and statistics
@@ -20,7 +20,7 @@ flowchart LR
     subgraph dp["dataplane"]
         subgraph fast["fast-path"]
             match["parse / match"]
-            tx["XDP_TX"]
+            tx["same interface / egress interface"]
         end
 
         subgraph xsk["xsk-worker planned"]
@@ -36,7 +36,7 @@ flowchart LR
     console["console / web"] --> cp
 ```
 
-- `dataplane`: XDP packet parsing, rule matching, action execution, event output, and XSK redirect.
+- `dataplane`: XDP packet parsing, rule matching, kernel TX action execution, event output, and XSK redirect.
 - `controlplane`: rule/config loading, runtime state, statistics aggregation, and coordination.
 - `console` / `web`: REST API and lightweight management UI.
 - `config`, `rule`, and `model`: shared local configuration, rule schema, and data models used by the active modules.

@@ -77,7 +77,7 @@ response:
 
 `params` is part of the rule schema but is not encoded into BPF `rule_meta` and has no effect in the current implementation.
 
-Execution path is not exposed as a rule field. The control plane validates `response.action`; dataplane compilation encodes it into the numeric action code. Dataplane and response modules own the fixed execution path for each action.
+Execution path is not exposed as a rule field. The control plane validates `response.action`; dataplane compilation encodes it into the numeric action code. Dataplane and response modules own the configured execution path for each action. For `tcp_reset`, local runtime config selects same-interface `XDP_TX` or egress-interface redirect for all rules.
 
 ## Actions
 
@@ -85,7 +85,7 @@ Execution path is not exposed as a rule field. The control plane validates `resp
 |--------|------|----------------|-----------|
 | `none` | `0` | dataplane | Match silently and continue with `XDP_PASS` |
 | `alert` | `1` | dataplane | Emit an observation event and continue with `XDP_PASS` |
-| `tcp_reset` | `2` | dataplane synchronous TX | Build TCP RST in BPF and return `XDP_TX` |
+| `tcp_reset` | `2` | dataplane kernel TX | Build TCP RST in BPF and send by configured same-interface or egress-interface TX mode |
 | `icmp_echo_reply` | `3` | XSK TX | Redirect original packet to XSK; user space builds ICMP echo reply |
 | `arp_reply` | `4` | XSK TX | Redirect original packet to XSK; user space builds ARP reply |
 | `tcp_syn_ack` | `5` | XSK TX | Redirect original packet to XSK; user space builds TCP SYN-ACK |

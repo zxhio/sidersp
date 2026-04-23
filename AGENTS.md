@@ -6,7 +6,7 @@ Side-path analysis and active response platform for mirrored traffic.
 
 | Module | Responsibility |
 |--------|----------------|
-| `dataplane` | Data plane: XDP packet parsing, rule matching, synchronous TX (`tcp_reset`), XSK redirect, event output |
+| `dataplane` | Data plane: XDP packet parsing, rule matching, kernel TX (`tcp_reset`), XSK redirect, event output |
 | `controlplane` | Control plane: rule management, state maintenance, statistics aggregation, workflow orchestration |
 | `analysis` | Planned deep analysis integration: analysis task submission and analysis result ingestion |
 | `response` | Planned response execution: XSK TX response, action execution, result feedback |

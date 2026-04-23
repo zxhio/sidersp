@@ -191,6 +191,10 @@ response:
   result_buffer_size: 2048
   hardware_addr: 02:aa:bb:cc:dd:ee
   tcp_seq: 1000
+  tcp_reset:
+    egress_interface: eth1
+    vlan_mode: access
+    failure_verdict: drop
 
 console:
   listen_addr: 127.0.0.1:8080
@@ -213,6 +217,12 @@ console:
 	if cfg.Response.HardwareAddr != "02:aa:bb:cc:dd:ee" || cfg.Response.TCPSeq != 1000 {
 		t.Fatalf("Response = %+v, want hardware/tcp_seq populated", cfg.Response)
 	}
+	if cfg.Response.TCPReset.TXPath() != "egress-interface" ||
+		cfg.Response.TCPReset.EgressInterface != "eth1" ||
+		cfg.Response.TCPReset.NormalizedVLANMode() != "access" ||
+		cfg.Response.TCPReset.NormalizedFailureVerdict() != "drop" {
+		t.Fatalf("TCPReset = %+v, want egress-interface/access/drop", cfg.Response.TCPReset)
+	}
 }
 
 func TestResponseConfigDefaults(t *testing.T) {
@@ -229,6 +239,15 @@ func TestResponseConfigDefaults(t *testing.T) {
 	}
 	if cfg.ResultBufferCapacity() != 1024 {
 		t.Fatalf("ResultBufferCapacity() = %d, want 1024", cfg.ResultBufferCapacity())
+	}
+	if cfg.TCPReset.TXPath() != "same-interface" {
+		t.Fatalf("TCPReset TXPath() = %q, want same-interface", cfg.TCPReset.TXPath())
+	}
+	if cfg.TCPReset.NormalizedVLANMode() != "preserve" {
+		t.Fatalf("TCPReset vlan mode = %q, want preserve", cfg.TCPReset.NormalizedVLANMode())
+	}
+	if cfg.TCPReset.NormalizedFailureVerdict() != "pass" {
+		t.Fatalf("TCPReset failure verdict = %q, want pass", cfg.TCPReset.NormalizedFailureVerdict())
 	}
 }
 
@@ -264,6 +283,21 @@ func TestLoadRejectsInvalidResponseConfig(t *testing.T) {
 			name: "non ethernet hardware address",
 			body: "hardware_addr: 02:aa:bb:cc:dd:ee:ff:00",
 			want: "response: hardware_addr must be a 6-byte ethernet address",
+		},
+		{
+			name: "tcp reset mode is not supported",
+			body: "tcp_reset:\n    mode: egress-interface",
+			want: "field mode not found",
+		},
+		{
+			name: "bad tcp reset vlan mode",
+			body: "tcp_reset:\n    vlan_mode: tagged",
+			want: `response: tcp_reset: vlan_mode "tagged" is not valid`,
+		},
+		{
+			name: "bad tcp reset failure verdict",
+			body: "tcp_reset:\n    failure_verdict: reject",
+			want: `response: tcp_reset: failure_verdict "reject" is not valid`,
 		},
 	}
 

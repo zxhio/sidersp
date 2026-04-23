@@ -6,7 +6,7 @@ This document defines the system module contract. For the short agent-facing sum
 
 | Module | Path | Status | Responsibility |
 |--------|------|--------|----------------|
-| `dataplane` | `internal/dataplane/`, `bpf/` | active | Fast-path packet parsing, classification, rule matching, XDP verdicts, synchronous TX, XSK redirect, event output |
+| `dataplane` | `internal/dataplane/`, `bpf/` | active | Fast-path packet parsing, classification, rule matching, XDP verdicts, kernel TX, XSK redirect, event output |
 | `controlplane` | `internal/controlplane/` | active | Rule loading, rule validation, runtime state, statistics aggregation, workflow orchestration |
 | `console` | `internal/console/`, `web/` | active | REST API, status display, statistics view, rule CRUD |
 | `config` | `internal/config/` | active | Local configuration loading and validation |
@@ -54,7 +54,7 @@ Owns:
 - Basic classification and feature extraction
 - Lightweight rule matching
 - XDP verdict selection
-- Synchronous TX actions such as `tcp_reset`
+- Kernel TX actions such as `tcp_reset`, including same-interface `XDP_TX` and configured egress-interface redirect
 - XSK redirect and XSK fd registration for actions that need full packet context
 - Observation event output
 - Dataplane interface setup required for packet capture, including promiscuous
@@ -147,7 +147,7 @@ Does not own:
 
 - Rule matching
 - Response decision making
-- BPF synchronous TX actions
+- BPF kernel TX actions
 
 ## Contract Documents
 

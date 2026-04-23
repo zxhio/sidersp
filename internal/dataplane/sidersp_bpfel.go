@@ -43,6 +43,14 @@ type siderspRuleMeta struct {
 	_            [1]byte
 }
 
+type siderspTxConfig struct {
+	_                      structs.HostLayout
+	TcpResetMode           uint32
+	TcpResetEgressIfindex  uint32
+	TcpResetVlanMode       uint32
+	TcpResetFailureVerdict uint32
+}
+
 // loadSidersp returns the embedded CollectionSpec for sidersp.
 func loadSidersp() (*ebpf.CollectionSpec, error) {
 	reader := bytes.NewReader(_SiderspBytes)
@@ -100,6 +108,7 @@ type siderspMapSpecs struct {
 	SrcPortIndexMap *ebpf.MapSpec `ebpf:"src_port_index_map"`
 	SrcPrefixLpmMap *ebpf.MapSpec `ebpf:"src_prefix_lpm_map"`
 	StatsMap        *ebpf.MapSpec `ebpf:"stats_map"`
+	TxConfigMap     *ebpf.MapSpec `ebpf:"tx_config_map"`
 	VlanIndexMap    *ebpf.MapSpec `ebpf:"vlan_index_map"`
 	XsksMap         *ebpf.MapSpec `ebpf:"xsks_map"`
 }
@@ -138,6 +147,7 @@ type siderspMaps struct {
 	SrcPortIndexMap *ebpf.Map `ebpf:"src_port_index_map"`
 	SrcPrefixLpmMap *ebpf.Map `ebpf:"src_prefix_lpm_map"`
 	StatsMap        *ebpf.Map `ebpf:"stats_map"`
+	TxConfigMap     *ebpf.Map `ebpf:"tx_config_map"`
 	VlanIndexMap    *ebpf.Map `ebpf:"vlan_index_map"`
 	XsksMap         *ebpf.Map `ebpf:"xsks_map"`
 }
@@ -152,6 +162,7 @@ func (m *siderspMaps) Close() error {
 		m.SrcPortIndexMap,
 		m.SrcPrefixLpmMap,
 		m.StatsMap,
+		m.TxConfigMap,
 		m.VlanIndexMap,
 		m.XsksMap,
 	)

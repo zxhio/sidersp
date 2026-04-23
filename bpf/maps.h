@@ -7,6 +7,8 @@
  *   ├──────────────────────────────────────────────────────────┤
  *   │  global_cfg_map       ARRAY<u32, global_cfg>    [1]      │
  *   │    all_active_rules bitmap (initial candidates)          │
+ *   │  tx_config_map        ARRAY<u32, tx_config>      [1]      │
+ *   │    tcp_reset TX mode and egress settings                  │
  *   ├──────────────────────────────────────────────────────────┤
  *   │  vlan_index_map       HASH<u16, mask_t>        [4096]    │
  *   │  src_port_index_map   HASH<u16, mask_t>        [4096]    │
@@ -47,6 +49,13 @@ struct {
     __type(key, __u32);
     __type(value, struct global_cfg);
 } global_cfg_map SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, __u32);
+    __type(value, struct tx_config);
+} tx_config_map SEC(".maps");
 
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);

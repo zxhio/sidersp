@@ -8,6 +8,13 @@ const METRICS = [
   { key: 'rule_candidates', label: '进入匹配',   color: '#f59e0b' },
   { key: 'matched_rules',   label: '规则命中',   color: '#10b981' },
   { key: 'ringbuf_dropped', label: '缓冲区丢弃', color: '#8b5cf6' },
+  { key: 'xdp_tx',          label: '同口 TX',    color: '#0ea5e9' },
+  { key: 'redirect_tx',     label: '出口重定向', color: '#14b8a6' },
+  { key: 'tx_failed',       label: 'TX 失败',    color: '#dc2626' },
+  { key: 'redirect_failed', label: '重定向失败', color: '#ea580c' },
+  { key: 'fib_lookup_failed', label: '路由查询失败', color: '#9333ea' },
+  { key: 'xsk_tx',          label: 'XSK 提交',   color: '#64748b' },
+  { key: 'xsk_failed',      label: 'XSK 失败',   color: '#be123c' },
 ]
 
 const RULE_METRICS = [
