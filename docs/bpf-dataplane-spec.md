@@ -186,9 +186,9 @@ is delivered.
 
 ## 5. BPF Map Layouts
 
-### `rule_index_map` — ARRAY (1024 entries)
+### `rule_index_map` — ARRAY (512 entries)
 
-Key: `uint32` slot index (0..1023)
+Key: `uint32` slot index (0..511)
 Value: `rule_meta`
 
 | Field | Type | Description |
@@ -219,16 +219,16 @@ Value: `global_cfg`
 
 | Field | Type | Description |
 |-------|------|-------------|
-| all_active_rules | mask_t (128 bytes) | Bitmap of all active compiled rule slots |
+| all_active_rules | mask_t (64 bytes) | Bitmap of all active compiled rule slots |
 | vlan_optional_rules | mask_t | Rules without VLAN condition |
 | src_port_optional_rules | mask_t | Rules without src port condition |
 | dst_port_optional_rules | mask_t | Rules without dst port condition |
 | src_prefix_optional_rules | mask_t | Rules without src prefix condition |
 | dst_prefix_optional_rules | mask_t | Rules without dst prefix condition |
 
-### `mask_t` — Bitmap (128 bytes)
+### `mask_t` — Bitmap (64 bytes)
 
-16 × uint64 words = 1024 bits. Bit N set → rule at slot N is a candidate.
+8 × uint64 words = 512 bits. Bit N set → rule at slot N is a candidate.
 
 ### Index Maps (HASH)
 

@@ -1,13 +1,14 @@
 # BPF Verifier Analysis
 
 The kernel 5.10 LTS BPF verifier enforces a **1,000,000 processed instruction** limit
-per program. The current 1024-rule configuration consumes ~50K–80K processed
-instructions — well within bounds. This document records the current verifier
+per program. The current 512-rule configuration is the preferred performance
+profile for keeping both verifier cost and per-packet rule selection bounded.
+This document records the current verifier
 cost model, measured ceilings, and optimization techniques used by the BPF data
 plane.
 
 1. **How to measure verifier cost** (from BPF instruction dumps)
-2. **Measured scaling ceilings per rule count** (256 / 1024 / 4096)
+2. **Measured scaling ceilings per rule count** (256 / 512 / 1024 / 4096)
 3. **Optimization techniques** (reducing branch paths, simplifying loop bodies)
 
 ---
@@ -46,7 +47,7 @@ Two rules of thumb:
 
 ### 1.3 Extracting Per-Section Data from Dumps
 
-Example: `RULE_GROUPS=16`, `RULES_PER_GROUP=64`, `MAX_RULE_SLOTS=1024`
+Example: `RULE_GROUPS=8`, `RULES_PER_GROUP=64`, `MAX_RULE_SLOTS=512`
 produces 582 static BPF instructions (insn 0–581).
 
 #### mask_and (16 iterations)
@@ -62,16 +63,16 @@ produces 582 static BPF instructions (insn 0–581).
 182: (5f) r4 &= r2          // ⑧ AND
 183: (7b) *(u64 *)… = r4    // ⑨ store dst->bits[i]
 184: (07) r1 += 8           // ⑩ offset += 8
-185: (55) if r1 != 0x80 …   // ⑪ back-edge (0x80=128=16×8)
+185: (55) if r1 != 0x40 …   // ⑪ back-edge (0x40=64=8×8)
 ```
 
-**11 insns/iter × 16 = 176 processed insns / call**
+**11 insns/iter × 8 = 88 processed insns / call**
 
-#### mask_is_zero (16 iterations)
+#### mask_is_zero (8 iterations)
 
 ```
 358: (07) r1 += 8           // offset += 8
-359: (15) if r1 == 0x80 …   // exit check
+359: (15) if r1 == 0x40 …   // exit check
 360: (bf) r2 = r10          // ① stack base
 361: (07) r2 += -136
 362: (0f) r2 += r1          // ② add offset
@@ -79,21 +80,21 @@ produces 582 static BPF instructions (insn 0–581).
 364: (15) if r2 == 0x0 …    // ④ zero → continue loop
 ```
 
-**7 insns/iter × 16 = 112 processed insns / call**
+**7 insns/iter × 8 = 56 processed insns / call**
 
-#### mask_copy (128-byte memcpy)
+#### mask_copy (64-byte memcpy)
 
-The compiler expands `__builtin_memcpy` into 16 load/store pairs:
+The compiler expands `__builtin_memcpy` into 8 load/store pairs:
 
 ```
 133: (79) r1 = *(u64 *)(r6 +120)
 134: (7b) *(u64 *)(r10 -16) = r1
-…（16 pairs）
+…（8 pairs）
 163: (79) r1 = *(u64 *)(r6 +0)
 164: (7b) *(u64 *)(r10 -136) = r1
 ```
 
-**32 insns, no loop, counted once per path**
+**16 insns, no loop, counted once per path**
 
 #### pick_best_rule inner loop
 
@@ -109,7 +110,7 @@ The compiler expands `__builtin_memcpy` into 16 load/store pairs:
 404: (18) r1 = map[…]       // ⑦ ld_imm64 (2 insns)
 406: (07) r1 += 272         // ⑧ inline array lookup base
 407: (61) r0 = *(u32 *)…    // ⑨ load key value
-408: (35) if r0 >= 0x400 …  // ⑩ bounds check (1024)
+408: (35) if r0 >= 0x200 …  // ⑩ bounds check (512)
 409: (27) r0 *= 12          // ⑪ sizeof(rule_meta)=12
 410: (0f) r0 += r1
 411: (05) goto pc+1
@@ -172,16 +173,16 @@ Linux test environment.
 
 ### 2.2 Comparison Across Scales
 
-| Parameter | 256 rules | 1024 rules | 4096 rules |
-|-----------|-----------|------------|------------|
-| RULE_GROUPS | 4 | 16 | 64 |
-| mask_t size | 32 B | 128 B | 512 B |
-| mask_and / call | 44 | 176 | 704 |
-| mask_is_zero / call | 28 | 112 | 448 |
-| mask_copy | 8 insns | 32 insns | 128 insns |
-| pick_best_rule / path | ~290 | ~2,000 | **~115,000** |
-| Estimated paths | ~30 | ~15 | ~10 |
-| **Estimated total processed** | **~15K** | **~50K** | **~1.2M** |
+| Parameter | 256 rules | 512 rules | 1024 rules | 4096 rules |
+|-----------|-----------|-----------|------------|------------|
+| RULE_GROUPS | 4 | 8 | 16 | 64 |
+| mask_t size | 32 B | 64 B | 128 B | 512 B |
+| mask_and / call | 44 | 88 | 176 | 704 |
+| mask_is_zero / call | 28 | 56 | 112 | 448 |
+| mask_copy | 8 insns | 16 insns | 32 insns | 128 insns |
+| pick_best_rule / path | ~290 | TBD | ~2,000 | **~115,000** |
+| Estimated paths | ~30 | TBD | ~15 | ~10 |
+| **Estimated total processed** | **~15K** | TBD | **~50K** | **~1.2M** |
 
 ### 2.3 Bottleneck
 
@@ -251,12 +252,12 @@ so `if (ctx.ip_version == 4)` is always true — just remove it.
 
 ### Combined Effect
 
-The current 1024-rule configuration applies all 4 techniques:
+The current 512-rule configuration applies these techniques:
 
-- Static instructions: 582
+- Static instructions: tied to compiler output for the current object
 - Active paths: ~15 (verifier prunes theoretical 32 down to ~15)
-- Total processed insns: ~50K–80K (well below 1M)
-- Safety margin: **>10×**
+- Total processed insns: expected to stay between the 256-rule and 1024-rule profiles above
+- Safety margin: expected to be substantially higher than the previous 1024-rule profile
 
 These figures are verifier-log measurements from the Linux build used for this
 analysis. They are tied to the current compiler, kernel, map layout, struct

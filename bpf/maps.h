@@ -2,7 +2,7 @@
  * BPF Maps — inverted index + rule storage + event output.
  *
  *   ┌──────────────────────────────────────────────────────────┐
- *   │  rule_index_map       ARRAY<u32, rule_meta>    [1024]    │
+ *   │  rule_index_map       ARRAY<u32, rule_meta>    [512]     │
  *   │    slot → rule metadata (id, required_mask, action)      │
  *   ├──────────────────────────────────────────────────────────┤
  *   │  global_cfg_map       ARRAY<u32, global_cfg>    [1]      │

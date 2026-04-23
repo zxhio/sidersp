@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	maxRuleSlots     = 1024
+	maxRuleSlots     = 512
 	statsLogInterval = 10 * time.Second
 
 	condProtoTCP        = 1 << 0

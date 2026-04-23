@@ -31,7 +31,7 @@ type siderspIpv4LpmKey struct {
 
 type siderspMaskT struct {
 	_    structs.HostLayout
-	Bits [16]uint64
+	Bits [8]uint64
 }
 
 type siderspRuleMeta struct {

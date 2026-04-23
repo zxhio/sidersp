@@ -22,7 +22,7 @@
 #define __always_inline inline __attribute__((always_inline))
 #endif
 
-#define RULE_GROUPS 16
+#define RULE_GROUPS 8
 #define RULES_PER_GROUP 64
 #define MAX_RULE_SLOTS (RULE_GROUPS * RULES_PER_GROUP)
 
