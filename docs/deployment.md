@@ -129,24 +129,24 @@ ip link show <interface>
 
 ## Response AF_XDP Notes
 
-The default example config keeps `response.enabled: false`. If AF_XDP response
-workers are enabled, verify queue IDs, NIC support, UMEM sizing, and source
-hardware address settings before starting the service. AF_XDP setup failures
-will fail service startup and systemd will restart according to the unit policy.
+The default example config keeps `response.runtime.enabled: false`. If AF_XDP
+response workers are enabled, verify queue IDs, NIC support, UMEM sizing, and
+source hardware address settings before starting the service. AF_XDP setup
+failures will fail service startup and systemd will restart according to the
+unit policy.
 
 ## Shared Response TX Egress
 
 For a pure switch mirror/SPAN destination port, do not rely on same-port
-transmission for active responses. Set `response.tx.egress_interface` to send
+transmission for active responses. Set `egress.interface` to send
 supported responses from a separate interface that participates in normal
 switching or routing:
 
 ```yaml
-response:
-  tx:
-    egress_interface: eth1
-    vlan_mode: access
-    failure_verdict: drop
+egress:
+  interface: eth1
+  vlan_mode: access
+  failure_verdict: drop
 ```
 
 Use `vlan_mode: access` when the response interface is an access port. Use

@@ -14,6 +14,7 @@ import (
 
 type Config struct {
 	Dataplane    DataplaneConfig    `yaml:"dataplane"`
+	Egress       EgressConfig       `yaml:"egress"`
 	ControlPlane ControlPlaneConfig `yaml:"controlplane"`
 	Console      ConsoleConfig      `yaml:"console"`
 	Response     ResponseConfig     `yaml:"response"`
@@ -35,20 +36,27 @@ type ConsoleConfig struct {
 	StatsHistory StatsHistoryConfig `yaml:"stats_history"`
 }
 
-type ResponseConfig struct {
-	Enabled          bool             `yaml:"enabled"`
-	Queues           []int            `yaml:"queues"`
-	ResultBufferSize int              `yaml:"result_buffer_size"`
-	TX               ResponseTXConfig `yaml:"tx"`
-	ARPReply         ARPReplyConfig   `yaml:"arp_reply"`
-	TCPSynAck        TCPSynAckConfig  `yaml:"tcp_syn_ack"`
-	AFXDP            AFXDPConfig      `yaml:"afxdp"`
+type EgressConfig struct {
+	Interface      string `yaml:"interface"`
+	VLANMode       string `yaml:"vlan_mode"`
+	FailureVerdict string `yaml:"failure_verdict"`
 }
 
-type ResponseTXConfig struct {
-	EgressInterface string `yaml:"egress_interface"`
-	VLANMode        string `yaml:"vlan_mode"`
-	FailureVerdict  string `yaml:"failure_verdict"`
+type ResponseConfig struct {
+	Runtime ResponseRuntimeConfig `yaml:"runtime"`
+	Actions ResponseActionsConfig `yaml:"actions"`
+}
+
+type ResponseRuntimeConfig struct {
+	Enabled          bool        `yaml:"enabled"`
+	Queues           []int       `yaml:"queues"`
+	ResultBufferSize int         `yaml:"result_buffer_size"`
+	AFXDP            AFXDPConfig `yaml:"afxdp"`
+}
+
+type ResponseActionsConfig struct {
+	ARPReply  ARPReplyConfig  `yaml:"arp_reply"`
+	TCPSynAck TCPSynAckConfig `yaml:"tcp_syn_ack"`
 }
 
 type ARPReplyConfig struct {
@@ -132,6 +140,9 @@ func (c Config) validate() error {
 	if err := c.Dataplane.validate(); err != nil {
 		return err
 	}
+	if err := c.Egress.validate(); err != nil {
+		return fmt.Errorf("egress: %w", err)
+	}
 	if strings.TrimSpace(c.ControlPlane.RulesPath) == "" {
 		return fmt.Errorf("controlplane.rules_path is required")
 	}
@@ -183,28 +194,14 @@ func (c DataplaneConfig) validate() error {
 	}
 }
 
-func (c ResponseConfig) WorkerQueues() []int {
-	if len(c.Queues) == 0 {
-		return []int{0}
-	}
-	return append([]int(nil), c.Queues...)
-}
-
-func (c ResponseConfig) ResultBufferCapacity() int {
-	if c.ResultBufferSize <= 0 {
-		return 1024
-	}
-	return c.ResultBufferSize
-}
-
-func (c ResponseTXConfig) TXPath() string {
-	if strings.TrimSpace(c.EgressInterface) == "" {
+func (c EgressConfig) TXPath() string {
+	if strings.TrimSpace(c.Interface) == "" {
 		return "same-interface"
 	}
 	return "egress-interface"
 }
 
-func (c ResponseTXConfig) NormalizedVLANMode() string {
+func (c EgressConfig) NormalizedVLANMode() string {
 	mode := strings.ToLower(strings.TrimSpace(c.VLANMode))
 	if mode == "" {
 		return "preserve"
@@ -212,7 +209,7 @@ func (c ResponseTXConfig) NormalizedVLANMode() string {
 	return mode
 }
 
-func (c ResponseTXConfig) NormalizedFailureVerdict() string {
+func (c EgressConfig) NormalizedFailureVerdict() string {
 	verdict := strings.ToLower(strings.TrimSpace(c.FailureVerdict))
 	if verdict == "" {
 		return "pass"
@@ -220,7 +217,31 @@ func (c ResponseTXConfig) NormalizedFailureVerdict() string {
 	return verdict
 }
 
+func (c ResponseRuntimeConfig) WorkerQueues() []int {
+	if len(c.Queues) == 0 {
+		return []int{0}
+	}
+	return append([]int(nil), c.Queues...)
+}
+
+func (c ResponseRuntimeConfig) ResultBufferCapacity() int {
+	if c.ResultBufferSize <= 0 {
+		return 1024
+	}
+	return c.ResultBufferSize
+}
+
 func (c ResponseConfig) validate() error {
+	if err := c.Runtime.validate(); err != nil {
+		return fmt.Errorf("runtime: %w", err)
+	}
+	if err := c.Actions.validate(); err != nil {
+		return fmt.Errorf("actions: %w", err)
+	}
+	return nil
+}
+
+func (c ResponseRuntimeConfig) validate() error {
 	if c.ResultBufferSize < 0 {
 		return fmt.Errorf("result_buffer_size must be >= 0")
 	}
@@ -234,6 +255,10 @@ func (c ResponseConfig) validate() error {
 		}
 		seenQueues[queue] = struct{}{}
 	}
+	return nil
+}
+
+func (c ResponseActionsConfig) validate() error {
 	if strings.TrimSpace(c.ARPReply.HardwareAddr) != "" {
 		hw, err := net.ParseMAC(c.ARPReply.HardwareAddr)
 		if err != nil {
@@ -243,13 +268,10 @@ func (c ResponseConfig) validate() error {
 			return fmt.Errorf("hardware_addr must be a 6-byte ethernet address")
 		}
 	}
-	if err := c.TX.validate(); err != nil {
-		return fmt.Errorf("tx: %w", err)
-	}
 	return nil
 }
 
-func (c ResponseTXConfig) validate() error {
+func (c EgressConfig) validate() error {
 	switch c.NormalizedVLANMode() {
 	case "preserve", "access":
 	default:

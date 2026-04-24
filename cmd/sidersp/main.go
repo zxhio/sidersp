@@ -52,7 +52,7 @@ func main() {
 		}
 	}()
 
-	tcpResetTX, err := buildTCPResetTXOptions(cfg.Response.TX)
+	tcpResetTX, err := buildTCPResetTXOptions(cfg.Egress)
 	if err != nil {
 		logrus.WithError(err).Fatal("Fail to configure tcp_reset TX")
 	}
@@ -115,12 +115,12 @@ func main() {
 	}
 }
 
-func buildTCPResetTXOptions(cfg config.ResponseTXConfig) (dataplane.TCPResetTXOptions, error) {
+func buildTCPResetTXOptions(cfg config.EgressConfig) (dataplane.TCPResetTXOptions, error) {
 	var egressIfIndex int
 	if cfg.TXPath() == "egress-interface" {
-		iface, err := net.InterfaceByName(cfg.EgressInterface)
+		iface, err := net.InterfaceByName(cfg.Interface)
 		if err != nil {
-			return dataplane.TCPResetTXOptions{}, fmt.Errorf("lookup egress interface %s: %w", cfg.EgressInterface, err)
+			return dataplane.TCPResetTXOptions{}, fmt.Errorf("lookup egress interface %s: %w", cfg.Interface, err)
 		}
 		egressIfIndex = iface.Index
 	}
@@ -133,7 +133,7 @@ func buildTCPResetTXOptions(cfg config.ResponseTXConfig) (dataplane.TCPResetTXOp
 }
 
 func buildResponseRuntime(cfg config.Config, registrar response.XSKRegistrar) (*response.Runtime, error) {
-	if !cfg.Response.Enabled {
+	if !cfg.Response.Runtime.Enabled {
 		return nil, nil
 	}
 
@@ -143,14 +143,14 @@ func buildResponseRuntime(cfg config.Config, registrar response.XSKRegistrar) (*
 	}
 
 	var hardwareAddr net.HardwareAddr
-	if cfg.Response.ARPReply.HardwareAddr != "" {
-		hardwareAddr, err = net.ParseMAC(cfg.Response.ARPReply.HardwareAddr)
+	if cfg.Response.Actions.ARPReply.HardwareAddr != "" {
+		hardwareAddr, err = net.ParseMAC(cfg.Response.Actions.ARPReply.HardwareAddr)
 		if err != nil {
 			return nil, fmt.Errorf("parse response hardware address: %w", err)
 		}
 	}
 
-	afxdpCfg := buildAFXDPConfig(cfg.Response, iface.Index)
+	afxdpCfg := buildAFXDPConfig(cfg.Response.Runtime, iface.Index)
 
 	newBackend := func(queueID int) (response.XSKBackend, error) {
 		return afxdp.NewSocket(afxdpCfg, queueID)
@@ -158,17 +158,17 @@ func buildResponseRuntime(cfg config.Config, registrar response.XSKRegistrar) (*
 
 	return response.NewRuntime(response.RuntimeConfig{
 		IfIndex:              iface.Index,
-		Queues:               cfg.Response.WorkerQueues(),
-		ResultBufferCapacity: cfg.Response.ResultBufferCapacity(),
+		Queues:               cfg.Response.Runtime.WorkerQueues(),
+		ResultBufferCapacity: cfg.Response.Runtime.ResultBufferCapacity(),
 		HardwareAddr:         hardwareAddr,
-		TCPSeq:               cfg.Response.TCPSynAck.TCPSeq,
-		EgressInterface:      cfg.Response.TX.EgressInterface,
+		TCPSeq:               cfg.Response.Actions.TCPSynAck.TCPSeq,
+		EgressInterface:      cfg.Egress.Interface,
 		Registrar:            registrar,
 		NewXSKBackend:        newBackend,
 	})
 }
 
-func buildAFXDPConfig(cfg config.ResponseConfig, ifindex int) afxdp.SocketConfig {
+func buildAFXDPConfig(cfg config.ResponseRuntimeConfig, ifindex int) afxdp.SocketConfig {
 	afxdpCfg := afxdp.DefaultSocketConfig()
 	afxdpCfg.IfIndex = ifindex
 

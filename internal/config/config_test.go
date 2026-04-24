@@ -227,21 +227,24 @@ func TestLoadResponseConfig(t *testing.T) {
 dataplane:
   interface: eth0
 
+egress:
+  interface: eth1
+  vlan_mode: access
+  failure_verdict: drop
+
 response:
-  enabled: true
-  queues: [0, 1]
-  result_buffer_size: 2048
-  tx:
-    egress_interface: eth1
-    vlan_mode: access
-    failure_verdict: drop
-  arp_reply:
-    hardware_addr: 02:aa:bb:cc:dd:ee
-  tcp_syn_ack:
-    tcp_seq: 1000
-  afxdp:
-    frame_size: 4096
-    tx_frame_reserve: 256
+  runtime:
+    enabled: true
+    queues: [0, 1]
+    result_buffer_size: 2048
+    afxdp:
+      frame_size: 4096
+      tx_frame_reserve: 256
+  actions:
+    arp_reply:
+      hardware_addr: 02:aa:bb:cc:dd:ee
+    tcp_syn_ack:
+      tcp_seq: 1000
 
 console:
   listen_addr: 127.0.0.1:8080
@@ -252,33 +255,33 @@ console:
 		t.Fatalf("Load() error = %v", err)
 	}
 
-	if !cfg.Response.Enabled {
-		t.Fatal("Response.Enabled = false, want true")
+	if !cfg.Response.Runtime.Enabled {
+		t.Fatal("Response.Runtime.Enabled = false, want true")
 	}
-	if got := cfg.Response.WorkerQueues(); len(got) != 2 || got[0] != 0 || got[1] != 1 {
+	if got := cfg.Response.Runtime.WorkerQueues(); len(got) != 2 || got[0] != 0 || got[1] != 1 {
 		t.Fatalf("WorkerQueues() = %+v, want [0 1]", got)
 	}
-	if cfg.Response.ResultBufferCapacity() != 2048 {
-		t.Fatalf("ResultBufferCapacity() = %d, want 2048", cfg.Response.ResultBufferCapacity())
+	if cfg.Response.Runtime.ResultBufferCapacity() != 2048 {
+		t.Fatalf("ResultBufferCapacity() = %d, want 2048", cfg.Response.Runtime.ResultBufferCapacity())
 	}
-	if cfg.Response.ARPReply.HardwareAddr != "02:aa:bb:cc:dd:ee" || cfg.Response.TCPSynAck.TCPSeq != 1000 {
+	if cfg.Response.Actions.ARPReply.HardwareAddr != "02:aa:bb:cc:dd:ee" || cfg.Response.Actions.TCPSynAck.TCPSeq != 1000 {
 		t.Fatalf("Response = %+v, want arp_reply/tcp_syn_ack populated", cfg.Response)
 	}
-	if cfg.Response.TX.TXPath() != "egress-interface" ||
-		cfg.Response.TX.EgressInterface != "eth1" ||
-		cfg.Response.TX.NormalizedVLANMode() != "access" ||
-		cfg.Response.TX.NormalizedFailureVerdict() != "drop" {
-		t.Fatalf("TX = %+v, want egress-interface/access/drop", cfg.Response.TX)
+	if cfg.Egress.TXPath() != "egress-interface" ||
+		cfg.Egress.Interface != "eth1" ||
+		cfg.Egress.NormalizedVLANMode() != "access" ||
+		cfg.Egress.NormalizedFailureVerdict() != "drop" {
+		t.Fatalf("Egress = %+v, want egress-interface/access/drop", cfg.Egress)
 	}
-	if cfg.Response.AFXDP.FrameSize != 4096 || cfg.Response.AFXDP.TXFrameReserve != 256 {
-		t.Fatalf("AFXDP = %+v, want frame_size=4096 tx_frame_reserve=256", cfg.Response.AFXDP)
+	if cfg.Response.Runtime.AFXDP.FrameSize != 4096 || cfg.Response.Runtime.AFXDP.TXFrameReserve != 256 {
+		t.Fatalf("AFXDP = %+v, want frame_size=4096 tx_frame_reserve=256", cfg.Response.Runtime.AFXDP)
 	}
 }
 
 func TestResponseConfigDefaults(t *testing.T) {
 	t.Parallel()
 
-	cfg := ResponseConfig{}
+	cfg := ResponseRuntimeConfig{}
 	queues := cfg.WorkerQueues()
 	if len(queues) != 1 || queues[0] != 0 {
 		t.Fatalf("WorkerQueues() = %+v, want [0]", queues)
@@ -290,15 +293,27 @@ func TestResponseConfigDefaults(t *testing.T) {
 	if cfg.ResultBufferCapacity() != 1024 {
 		t.Fatalf("ResultBufferCapacity() = %d, want 1024", cfg.ResultBufferCapacity())
 	}
-	if cfg.TX.TXPath() != "same-interface" {
-		t.Fatalf("TXPath() = %q, want same-interface", cfg.TX.TXPath())
+}
+
+func TestEgressConfigDefaults(t *testing.T) {
+	t.Parallel()
+
+	cfg := EgressConfig{}
+	if cfg.TXPath() != "same-interface" {
+		t.Fatalf("TXPath() = %q, want same-interface", cfg.TXPath())
 	}
-	if cfg.TX.NormalizedVLANMode() != "preserve" {
-		t.Fatalf("tx vlan mode = %q, want preserve", cfg.TX.NormalizedVLANMode())
+	if cfg.NormalizedVLANMode() != "preserve" {
+		t.Fatalf("egress vlan mode = %q, want preserve", cfg.NormalizedVLANMode())
 	}
-	if cfg.TX.NormalizedFailureVerdict() != "pass" {
-		t.Fatalf("tx failure verdict = %q, want pass", cfg.TX.NormalizedFailureVerdict())
+	if cfg.NormalizedFailureVerdict() != "pass" {
+		t.Fatalf("egress failure verdict = %q, want pass", cfg.NormalizedFailureVerdict())
 	}
+}
+
+func TestResponseActionsConfigDefaults(t *testing.T) {
+	t.Parallel()
+
+	cfg := ResponseActionsConfig{}
 	if cfg.TCPSynAck.TCPSeq != 0 {
 		t.Fatalf("tcp_syn_ack.tcp_seq = %d, want 0 zero-value", cfg.TCPSynAck.TCPSeq)
 	}
@@ -323,63 +338,48 @@ func TestLoadRejectsInvalidResponseConfig(t *testing.T) {
 	}{
 		{
 			name: "negative queue",
-			body: "queues: [-1]",
-			want: "response: queue -1 out of range",
+			body: "runtime:\n    queues: [-1]",
+			want: "response: runtime: queue -1 out of range",
 		},
 		{
 			name: "duplicate queue",
-			body: "queues: [0, 0]",
-			want: "response: duplicate queue 0",
+			body: "runtime:\n    queues: [0, 0]",
+			want: "response: runtime: duplicate queue 0",
 		},
 		{
 			name: "negative result buffer",
-			body: "result_buffer_size: -1",
-			want: "response: result_buffer_size must be >= 0",
+			body: "runtime:\n    result_buffer_size: -1",
+			want: "response: runtime: result_buffer_size must be >= 0",
 		},
 		{
 			name: "invalid hardware address",
-			body: "arp_reply:\n    hardware_addr: nope",
-			want: "response: hardware_addr",
+			body: "actions:\n    arp_reply:\n      hardware_addr: nope",
+			want: "response: actions: hardware_addr",
 		},
 		{
 			name: "non ethernet hardware address",
-			body: "arp_reply:\n    hardware_addr: 02:aa:bb:cc:dd:ee:ff:00",
-			want: "response: hardware_addr must be a 6-byte ethernet address",
+			body: "actions:\n    arp_reply:\n      hardware_addr: 02:aa:bb:cc:dd:ee:ff:00",
+			want: "response: actions: hardware_addr must be a 6-byte ethernet address",
 		},
 		{
-			name: "tx mode is not supported",
+			name: "reject old response tx block",
 			body: "tx:\n    mode: egress-interface",
-			want: "field mode not found",
+			want: "field tx not found",
 		},
 		{
-			name: "bad tx vlan mode",
-			body: "tx:\n    vlan_mode: tagged",
-			want: `response: tx: vlan_mode "tagged" is not valid`,
-		},
-		{
-			name: "bad tx failure verdict",
-			body: "tx:\n    failure_verdict: reject",
-			want: `response: tx: failure_verdict "reject" is not valid`,
-		},
-		{
-			name: "reject old tcp_reset block",
-			body: "tcp_reset:\n    egress_interface: eth1",
-			want: "field tcp_reset not found",
-		},
-		{
-			name: "reject old top level hardware address",
-			body: "hardware_addr: nope",
-			want: "field hardware_addr not found",
-		},
-		{
-			name: "reject old top level tcp seq",
-			body: "tcp_seq: 1000",
-			want: "field tcp_seq not found",
+			name: "reject old flat runtime enabled",
+			body: "enabled: true",
+			want: "field enabled not found",
 		},
 		{
 			name: "reject old flat afxdp field",
 			body: "frame_count: 4096",
 			want: "field frame_count not found",
+		},
+		{
+			name: "reject old flat action block",
+			body: "arp_reply:\n    hardware_addr: nope",
+			want: "field arp_reply not found",
 		},
 	}
 
@@ -404,6 +404,55 @@ console:
 			_, err := Load(path)
 			if err == nil {
 				t.Fatal("Load() error = nil, want response validation error")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Load() error = %q, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestLoadRejectsInvalidEgressConfig(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "bad vlan mode",
+			body: "vlan_mode: tagged",
+			want: `egress: vlan_mode "tagged" is not valid`,
+		},
+		{
+			name: "bad failure verdict",
+			body: "failure_verdict: reject",
+			want: `egress: failure_verdict "reject" is not valid`,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			path := writeConfigFile(t, `controlplane:
+  rules_path: configs/rules.example.yaml
+
+dataplane:
+  interface: eth0
+
+egress:
+  `+tc.body+`
+
+console:
+  listen_addr: 127.0.0.1:8080
+`)
+
+			_, err := Load(path)
+			if err == nil {
+				t.Fatal("Load() error = nil, want egress validation error")
 			}
 			if !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("Load() error = %q, want %q", err, tc.want)

@@ -81,10 +81,10 @@ response packet was transmitted.
 packets that also carry ACK, RST, or FIN fall back to
 `dataplane.ingress_verdict` without XSK redirect.
 
-`icmp_echo_reply` and `arp_reply` use the shared `response.tx.*` policy
-surface. With `response.tx.egress_interface: ""`, replies are transmitted
-through the same AF_XDP socket bound to the ingress interface. With a non-empty
-`response.tx.egress_interface`, the worker still receives and parses the packet
+`icmp_echo_reply` and `arp_reply` use the shared `egress.*` policy surface.
+With `egress.interface: ""`, replies are transmitted through the same AF_XDP
+socket bound to the ingress interface. With a non-empty `egress.interface`,
+the worker still receives and parses the packet
 from ingress XSK, but transmits supported replies through the configured egress
 interface in user space instead of assuming the ingress interface is also the
 transmit interface.
@@ -158,35 +158,39 @@ separate changes.
 
 ## Runtime Configuration
 
-The top-level `response` config block is parsed by the config layer. Response
-execution remains disabled unless `response.enabled` is true. Worker queues
+The config layer parses a top-level `egress` block plus the nested
+`response.runtime` and `response.actions` blocks. User-space response execution
+remains disabled unless `response.runtime.enabled` is true. Worker queues
 default to queue `0` when omitted, and the local result buffer defaults to
-capacity `1024` when `result_buffer_size` is omitted or zero.
+capacity `1024` when `response.runtime.result_buffer_size` is omitted or zero.
 
 ```yaml
+egress:
+  interface: ""
+  vlan_mode: preserve
+  failure_verdict: pass
+
 response:
-  enabled: false
-  queues: [0]
-  result_buffer_size: 1024
-  tx:
-    egress_interface: ""
-    vlan_mode: preserve
-    failure_verdict: pass
-  arp_reply:
-    hardware_addr: ""
-  tcp_syn_ack:
-    tcp_seq: 1
-  afxdp:
-    frame_size: 4096
-    frame_count: 4096
-    fill_ring_size: 2048
-    completion_ring_size: 2048
-    rx_ring_size: 2048
-    tx_ring_size: 2048
-    tx_frame_reserve: 256
+  runtime:
+    enabled: false
+    queues: [0]
+    result_buffer_size: 1024
+    afxdp:
+      frame_size: 4096
+      frame_count: 4096
+      fill_ring_size: 2048
+      completion_ring_size: 2048
+      rx_ring_size: 2048
+      tx_ring_size: 2048
+      tx_frame_reserve: 256
+  actions:
+    arp_reply:
+      hardware_addr: ""
+    tcp_syn_ack:
+      tcp_seq: 1
 ```
 
-`response.tx` config fields:
+`egress` config fields:
 
 `dataplane` config also includes:
 
@@ -195,7 +199,7 @@ response:
   delivery behavior. `drop` is recommended for dedicated mirror-port
   deployments.
 
-- `egress_interface`: shared TX egress policy. `""` keeps same-interface TX.
+- `interface`: shared TX egress policy. `""` keeps same-interface TX.
   For `tcp_reset`, a non-empty interface name enables BPF redirect TX. For
   `icmp_echo_reply` and `arp_reply`, a non-empty interface name enables
   user-space alternate egress TX after the packet is received from ingress XSK.
@@ -205,16 +209,17 @@ response:
   alternate egress transmission, starting with `tcp_reset`,
   `icmp_echo_reply`, and `arp_reply`.
 
-`response.arp_reply.hardware_addr` selects the ARP reply source hardware
-address when configured.
+`response.actions.arp_reply.hardware_addr` selects the ARP reply source
+hardware address when configured.
 
-`response.tcp_syn_ack.tcp_seq` sets the TCP SYN-ACK response sequence seed.
+`response.actions.tcp_syn_ack.tcp_seq` sets the TCP SYN-ACK response sequence
+seed.
 
-`response.afxdp.*` contains AF_XDP socket and UMEM sizing. AF_XDP socket
-startup is Linux-only and requires an attached XDP program plus configured
-queues that match the redirected RX queues. `frame_count` covers both RX fill
-frames and TX-reserved frames; `fill_ring_size + tx_frame_reserve` must not
-exceed `frame_count`.
+`response.runtime.afxdp.*` contains AF_XDP socket and UMEM sizing. AF_XDP
+socket startup is Linux-only and requires an attached XDP program plus
+configured queues that match the redirected RX queues. `frame_count` covers
+both RX fill frames and TX-reserved frames; `fill_ring_size + tx_frame_reserve`
+must not exceed `frame_count`.
 
 ## Module Boundaries
 
