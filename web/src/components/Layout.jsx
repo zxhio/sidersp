@@ -5,7 +5,7 @@ export default function Layout({ children }) {
     <div className="layout">
       <aside className="sidebar">
         <div className="sidebar-brand">
-          <span>SiderSP</span>
+          <span>SideRSP</span>
         </div>
         <nav className="sidebar-nav">
           <NavLink to="/" end>概览</NavLink>
