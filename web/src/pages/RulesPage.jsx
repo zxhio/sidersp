@@ -9,6 +9,7 @@ const DEFAULT_COL = {
   id: 40,
   name: 60,
   status: 50,
+  matched: 70,
   priority: 50,
   action: 70,
   operations: 100,
@@ -25,6 +26,10 @@ function formatTCPFlags(flags) {
 
 function formatProtocol(protocol) {
   return protocol ? protocol.toUpperCase() : ''
+}
+
+function formatCount(value) {
+  return (value ?? 0).toLocaleString()
 }
 
 function MatchDetail({ match }) {
@@ -183,6 +188,10 @@ export default function RulesPage() {
                       优先级
                       <span className="resize-handle" onMouseDown={e => onResizeStart('priority', e)} />
                     </th>
+                    <th style={colStyle('matched')}>
+                      匹配数
+                      <span className="resize-handle" onMouseDown={e => onResizeStart('matched', e)} />
+                    </th>
                     <th>匹配条件</th>
                     <th style={colStyle('action')}>
                       响应动作
@@ -196,7 +205,7 @@ export default function RulesPage() {
                 <tbody>
                   {rules.length === 0 ? (
                     <tr className="empty-row">
-                      <td colSpan={7}>暂无规则数据</td>
+                      <td colSpan={8}>暂无规则数据</td>
                     </tr>
                   ) : (
                     rules.map(rule => (
@@ -212,6 +221,7 @@ export default function RulesPage() {
                           />
                         </td>
                         <td style={{ fontFamily: 'var(--font-mono)', fontSize: 13 }}>{rule.priority}</td>
+                        <td style={{ fontFamily: 'var(--font-mono)', fontSize: 13 }}>{formatCount(rule.matched_count)}</td>
                         <td><MatchDetail match={rule.match} /></td>
                         <td>
                           <span className="tag tag-success">{rule.response.action}</span>
