@@ -224,6 +224,7 @@ func TestStatsReturnsRuntimeAndDataplaneCounters(t *testing.T) {
 			ParseFailed:     2,
 			RuleCandidates:  40,
 			MatchedRules:    7,
+			RuleMatches:     map[uint32]uint64{1: 11},
 			RingbufDropped:  1,
 			XDPTX:           3,
 			XskTX:           4,
@@ -262,6 +263,27 @@ func TestStatsReturnsRuntimeAndDataplaneCounters(t *testing.T) {
 	}
 	if got.Histories[0].Name != "1d" {
 		t.Fatalf("first history = %+v, want name=1d", got.Histories[0])
+	}
+}
+
+func TestRuleMatchCountsReturnsPerRuleCounters(t *testing.T) {
+	t.Parallel()
+
+	r := NewRuntime(config.Config{}, &testSyncer{}, testStreamer{}, testStatsReader{
+		stats: model.DataplaneStats{
+			RuleMatches: map[uint32]uint64{
+				1: 8,
+				2: 3,
+			},
+		},
+	})
+
+	got, err := r.RuleMatchCounts()
+	if err != nil {
+		t.Fatalf("RuleMatchCounts() error = %v", err)
+	}
+	if got[1] != 8 || got[2] != 3 {
+		t.Fatalf("RuleMatchCounts() = %+v, want rule 1=8 rule 2=3", got)
 	}
 }
 

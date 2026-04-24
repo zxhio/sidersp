@@ -34,12 +34,13 @@ type ruleARPMatch struct {
 }
 
 type RuleBody struct {
-	ID       int        `json:"id"`
-	Name     string     `json:"name"`
-	Enabled  bool       `json:"enabled"`
-	Priority int        `json:"priority"`
-	Match    RuleMatch  `json:"match"`
-	Response RuleAction `json:"response"`
+	ID           int        `json:"id"`
+	Name         string     `json:"name"`
+	Enabled      bool       `json:"enabled"`
+	Priority     int        `json:"priority"`
+	MatchedCount uint64     `json:"matched_count"`
+	Match        RuleMatch  `json:"match"`
+	Response     RuleAction `json:"response"`
 }
 
 type StatusResponse struct {

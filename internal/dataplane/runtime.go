@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/netip"
 	"slices"
+	"sync"
 	"strings"
 	"time"
 
@@ -26,6 +27,8 @@ type Runtime struct {
 	iface      string
 	opts       Options
 	promiscSet bool
+	matchMu    sync.RWMutex
+	matchCounts map[uint32]uint64
 }
 
 type Options struct {
@@ -52,9 +55,10 @@ func Open(opts Options) (*Runtime, error) {
 	}
 
 	r := &Runtime{
-		objs:  objs,
-		iface: opts.Interface,
-		opts:  opts,
+		objs:        objs,
+		iface:       opts.Interface,
+		opts:        opts,
+		matchCounts: make(map[uint32]uint64),
 	}
 	if err := r.writeTXConfig(opts.TCPResetTX); err != nil {
 		_ = r.objs.Close()
@@ -211,6 +215,10 @@ func (r *Runtime) streamEvents(ctx context.Context, reader *ringbuf.Reader) {
 			continue
 		}
 
+		r.matchMu.Lock()
+		r.matchCounts[evt.RuleID]++
+		r.matchMu.Unlock()
+
 		logrus.WithFields(logrus.Fields{
 			"rule_id":   evt.RuleID,
 			"action":    actionName(evt.Action),
@@ -316,12 +324,19 @@ func (r *Runtime) ReadStats() (model.DataplaneStats, error) {
 	if err != nil {
 		return model.DataplaneStats{}, err
 	}
+	r.matchMu.RLock()
+	ruleMatches := make(map[uint32]uint64, len(r.matchCounts))
+	for ruleID, matchedCount := range r.matchCounts {
+		ruleMatches[ruleID] = matchedCount
+	}
+	r.matchMu.RUnlock()
 
 	return model.DataplaneStats{
 		RXPackets:       stats.RXPackets,
 		ParseFailed:     stats.ParseFailed,
 		RuleCandidates:  stats.RuleCandidates,
 		MatchedRules:    stats.MatchedRules,
+		RuleMatches:     ruleMatches,
 		RingbufDropped:  stats.RingbufDropped,
 		XDPTX:           stats.XDPTX,
 		XskTX:           stats.XskTX,

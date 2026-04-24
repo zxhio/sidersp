@@ -19,6 +19,7 @@ type RuleService interface {
 	Stats(window string) (controlplane.Stats, error)
 	StatsWindows() []string
 	ListRules() []rule.Rule
+	RuleMatchCounts() (map[int]uint64, error)
 	GetRule(id int) (rule.Rule, error)
 	CreateRule(item rule.Rule) (rule.Rule, error)
 	UpdateRule(id int, item rule.Rule) (rule.Rule, error)

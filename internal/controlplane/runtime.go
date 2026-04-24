@@ -140,6 +140,19 @@ func (r *Runtime) Stats(window string) (Stats, error) {
 	return current, nil
 }
 
+func (r *Runtime) RuleMatchCounts() (map[int]uint64, error) {
+	dpStats, err := r.stats.ReadStats()
+	if err != nil {
+		return nil, fmt.Errorf("read dataplane stats: %w", err)
+	}
+
+	counts := make(map[int]uint64, len(dpStats.RuleMatches))
+	for ruleID, matchedCount := range dpStats.RuleMatches {
+		counts[int(ruleID)] = matchedCount
+	}
+	return counts, nil
+}
+
 type Status struct {
 	RulesPath   string `json:"rules_path"`
 	ListenAddr  string `json:"listen_addr"`

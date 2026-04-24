@@ -17,6 +17,7 @@ type stubService struct {
 	stats      controlplane.Stats
 	windows    []string
 	statsByKey map[string]controlplane.Stats
+	ruleCounts map[int]uint64
 	lastWindow string
 	rules      []rule.Rule
 }
@@ -35,6 +36,9 @@ func (s *stubService) Stats(window string) (controlplane.Stats, error) {
 }
 func (s *stubService) StatsWindows() []string {
 	return append([]string(nil), s.windows...)
+}
+func (s *stubService) RuleMatchCounts() (map[int]uint64, error) {
+	return mapsClone(s.ruleCounts), nil
 }
 func (s *stubService) ListRules() []rule.Rule { return append([]rule.Rule(nil), s.rules...) }
 func (s *stubService) GetRule(id int) (rule.Rule, error) {
@@ -101,6 +105,17 @@ func validateStubRule(item rule.Rule) error {
 	}
 }
 
+func mapsClone(src map[int]uint64) map[int]uint64 {
+	if len(src) == 0 {
+		return nil
+	}
+	out := make(map[int]uint64, len(src))
+	for key, value := range src {
+		out[key] = value
+	}
+	return out
+}
+
 func TestGetStatus(t *testing.T) {
 	t.Parallel()
 
@@ -140,6 +155,7 @@ func TestListRules(t *testing.T) {
 	t.Parallel()
 
 	server := NewServer("127.0.0.1:0", &stubService{
+		ruleCounts: map[int]uint64{1: 12, 2: 3},
 		rules: []rule.Rule{
 			{ID: 1, Name: "one", Enabled: true},
 			{ID: 2, Name: "two", Enabled: false},
@@ -155,10 +171,10 @@ func TestListRules(t *testing.T) {
 	}
 
 	var body struct {
-		Data     []rule.Rule `json:"data"`
-		Total    int         `json:"total"`
-		Page     int         `json:"page"`
-		PageSize int         `json:"page_size"`
+		Data     []RuleBody `json:"data"`
+		Total    int        `json:"total"`
+		Page     int        `json:"page"`
+		PageSize int        `json:"page_size"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
@@ -169,6 +185,9 @@ func TestListRules(t *testing.T) {
 	}
 	if len(body.Data) != 1 || body.Data[0].ID != 1 {
 		t.Fatalf("data = %+v, want first rule only", body.Data)
+	}
+	if body.Data[0].MatchedCount != 12 {
+		t.Fatalf("matched_count = %d, want 12", body.Data[0].MatchedCount)
 	}
 }
 

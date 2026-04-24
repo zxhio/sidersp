@@ -78,6 +78,11 @@ func (h Handler) listRules(c *gin.Context) {
 	}
 
 	all := h.service.ListRules()
+	counts, err := h.service.RuleMatchCounts()
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
 	start := (page - 1) * pageSize
 	if start > len(all) {
 		start = len(all)
@@ -88,7 +93,7 @@ func (h Handler) listRules(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, listEnvelope{
-		Data:     newRuleBodies(all[start:end]),
+		Data:     newRuleBodies(all[start:end], counts),
 		Total:    len(all),
 		Page:     page,
 		PageSize: pageSize,
@@ -108,7 +113,13 @@ func (h Handler) getRule(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, dataEnvelope{Data: newRuleBody(item)})
+	counts, err := h.service.RuleMatchCounts()
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, dataEnvelope{Data: newRuleBody(item, counts[item.ID])})
 }
 
 func (h Handler) createRule(c *gin.Context) {
@@ -124,7 +135,13 @@ func (h Handler) createRule(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, dataEnvelope{Data: newRuleBody(item)})
+	counts, err := h.service.RuleMatchCounts()
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusCreated, dataEnvelope{Data: newRuleBody(item, counts[item.ID])})
 }
 
 func (h Handler) updateRule(c *gin.Context) {
@@ -146,7 +163,13 @@ func (h Handler) updateRule(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, dataEnvelope{Data: newRuleBody(item)})
+	counts, err := h.service.RuleMatchCounts()
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, dataEnvelope{Data: newRuleBody(item, counts[item.ID])})
 }
 
 func (h Handler) deleteRule(c *gin.Context) {
@@ -185,7 +208,13 @@ func (h Handler) setRuleEnabled(c *gin.Context, enabled bool) {
 		return
 	}
 
-	c.JSON(http.StatusOK, dataEnvelope{Data: newRuleBody(item)})
+	counts, err := h.service.RuleMatchCounts()
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, dataEnvelope{Data: newRuleBody(item, counts[item.ID])})
 }
 
 func writeServiceError(c *gin.Context, err error) {
@@ -327,20 +356,21 @@ func uint64Ptr(v uint64) *uint64 {
 	return &v
 }
 
-func newRuleBodies(items []rule.Rule) []RuleBody {
+func newRuleBodies(items []rule.Rule, counts map[int]uint64) []RuleBody {
 	out := make([]RuleBody, 0, len(items))
 	for _, item := range items {
-		out = append(out, newRuleBody(item))
+		out = append(out, newRuleBody(item, counts[item.ID]))
 	}
 	return out
 }
 
-func newRuleBody(item rule.Rule) RuleBody {
+func newRuleBody(item rule.Rule, matchedCount uint64) RuleBody {
 	return RuleBody{
-		ID:       item.ID,
-		Name:     item.Name,
-		Enabled:  item.Enabled,
-		Priority: item.Priority,
+		ID:           item.ID,
+		Name:         item.Name,
+		Enabled:      item.Enabled,
+		Priority:     item.Priority,
+		MatchedCount: matchedCount,
 		Match: RuleMatch{
 			Protocol:    item.Match.Protocol,
 			VLANs:       append([]int(nil), item.Match.VLANs...),
