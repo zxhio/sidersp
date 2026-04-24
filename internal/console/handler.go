@@ -56,13 +56,14 @@ func (h Handler) setLogLevel(c *gin.Context) {
 
 func (h Handler) getStats(c *gin.Context) {
 	window := strings.TrimSpace(c.Query("window"))
+	more := parseBoolQuery(c.Query("more"))
 	item, err := h.service.Stats(window)
 	if err != nil {
 		writeServiceError(c, err)
 		return
 	}
 
-	c.JSON(http.StatusOK, dataEnvelope{Data: newStatsResponse(item)})
+	c.JSON(http.StatusOK, dataEnvelope{Data: newStatsResponse(item, more)})
 }
 
 func (h Handler) listStatsWindows(c *gin.Context) {
@@ -252,28 +253,31 @@ func newStatusResponse(item controlplane.Status) StatusResponse {
 	}
 }
 
-func newStatsResponse(item controlplane.Stats) StatsResponse {
+func newStatsResponse(item controlplane.Stats, more bool) StatsResponse {
 	histories := make([]StatsHistoryResponse, 0, len(item.Histories))
 	for _, series := range item.Histories {
 		points := make([]StatsPointResponse, 0, len(series.Points))
 		for _, point := range series.Points {
-			points = append(points, StatsPointResponse{
+			out := StatsPointResponse{
 				Timestamp:       point.Timestamp.Format(time.RFC3339),
-				TotalRules:      point.TotalRules,
-				EnabledRules:    point.EnabledRules,
 				RXPackets:       point.RXPackets,
 				ParseFailed:     point.ParseFailed,
 				RuleCandidates:  point.RuleCandidates,
 				MatchedRules:    point.MatchedRules,
-				RingbufDropped:  point.RingbufDropped,
-				XDPTX:           point.XDPTX,
-				XskTX:           point.XskTX,
-				TXFailed:        point.TXFailed,
-				XskFailed:       point.XskFailed,
-				RedirectTX:      point.RedirectTX,
-				RedirectFailed:  point.RedirectFailed,
-				FibLookupFailed: point.FibLookupFailed,
-			})
+			}
+			if more {
+				out.TotalRules = intPtr(point.TotalRules)
+				out.EnabledRules = intPtr(point.EnabledRules)
+				out.RingbufDropped = uint64Ptr(point.RingbufDropped)
+				out.XDPTX = uint64Ptr(point.XDPTX)
+				out.XskTX = uint64Ptr(point.XskTX)
+				out.TXFailed = uint64Ptr(point.TXFailed)
+				out.XskFailed = uint64Ptr(point.XskFailed)
+				out.RedirectTX = uint64Ptr(point.RedirectTX)
+				out.RedirectFailed = uint64Ptr(point.RedirectFailed)
+				out.FibLookupFailed = uint64Ptr(point.FibLookupFailed)
+			}
+			points = append(points, out)
 		}
 		histories = append(histories, StatsHistoryResponse{
 			Name:   series.Name,
@@ -283,23 +287,43 @@ func newStatsResponse(item controlplane.Stats) StatsResponse {
 		})
 	}
 
-	return StatsResponse{
-		TotalRules:      item.TotalRules,
-		EnabledRules:    item.EnabledRules,
+	out := StatsResponse{
 		RXPackets:       item.RXPackets,
 		ParseFailed:     item.ParseFailed,
 		RuleCandidates:  item.RuleCandidates,
 		MatchedRules:    item.MatchedRules,
-		RingbufDropped:  item.RingbufDropped,
-		XDPTX:           item.XDPTX,
-		XskTX:           item.XskTX,
-		TXFailed:        item.TXFailed,
-		XskFailed:       item.XskFailed,
-		RedirectTX:      item.RedirectTX,
-		RedirectFailed:  item.RedirectFailed,
-		FibLookupFailed: item.FibLookupFailed,
 		Histories:       histories,
 	}
+	if more {
+		out.TotalRules = intPtr(item.TotalRules)
+		out.EnabledRules = intPtr(item.EnabledRules)
+		out.RingbufDropped = uint64Ptr(item.RingbufDropped)
+		out.XDPTX = uint64Ptr(item.XDPTX)
+		out.XskTX = uint64Ptr(item.XskTX)
+		out.TXFailed = uint64Ptr(item.TXFailed)
+		out.XskFailed = uint64Ptr(item.XskFailed)
+		out.RedirectTX = uint64Ptr(item.RedirectTX)
+		out.RedirectFailed = uint64Ptr(item.RedirectFailed)
+		out.FibLookupFailed = uint64Ptr(item.FibLookupFailed)
+	}
+	return out
+}
+
+func parseBoolQuery(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func intPtr(v int) *int {
+	return &v
+}
+
+func uint64Ptr(v uint64) *uint64 {
+	return &v
 }
 
 func newRuleBodies(items []rule.Rule) []RuleBody {

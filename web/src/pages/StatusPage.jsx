@@ -2,11 +2,14 @@ import { useState, useEffect, useCallback } from 'react'
 import { getStats, getStatsWindows } from '../api'
 import Sparkline from '../components/Sparkline'
 
-const METRICS = [
+const PRIMARY_METRICS = [
   { key: 'rx_packets',      label: '收包数',     color: '#6366f1' },
   { key: 'parse_failed',    label: '解析失败',   color: '#ef4444' },
-  { key: 'rule_candidates', label: '进入匹配',   color: '#f59e0b' },
+  { key: 'rule_candidates', label: '匹配数量',   color: '#f59e0b' },
   { key: 'matched_rules',   label: '规则命中',   color: '#10b981' },
+]
+
+const EXTENDED_METRICS = [
   { key: 'ringbuf_dropped', label: '缓冲区丢弃', color: '#8b5cf6' },
   { key: 'xdp_tx',          label: '同口 TX',    color: '#0ea5e9' },
   { key: 'redirect_tx',     label: '出口重定向', color: '#14b8a6' },
@@ -62,6 +65,7 @@ export default function StatsPage() {
   const [error, setError] = useState('')
   const [window, setWindow] = useState('')
   const [windows, setWindows] = useState(DEFAULT_WINDOWS)
+  const [showMoreMetrics, setShowMoreMetrics] = useState(false)
 
   useEffect(() => {
     getStatsWindows()
@@ -69,13 +73,14 @@ export default function StatsPage() {
       .catch(() => {})
   }, [])
 
-  const load = useCallback((w) => {
-    getStats(w)
+  const load = useCallback((w, more) => {
+    setError('')
+    getStats(w, more)
       .then(setStats)
       .catch(err => setError(err.message))
   }, [])
 
-  useEffect(() => { load(window) }, [load, window])
+  useEffect(() => { load(window, showMoreMetrics) }, [load, window, showMoreMetrics])
 
   if (error) {
     return (
@@ -109,6 +114,8 @@ export default function StatsPage() {
   const hasHistory = points.length >= 1
 
   const activeWindow = window || (series?.name || '')
+  const toggleLabel = showMoreMetrics ? '收起更多' : '展示更多'
+  const hasMoreStats = showMoreMetrics && stats.ringbuf_dropped !== undefined
 
   return (
     <>
@@ -119,7 +126,7 @@ export default function StatsPage() {
       <div className="page-body">
         {/* Current values */}
         <div className="status-cards" style={{ marginBottom: 24 }}>
-          {METRICS.map(m => (
+          {PRIMARY_METRICS.map(m => (
             <div className="status-card" key={m.key}>
               <div className="status-card-label">{m.label}</div>
               <div className="status-card-value" style={{ fontSize: 20 }}>
@@ -145,7 +152,7 @@ export default function StatsPage() {
         {/* Charts from history */}
         {hasHistory ? (
           <>
-            {METRICS.map(m => {
+            {PRIMARY_METRICS.map(m => {
               const { deltas, timestamps } = computeDeltas(points, m.key)
               if (deltas.length < 1) return null
               return (
@@ -161,30 +168,128 @@ export default function StatsPage() {
                 </div>
               )
             })}
-            {RULE_METRICS.map(m => {
-              const { deltas, timestamps } = extractValues(points, m.key)
-              if (deltas.length < 1) return null
-              return (
-                <div className="section" key={m.key}>
-                  <div className="section-title">{m.label}</div>
-                  <div className="chart-container">
-                    <Sparkline
-                      data={deltas}
-                      color={m.color}
-                      labels={timestamps.map(formatTimestamp)}
-                    />
+            <div className="stats-toggle">
+              <button
+                className="btn btn-sm stats-toggle-btn"
+                onClick={() => setShowMoreMetrics(show => !show)}
+              >
+                {toggleLabel}
+              </button>
+            </div>
+            {showMoreMetrics && hasMoreStats && (
+              <>
+                <div className="section">
+                  <div className="section-title">更多统计</div>
+                  <div className="status-cards">
+                    {EXTENDED_METRICS.map(m => (
+                      <div className="status-card" key={m.key}>
+                        <div className="status-card-label">{m.label}</div>
+                        <div className="status-card-value" style={{ fontSize: 20 }}>
+                          {formatValue(stats[m.key])}
+                        </div>
+                      </div>
+                    ))}
+                    {RULE_METRICS.map(m => (
+                      <div className="status-card" key={m.key}>
+                        <div className="status-card-label">{m.label}</div>
+                        <div className="status-card-value" style={{ fontSize: 20 }}>
+                          {formatValue(stats[m.key])}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
-              )
-            })}
+                {EXTENDED_METRICS.map(m => {
+                  const { deltas, timestamps } = computeDeltas(points, m.key)
+                  if (deltas.length < 1) return null
+                  return (
+                    <div className="section" key={m.key}>
+                      <div className="section-title">{m.label}（增量/采样间隔）</div>
+                      <div className="chart-container">
+                        <Sparkline
+                          data={deltas}
+                          color={m.color}
+                          labels={timestamps.map(formatTimestamp)}
+                        />
+                      </div>
+                    </div>
+                  )
+                })}
+                {RULE_METRICS.map(m => {
+                  const { deltas, timestamps } = extractValues(points, m.key)
+                  if (deltas.length < 1) return null
+                  return (
+                    <div className="section" key={m.key}>
+                      <div className="section-title">{m.label}</div>
+                      <div className="chart-container">
+                        <Sparkline
+                          data={deltas}
+                          color={m.color}
+                          labels={timestamps.map(formatTimestamp)}
+                        />
+                      </div>
+                    </div>
+                  )
+                })}
+              </>
+            )}
+            {showMoreMetrics && !hasMoreStats && (
+              <div className="section">
+                <div className="section-title">更多统计</div>
+                <div style={{ color: 'var(--c-text-placeholder)', fontSize: 13, padding: '16px 0' }}>
+                  加载中...
+                </div>
+              </div>
+            )}
           </>
         ) : (
-          <div className="section">
-            <div className="section-title">趋势图</div>
-            <div style={{ color: 'var(--c-text-placeholder)', fontSize: 13, padding: '16px 0' }}>
-              暂无历史数据
+          <>
+            <div className="stats-toggle">
+              <button
+                className="btn btn-sm stats-toggle-btn"
+                onClick={() => setShowMoreMetrics(show => !show)}
+              >
+                {toggleLabel}
+              </button>
             </div>
-          </div>
+            {showMoreMetrics && hasMoreStats && (
+              <div className="section">
+                <div className="section-title">更多统计</div>
+                <div className="status-cards">
+                  {EXTENDED_METRICS.map(m => (
+                    <div className="status-card" key={m.key}>
+                      <div className="status-card-label">{m.label}</div>
+                      <div className="status-card-value" style={{ fontSize: 20 }}>
+                        {formatValue(stats[m.key])}
+                      </div>
+                    </div>
+                  ))}
+                  {RULE_METRICS.map(m => (
+                    <div className="status-card" key={m.key}>
+                      <div className="status-card-label">{m.label}</div>
+                      <div className="status-card-value" style={{ fontSize: 20 }}>
+                        {formatValue(stats[m.key])}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {showMoreMetrics && !hasMoreStats && (
+              <div className="section">
+                <div className="section-title">更多统计</div>
+                <div style={{ color: 'var(--c-text-placeholder)', fontSize: 13, padding: '16px 0' }}>
+                  加载中...
+                </div>
+              </div>
+            )}
+            <div className="section">
+              <div className="section-title">趋势图</div>
+              <div style={{ color: 'var(--c-text-placeholder)', fontSize: 13, padding: '16px 0' }}>
+                暂无历史数据
+              </div>
+            </div>
+          </>
         )}
       </div>
     </>

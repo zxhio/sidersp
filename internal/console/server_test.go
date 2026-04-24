@@ -182,19 +182,99 @@ func TestGetStats(t *testing.T) {
 	}
 
 	var body struct {
-		Data controlplane.Stats `json:"data"`
+		Data StatsResponse `json:"data"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
-	if body.Data.RXPackets != 100 || body.Data.EnabledRules != 1 {
-		t.Fatalf("stats = %+v, want rx_packets=100 enabled_rules=1", body.Data)
+	if body.Data.RXPackets != 100 {
+		t.Fatalf("stats = %+v, want rx_packets=100", body.Data)
+	}
+	if body.Data.EnabledRules != nil || body.Data.RingbufDropped != nil {
+		t.Fatalf("stats = %+v, want compact response without more-only fields", body.Data)
 	}
 	if service.lastWindow != "1d" {
 		t.Fatalf("window = %q, want 1d", service.lastWindow)
 	}
 	if len(body.Data.Histories) != 1 {
 		t.Fatalf("histories len = %d, want 1", len(body.Data.Histories))
+	}
+	if body.Data.Histories[0].Points[0].TotalRules != nil || body.Data.Histories[0].Points[0].RingbufDropped != nil {
+		t.Fatalf("point = %+v, want compact history response", body.Data.Histories[0].Points[0])
+	}
+}
+
+func TestGetStatsVerbose(t *testing.T) {
+	t.Parallel()
+
+	server := NewServer("127.0.0.1:0", &stubService{
+		statsByKey: map[string]controlplane.Stats{
+			"1d": {
+				TotalRules:      2,
+				EnabledRules:    1,
+				RXPackets:       100,
+				ParseFailed:     3,
+				RuleCandidates:  20,
+				MatchedRules:    8,
+				RingbufDropped:  1,
+				XDPTX:           2,
+				XskTX:           3,
+				TXFailed:        4,
+				XskFailed:       5,
+				RedirectTX:      6,
+				RedirectFailed:  7,
+				FibLookupFailed: 8,
+				Histories: []controlplane.StatsHistorySeries{
+					{
+						Name:   "10min",
+						Window: "10m",
+						Step:   "10s",
+						Points: []controlplane.StatsPoint{
+							{
+								TotalRules:      2,
+								EnabledRules:    1,
+								RXPackets:       90,
+								ParseFailed:     2,
+								RuleCandidates:  18,
+								MatchedRules:    7,
+								RingbufDropped:  1,
+								XDPTX:           2,
+								XskTX:           3,
+								TXFailed:        4,
+								XskFailed:       5,
+								RedirectTX:      6,
+								RedirectFailed:  7,
+								FibLookupFailed: 8,
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/stats?window=1d&more=1", nil)
+	rec := httptest.NewRecorder()
+	server.newRouter().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var body struct {
+		Data StatsResponse `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if body.Data.EnabledRules == nil || *body.Data.EnabledRules != 1 {
+		t.Fatalf("stats = %+v, want enabled_rules=1", body.Data)
+	}
+	if body.Data.RingbufDropped == nil || *body.Data.RingbufDropped != 1 {
+		t.Fatalf("stats = %+v, want ringbuf_dropped=1", body.Data)
+	}
+	if body.Data.Histories[0].Points[0].TotalRules == nil || *body.Data.Histories[0].Points[0].TotalRules != 2 {
+		t.Fatalf("point = %+v, want total_rules=2", body.Data.Histories[0].Points[0])
 	}
 }
 

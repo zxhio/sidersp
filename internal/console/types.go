@@ -51,20 +51,20 @@ type StatusResponse struct {
 }
 
 type StatsResponse struct {
-	TotalRules      int                    `json:"total_rules"`
-	EnabledRules    int                    `json:"enabled_rules"`
+	TotalRules      *int                   `json:"total_rules,omitempty"`
+	EnabledRules    *int                   `json:"enabled_rules,omitempty"`
 	RXPackets       uint64                 `json:"rx_packets"`
 	ParseFailed     uint64                 `json:"parse_failed"`
 	RuleCandidates  uint64                 `json:"rule_candidates"`
 	MatchedRules    uint64                 `json:"matched_rules"`
-	RingbufDropped  uint64                 `json:"ringbuf_dropped"`
-	XDPTX           uint64                 `json:"xdp_tx"`
-	XskTX           uint64                 `json:"xsk_tx"`
-	TXFailed        uint64                 `json:"tx_failed"`
-	XskFailed       uint64                 `json:"xsk_failed"`
-	RedirectTX      uint64                 `json:"redirect_tx"`
-	RedirectFailed  uint64                 `json:"redirect_failed"`
-	FibLookupFailed uint64                 `json:"fib_lookup_failed"`
+	RingbufDropped  *uint64                `json:"ringbuf_dropped,omitempty"`
+	XDPTX           *uint64                `json:"xdp_tx,omitempty"`
+	XskTX           *uint64                `json:"xsk_tx,omitempty"`
+	TXFailed        *uint64                `json:"tx_failed,omitempty"`
+	XskFailed       *uint64                `json:"xsk_failed,omitempty"`
+	RedirectTX      *uint64                `json:"redirect_tx,omitempty"`
+	RedirectFailed  *uint64                `json:"redirect_failed,omitempty"`
+	FibLookupFailed *uint64                `json:"fib_lookup_failed,omitempty"`
 	Histories       []StatsHistoryResponse `json:"histories"`
 }
 
@@ -76,21 +76,21 @@ type StatsHistoryResponse struct {
 }
 
 type StatsPointResponse struct {
-	Timestamp       string `json:"timestamp"`
-	TotalRules      int    `json:"total_rules"`
-	EnabledRules    int    `json:"enabled_rules"`
-	RXPackets       uint64 `json:"rx_packets"`
-	ParseFailed     uint64 `json:"parse_failed"`
-	RuleCandidates  uint64 `json:"rule_candidates"`
-	MatchedRules    uint64 `json:"matched_rules"`
-	RingbufDropped  uint64 `json:"ringbuf_dropped"`
-	XDPTX           uint64 `json:"xdp_tx"`
-	XskTX           uint64 `json:"xsk_tx"`
-	TXFailed        uint64 `json:"tx_failed"`
-	XskFailed       uint64 `json:"xsk_failed"`
-	RedirectTX      uint64 `json:"redirect_tx"`
-	RedirectFailed  uint64 `json:"redirect_failed"`
-	FibLookupFailed uint64 `json:"fib_lookup_failed"`
+	Timestamp       string  `json:"timestamp"`
+	TotalRules      *int    `json:"total_rules,omitempty"`
+	EnabledRules    *int    `json:"enabled_rules,omitempty"`
+	RXPackets       uint64  `json:"rx_packets"`
+	ParseFailed     uint64  `json:"parse_failed"`
+	RuleCandidates  uint64  `json:"rule_candidates"`
+	MatchedRules    uint64  `json:"matched_rules"`
+	RingbufDropped  *uint64 `json:"ringbuf_dropped,omitempty"`
+	XDPTX           *uint64 `json:"xdp_tx,omitempty"`
+	XskTX           *uint64 `json:"xsk_tx,omitempty"`
+	TXFailed        *uint64 `json:"tx_failed,omitempty"`
+	XskFailed       *uint64 `json:"xsk_failed,omitempty"`
+	RedirectTX      *uint64 `json:"redirect_tx,omitempty"`
+	RedirectFailed  *uint64 `json:"redirect_failed,omitempty"`
+	FibLookupFailed *uint64 `json:"fib_lookup_failed,omitempty"`
 }
 
 type LogLevelRequest struct {
