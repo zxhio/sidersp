@@ -141,20 +141,27 @@ func (r *Runtime) Stats(window string) (Stats, error) {
 }
 
 type Status struct {
-	RulesPath  string `json:"rules_path"`
-	ListenAddr string `json:"listen_addr"`
-	Interface  string `json:"interface"`
-	TotalRules int    `json:"total_rules"`
-	Enabled    int    `json:"enabled_rules"`
+	RulesPath   string `json:"rules_path"`
+	ListenAddr  string `json:"listen_addr"`
+	Interface   string `json:"interface"`
+	TXInterface string `json:"tx_interface"`
+	TotalRules  int    `json:"total_rules"`
+	Enabled     int    `json:"enabled_rules"`
 }
 
 func newStatus(cfg config.Config, rules rule.RuleSet) Status {
+	txInterface := cfg.Dataplane.Interface
+	if cfg.Egress.TXPath() == "egress-interface" && cfg.Egress.Interface != "" {
+		txInterface = cfg.Egress.Interface
+	}
+
 	return Status{
-		RulesPath:  cfg.ControlPlane.RulesPath,
-		ListenAddr: cfg.Console.ListenAddr,
-		Interface:  cfg.Dataplane.Interface,
-		TotalRules: len(rules.Rules),
-		Enabled:    len(enabledRuleSet(rules).Rules),
+		RulesPath:   cfg.ControlPlane.RulesPath,
+		ListenAddr:  cfg.Console.ListenAddr,
+		Interface:   cfg.Dataplane.Interface,
+		TXInterface: txInterface,
+		TotalRules:  len(rules.Rules),
+		Enabled:     len(enabledRuleSet(rules).Rules),
 	}
 }
 

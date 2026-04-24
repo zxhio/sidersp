@@ -101,6 +101,41 @@ func validateStubRule(item rule.Rule) error {
 	}
 }
 
+func TestGetStatus(t *testing.T) {
+	t.Parallel()
+
+	server := NewServer("127.0.0.1:0", &stubService{
+		status: controlplane.Status{
+			ListenAddr:  "127.0.0.1:8080",
+			Interface:   "enp1s0",
+			TXInterface: "eth1",
+			TotalRules:  13,
+			Enabled:     1,
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/status", nil)
+	rec := httptest.NewRecorder()
+	server.newRouter().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var body struct {
+		Data StatusResponse `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if body.Data.Interface != "enp1s0" || body.Data.TXInterface != "eth1" {
+		t.Fatalf("status body = %+v, want interface and tx interface", body.Data)
+	}
+	if body.Data.Enabled != 1 || body.Data.TotalRules != 13 {
+		t.Fatalf("status body = %+v, want rule counts", body.Data)
+	}
+}
+
 func TestListRules(t *testing.T) {
 	t.Parallel()
 

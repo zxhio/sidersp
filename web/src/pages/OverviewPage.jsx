@@ -1,13 +1,17 @@
 import { useState, useEffect } from 'react'
-import { getStatus } from '../api'
+import { getStatus, getStats } from '../api'
 
 export default function OverviewPage() {
   const [status, setStatus] = useState(null)
+  const [stats, setStats] = useState(null)
   const [error, setError] = useState('')
 
   useEffect(() => {
-    getStatus()
-      .then(setStatus)
+    Promise.all([getStatus(), getStats()])
+      .then(([statusData, statsData]) => {
+        setStatus(statusData)
+        setStats(statsData)
+      })
       .catch(err => setError(err.message))
   }, [])
 
@@ -22,7 +26,7 @@ export default function OverviewPage() {
     )
   }
 
-  if (!status) {
+  if (!status || !stats) {
     return (
       <>
         <PageHeader title="概览" desc="系统运行状态总览" />
@@ -31,13 +35,12 @@ export default function OverviewPage() {
     )
   }
 
-  const disabledCount = status.total_rules - status.enabled_rules
+  const enabledSummary = `${status.enabled_rules}/${status.total_rules}`
 
   return (
     <>
       <PageHeader title="概览" desc="系统运行状态总览" />
       <div className="page-body">
-        {/* Key metrics */}
         <div className="status-cards" style={{ marginBottom: 24 }}>
           <div className="status-card">
             <div className="status-card-label">监听地址</div>
@@ -48,16 +51,44 @@ export default function OverviewPage() {
             <div className="status-card-value mono">{status.interface || '-'}</div>
           </div>
           <div className="status-card">
-            <div className="status-card-label">规则总数</div>
-            <div className="status-card-value">{status.total_rules}</div>
+            <div className="status-card-label">发送网卡</div>
+            <div className="status-card-value mono">{status.tx_interface || '-'}</div>
           </div>
-          <div className="status-card">
-            <div className="status-card-label">已启用</div>
-            <div className="status-card-value">{status.enabled_rules}</div>
+        </div>
+
+        <div className="section">
+          <div className="section-title">规则状态</div>
+          <div className="field-list">
+            <div className="field-row">
+              <div className="field-label">规则数</div>
+              <div className="field-value">{status.total_rules}</div>
+            </div>
+            <div className="field-row">
+              <div className="field-label">启用</div>
+              <div className="field-value">{status.enabled_rules}</div>
+            </div>
           </div>
-          <div className="status-card">
-            <div className="status-card-label">已禁用</div>
-            <div className="status-card-value">{disabledCount}</div>
+        </div>
+
+        <div className="section">
+          <div className="section-title">统计状态</div>
+          <div className="field-list">
+            <div className="field-row">
+              <div className="field-label">收包数</div>
+              <div className="field-value">{formatValue(stats.rx_packets)}</div>
+            </div>
+            <div className="field-row">
+              <div className="field-label">解析失败</div>
+              <div className="field-value">{formatValue(stats.parse_failed)}</div>
+            </div>
+            <div className="field-row">
+              <div className="field-label">匹配数量</div>
+              <div className="field-value">{formatValue(stats.rule_candidates)}</div>
+            </div>
+            <div className="field-row">
+              <div className="field-label">规则命中</div>
+              <div className="field-value">{formatValue(stats.matched_rules)}</div>
+            </div>
           </div>
         </div>
       </div>
@@ -72,4 +103,8 @@ function PageHeader({ title, desc }) {
       {desc && <p>{desc}</p>}
     </div>
   )
+}
+
+function formatValue(n) {
+  return n.toLocaleString()
 }
