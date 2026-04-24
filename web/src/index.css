@@ -377,6 +377,12 @@ tr:last-child td {
   line-height: 24px;
 }
 
+.overview-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
