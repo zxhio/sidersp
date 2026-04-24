@@ -14,14 +14,30 @@ const DEFAULT_COL = {
   operations: 100,
 }
 
+function formatTCPFlags(flags) {
+  if (!flags) return ''
+
+  return Object.entries(flags)
+    .filter(([, enabled]) => enabled)
+    .map(([name]) => name.toUpperCase())
+    .join(', ')
+}
+
+function formatProtocol(protocol) {
+  return protocol ? protocol.toUpperCase() : ''
+}
+
 function MatchDetail({ match }) {
   const items = []
+  if (match.protocol) items.push({ k: '协议', v: formatProtocol(match.protocol) })
   if (match.vlans?.length) items.push({ k: 'VLAN', v: match.vlans.join(', ') })
   if (match.src_prefixes?.length) items.push({ k: '源地址', v: match.src_prefixes.join(', ') })
   if (match.dst_prefixes?.length) items.push({ k: '目的地址', v: match.dst_prefixes.join(', ') })
   if (match.src_ports?.length) items.push({ k: '源端口', v: match.src_ports.join(', ') })
   if (match.dst_ports?.length) items.push({ k: '目的端口', v: match.dst_ports.join(', ') })
-  if (match.features?.length) items.push({ k: '特征', v: match.features.join(', ') })
+  if (formatTCPFlags(match.tcp_flags)) items.push({ k: 'TCP Flags', v: formatTCPFlags(match.tcp_flags) })
+  if (match.icmp?.type) items.push({ k: 'ICMP 类型', v: match.icmp.type })
+  if (match.arp?.operation) items.push({ k: 'ARP 操作', v: match.arp.operation })
 
   if (!items.length) return <span style={{ color: 'var(--c-text-placeholder)' }}>无匹配条件</span>
 

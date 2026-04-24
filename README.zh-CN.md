@@ -12,6 +12,7 @@
 - XSK 重定向通道，用于后续用户态 spoof 响应
 - ringbuf 观测事件输出
 - 基础状态、规则和统计 Web 管理页
+- 规则页与 `specs/RULES.md` 对齐，支持 `protocol`、VLAN/IP/端口过滤、`tcp_flags`、`icmp.type`、`arp.operation` 和 snake_case 动作
 
 ## 架构
 
@@ -124,6 +125,16 @@ skills/     本地 agent 指引
 - TCP reset 响应
 - 事件和统计可视化
 - 基础管理页面
+
+## 规则页契约
+
+Web 规则页遵循 [specs/RULES.md](specs/RULES.md) 的当前契约，编辑字段包括
+`protocol`、`vlans`、`src_prefixes`、`dst_prefixes`、`src_ports`、
+`dst_ports`、`tcp_flags`、`icmp.type`、`arp.operation` 和
+`response.action`。
+
+页面支持的动作值为 `none`、`alert`、`tcp_reset`、`icmp_echo_reply`、
+`arp_reply` 和 `tcp_syn_ack`。前端只做基础可用性校验，后端校验仍然是最终依据。
 
 暂不包含：
 

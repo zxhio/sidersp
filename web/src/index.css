@@ -583,6 +583,13 @@ tr:last-child td {
   margin-bottom: 12px;
 }
 
+.checkbox-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding-top: 8px;
+}
+
 .checkbox-label {
   display: inline-flex !important;
   align-items: center;

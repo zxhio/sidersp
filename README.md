@@ -12,6 +12,7 @@ Lightweight side-path traffic pre-decision and active response service.
 - XSK redirect path for future user-space spoof responses
 - Ringbuf observation event output
 - Basic Web console for status, rules, and statistics
+- Rule UI aligned with `specs/RULES.md`, including `protocol`, VLAN/IP/port filters, `tcp_flags`, `icmp.type`, `arp.operation`, and snake_case response actions
 
 ## Architecture
 
@@ -124,6 +125,18 @@ Current focus:
 - TCP reset response
 - Event/statistics visibility
 - Basic management UI
+
+## Rule Console
+
+The Web rule page follows the current contract in [specs/RULES.md](specs/RULES.md).
+It edits `protocol`, `vlans`, `src_prefixes`, `dst_prefixes`, `src_ports`,
+`dst_ports`, `tcp_flags`, `icmp.type`, `arp.operation`, and
+`response.action`.
+
+Supported actions in the UI are `none`, `alert`, `tcp_reset`,
+`icmp_echo_reply`, `arp_reply`, and `tcp_syn_ack`. The UI performs basic
+compatibility checks for XSK TX actions, but backend validation remains
+authoritative.
 
 Not included yet:
 

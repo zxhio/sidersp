@@ -1,19 +1,55 @@
 import { useState } from 'react'
 
+const ACTION_OPTIONS = [
+  { value: 'tcp_reset', label: 'TCP Reset' },
+  { value: 'tcp_syn_ack', label: 'TCP SYN-ACK' },
+  { value: 'icmp_echo_reply', label: 'ICMP Echo Reply' },
+  { value: 'arp_reply', label: 'ARP Reply' },
+  { value: 'alert', label: 'Alert' },
+  { value: 'none', label: 'None' },
+]
+
+const PROTOCOL_OPTIONS = [
+  { value: 'tcp', label: 'TCP' },
+  { value: 'icmp', label: 'ICMP' },
+  { value: 'arp', label: 'ARP' },
+]
+const ICMP_TYPE_OPTIONS = [
+  { value: '', label: '不限' },
+  { value: 'echo_request', label: 'Echo Request' },
+  { value: 'echo_reply', label: 'Echo Reply' },
+]
+const ARP_OPERATION_OPTIONS = [
+  { value: '', label: '不限' },
+  { value: 'request', label: 'Request' },
+  { value: 'reply', label: 'Reply' },
+]
+const TCP_FLAG_FIELDS = [
+  { key: 'syn', label: 'SYN' },
+  { key: 'ack', label: 'ACK' },
+  { key: 'rst', label: 'RST' },
+  { key: 'fin', label: 'FIN' },
+  { key: 'psh', label: 'PSH' },
+]
+const TCP_RESET_FLAG_FIELDS = TCP_FLAG_FIELDS.filter(field => field.key !== 'rst')
+
 const EMPTY_RULE = {
   id: 0,
   name: '',
   enabled: true,
   priority: 100,
   match: {
+    protocol: 'tcp',
     vlans: [],
     src_prefixes: [],
     dst_prefixes: [],
     src_ports: [],
     dst_ports: [],
-    features: [],
+    tcp_flags: {},
+    icmp: null,
+    arp: null,
   },
-  response: { action: 'RST' },
+  response: { action: 'tcp_reset' },
 }
 
 function joinArr(arr) {
@@ -28,28 +64,251 @@ function splitNumArr(str) {
   return str.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n))
 }
 
+function isKnownProtocol(protocol) {
+  return PROTOCOL_OPTIONS.some(option => option.value === protocol)
+}
+
+function normalizePrefixValue(value) {
+  if (!value || value.includes('/')) return value
+  if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(value)) return `${value}/32`
+  return value
+}
+
+function normalizePrefixesInput(str) {
+  return splitArr(str).map(normalizePrefixValue)
+}
+
+function normalizeRule(rule) {
+  if (!rule) return EMPTY_RULE
+
+  const action = getActionOption(rule.response?.action).value
+  const rawProtocol = isKnownProtocol(rule.match?.protocol) ? rule.match.protocol : 'tcp'
+  const protocol = getProtocolForAction(action, rawProtocol)
+  const tcpFlags = { ...(rule.match?.tcp_flags || {}) }
+  const icmpType = rule.match?.icmp?.type || ''
+  const arpOperation = rule.match?.arp?.operation || ''
+
+  if (action === 'tcp_reset') {
+    delete tcpFlags.rst
+  }
+
+  if (action === 'tcp_syn_ack') {
+    tcpFlags.syn = true
+    delete tcpFlags.ack
+    delete tcpFlags.rst
+    delete tcpFlags.fin
+    delete tcpFlags.psh
+  }
+
+  return {
+    ...rule,
+    match: {
+      protocol,
+      vlans: rule.match?.vlans || [],
+      src_prefixes: rule.match?.src_prefixes || [],
+      dst_prefixes: rule.match?.dst_prefixes || [],
+      src_ports: rule.match?.src_ports || [],
+      dst_ports: rule.match?.dst_ports || [],
+      tcp_flags: tcpFlags,
+      icmp: action === 'icmp_echo_reply'
+        ? { type: 'echo_request' }
+        : protocol === 'icmp' && icmpType
+          ? { type: icmpType }
+          : null,
+      arp: action === 'arp_reply'
+        ? { operation: 'request' }
+        : protocol === 'arp' && arpOperation
+          ? { operation: arpOperation }
+          : null,
+    },
+    response: {
+      action,
+      params: rule.response?.params || {},
+    },
+  }
+}
+
+function getActionOption(action) {
+  return ACTION_OPTIONS.find(option => option.value === action) || ACTION_OPTIONS[0]
+}
+
+function getProtocolForAction(action, currentProtocol = 'tcp') {
+  switch (action) {
+    case 'tcp_reset':
+    case 'tcp_syn_ack':
+      return 'tcp'
+    case 'icmp_echo_reply':
+      return 'icmp'
+    case 'arp_reply':
+      return 'arp'
+    case 'alert':
+    case 'none':
+    default:
+      return currentProtocol
+  }
+}
+
+function isProtocolSelectable(action) {
+  return action === 'alert' || action === 'none'
+}
+
+function buildTCPFlags(form) {
+  return TCP_FLAG_FIELDS.reduce((flags, field) => {
+    if (form[`tcp_flag_${field.key}`]) {
+      flags[field.key] = true
+    }
+    return flags
+  }, {})
+}
+
+function hasValue(value) {
+  return value !== undefined && value !== null && value !== '' && (!Array.isArray(value) || value.length > 0)
+}
+
+function validateNumberList(values, min, max, label) {
+  const invalid = values.find(value => value < min || value > max)
+  if (invalid !== undefined) {
+    return `${label} 超出范围: ${invalid}`
+  }
+  return ''
+}
+
 export default function RuleForm({ rule, onSubmit, onCancel }) {
   const isNew = !rule
-  const initial = rule || EMPTY_RULE
+  const initial = normalizeRule(rule)
 
   const [form, setForm] = useState({
     id: initial.id,
     name: initial.name,
     enabled: initial.enabled,
     priority: initial.priority,
+    protocol: initial.match.protocol,
     vlans: joinArr(initial.match.vlans),
     src_prefixes: joinArr(initial.match.src_prefixes),
     dst_prefixes: joinArr(initial.match.dst_prefixes),
     src_ports: joinArr(initial.match.src_ports),
     dst_ports: joinArr(initial.match.dst_ports),
-    features: joinArr(initial.match.features),
+    tcp_flag_syn: Boolean(initial.match.tcp_flags.syn),
+    tcp_flag_ack: Boolean(initial.match.tcp_flags.ack),
+    tcp_flag_rst: Boolean(initial.match.tcp_flags.rst),
+    tcp_flag_fin: Boolean(initial.match.tcp_flags.fin),
+    tcp_flag_psh: Boolean(initial.match.tcp_flags.psh),
+    icmp_type: initial.match.icmp?.type || '',
+    arp_operation: initial.match.arp?.operation || '',
     action: initial.response.action,
   })
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const isProtocolEditable = isProtocolSelectable(form.action)
+  const protocol = form.protocol
+  const isTCPProtocol = protocol === 'tcp'
+  const isICMPProtocol = protocol === 'icmp'
+  const isARPProtocol = protocol === 'arp'
+  const isTCPResetAction = form.action === 'tcp_reset'
+  const isTCPSynAckAction = form.action === 'tcp_syn_ack'
+  const isICMPEchoReplyAction = form.action === 'icmp_echo_reply'
+  const isARPReplyAction = form.action === 'arp_reply'
+  const visibleTCPFlagFields = isTCPSynAckAction ? [{ key: 'syn', label: 'SYN' }] : isTCPResetAction ? TCP_RESET_FLAG_FIELDS : TCP_FLAG_FIELDS
 
   function set(key, value) {
-    setForm(f => ({ ...f, [key]: value }))
+    setForm(f => {
+      if (key === 'action') {
+        const nextProtocol = getProtocolForAction(value, f.protocol)
+        const next = {
+          ...f,
+          action: value,
+          protocol: nextProtocol,
+        }
+
+        if (nextProtocol !== 'tcp') {
+          next.tcp_flag_syn = false
+          next.tcp_flag_ack = false
+          next.tcp_flag_rst = false
+          next.tcp_flag_fin = false
+          next.tcp_flag_psh = false
+        }
+
+        if (value === 'tcp_reset') {
+          next.tcp_flag_rst = false
+          next.icmp_type = ''
+          next.arp_operation = ''
+        }
+
+        if (value === 'tcp_syn_ack') {
+          next.tcp_flag_syn = true
+          next.tcp_flag_ack = false
+          next.tcp_flag_rst = false
+          next.tcp_flag_fin = false
+          next.tcp_flag_psh = false
+          next.icmp_type = ''
+          next.arp_operation = ''
+        }
+
+        if (value === 'icmp_echo_reply') {
+          next.icmp_type = 'echo_request'
+          next.arp_operation = ''
+          next.tcp_flag_syn = false
+          next.tcp_flag_ack = false
+          next.tcp_flag_rst = false
+          next.tcp_flag_fin = false
+          next.tcp_flag_psh = false
+        }
+
+        if (value === 'arp_reply') {
+          next.arp_operation = 'request'
+          next.icmp_type = ''
+          next.tcp_flag_syn = false
+          next.tcp_flag_ack = false
+          next.tcp_flag_rst = false
+          next.tcp_flag_fin = false
+          next.tcp_flag_psh = false
+        }
+
+        if (value === 'alert' || value === 'none') {
+          if (nextProtocol !== 'icmp') {
+            next.icmp_type = ''
+          }
+          if (nextProtocol !== 'arp') {
+            next.arp_operation = ''
+          }
+        }
+
+        return next
+      }
+
+      if (key !== 'protocol') {
+        if (key === 'tcp_flag_rst' && f.action === 'tcp_reset') {
+          return f
+        }
+        if ((key === 'tcp_flag_ack' || key === 'tcp_flag_rst' || key === 'tcp_flag_fin' || key === 'tcp_flag_psh') && f.action === 'tcp_syn_ack') {
+          return f
+        }
+        return { ...f, [key]: value }
+      }
+
+      const next = {
+        ...f,
+        protocol: value,
+      }
+
+      if (value !== 'tcp') {
+        next.tcp_flag_syn = false
+        next.tcp_flag_ack = false
+        next.tcp_flag_rst = false
+        next.tcp_flag_fin = false
+        next.tcp_flag_psh = false
+      }
+
+      if (value !== 'icmp') {
+        next.icmp_type = ''
+      }
+
+      if (value !== 'arp') {
+        next.arp_operation = ''
+      }
+
+      return next
+    })
   }
 
   async function handleSubmit(e) {
@@ -65,21 +324,113 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
       setError('规则名称不能为空')
       return
     }
+    const priority = parseInt(form.priority, 10)
+    if (isNaN(priority) || priority < 0) {
+      setError('优先级必须为大于等于 0 的整数')
+      return
+    }
+
+    const vlans = splitNumArr(form.vlans)
+    const srcPorts = splitNumArr(form.src_ports)
+    const dstPorts = splitNumArr(form.dst_ports)
+    const tcpFlags = isTCPProtocol ? buildTCPFlags(form) : {}
+    const protocol = form.protocol.trim()
+    const action = form.action.trim()
+
+    const vlanError = validateNumberList(vlans, 0, 4095, 'VLAN')
+    if (vlanError) {
+      setError(vlanError)
+      return
+    }
+
+    const srcPortError = validateNumberList(srcPorts, 1, 65535, '源端口')
+    if (srcPortError) {
+      setError(srcPortError)
+      return
+    }
+
+    const dstPortError = validateNumberList(dstPorts, 1, 65535, '目的端口')
+    if (dstPortError) {
+      setError(dstPortError)
+      return
+    }
+
+    if (!action) {
+      setError('动作类型不能为空')
+      return
+    }
+
+    if (action === 'icmp_echo_reply') {
+      if (protocol !== 'icmp') {
+        setError('`icmp_echo_reply` 要求协议为 icmp')
+        return
+      }
+      if (form.icmp_type !== 'echo_request') {
+        setError('`icmp_echo_reply` 要求 ICMP 类型为 echo_request')
+        return
+      }
+    }
+
+    if (action === 'arp_reply') {
+      if (protocol !== 'arp') {
+        setError('`arp_reply` 要求协议为 arp')
+        return
+      }
+      if (form.arp_operation !== 'request') {
+        setError('`arp_reply` 要求 ARP 操作为 request')
+        return
+      }
+    }
+
+    if (action === 'tcp_syn_ack') {
+      if (protocol !== 'tcp') {
+        setError('`tcp_syn_ack` 要求协议为 tcp')
+        return
+      }
+      if (!tcpFlags.syn) {
+        setError('`tcp_syn_ack` 要求 TCP Flags 至少选择 SYN')
+        return
+      }
+      if (tcpFlags.ack || tcpFlags.rst || tcpFlags.fin || tcpFlags.psh) {
+        setError('`tcp_syn_ack` 仅允许初始 SYN 匹配，不允许 ACK/RST/FIN/PSH')
+        return
+      }
+    }
+
+    if (action === 'tcp_reset' && tcpFlags.rst) {
+      setError('`tcp_reset` 不应匹配已带 RST 的报文')
+      return
+    }
+
+    const match = {
+      protocol,
+      vlans,
+      src_prefixes: normalizePrefixesInput(form.src_prefixes),
+      dst_prefixes: normalizePrefixesInput(form.dst_prefixes),
+      src_ports: srcPorts,
+      dst_ports: dstPorts,
+      tcp_flags: tcpFlags,
+    }
+
+    if (isICMPProtocol && form.icmp_type) {
+      match.icmp = { type: form.icmp_type }
+    }
+
+    if (isARPProtocol && form.arp_operation) {
+      match.arp = { operation: form.arp_operation }
+    }
+
+    const compactMatch = Object.fromEntries(
+      Object.entries(match).filter(([, value]) => hasValue(value)),
+    )
 
     const payload = {
       id: isNew ? id : rule.id,
       name: form.name.trim(),
       enabled: form.enabled,
-      priority: parseInt(form.priority, 10) || 0,
-      match: {
-        vlans: splitNumArr(form.vlans),
-        src_prefixes: splitArr(form.src_prefixes),
-        dst_prefixes: splitArr(form.dst_prefixes),
-        src_ports: splitNumArr(form.src_ports),
-        dst_ports: splitNumArr(form.dst_ports),
-        features: splitArr(form.features),
-      },
-      response: { action: form.action },
+      priority,
+      match: compactMatch,
+      response: { action },
     }
 
     setSubmitting(true)
@@ -148,9 +499,35 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
               </div>
             </div>
 
+            <div className="form-section-title">响应动作</div>
+            <div className="form-group">
+              <label>动作类型</label>
+              <select value={form.action} onChange={e => set('action', e.target.value)}>
+                {ACTION_OPTIONS.map(option => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <div className="form-section-title">匹配条件</div>
             <div className="form-section-desc">多个值用英文逗号分隔，留空表示不限制</div>
             <div className="form-row">
+              <div className="form-group">
+                <label>协议</label>
+                {isProtocolEditable ? (
+                  <select value={form.protocol} onChange={e => set('protocol', e.target.value)}>
+                    {PROTOCOL_OPTIONS.map(option => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input type="text" value={protocol.toUpperCase()} disabled />
+                )}
+              </div>
               <div className="form-group">
                 <label>VLAN</label>
                 <input
@@ -158,15 +535,6 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
                   value={form.vlans}
                   onChange={e => set('vlans', e.target.value)}
                   placeholder="如 100, 200"
-                />
-              </div>
-              <div className="form-group">
-                <label>特征</label>
-                <input
-                  type="text"
-                  value={form.features}
-                  onChange={e => set('features', e.target.value)}
-                  placeholder="如 tcp, udp"
                 />
               </div>
             </div>
@@ -177,7 +545,7 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
                   type="text"
                   value={form.src_prefixes}
                   onChange={e => set('src_prefixes', e.target.value)}
-                  placeholder="如 10.0.0.0/8"
+                  placeholder="如 10.0.0.1 或 10.0.0.0/24"
                 />
               </div>
               <div className="form-group">
@@ -186,38 +554,94 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
                   type="text"
                   value={form.dst_prefixes}
                   onChange={e => set('dst_prefixes', e.target.value)}
-                  placeholder="如 192.168.0.0/16"
+                  placeholder="如 192.168.0.1 或 192.168.0.0/24"
                 />
               </div>
             </div>
-            <div className="form-row">
-              <div className="form-group">
-                <label>源端口</label>
-                <input
-                  type="text"
-                  value={form.src_ports}
-                  onChange={e => set('src_ports', e.target.value)}
-                  placeholder="如 80, 443"
-                />
+            {isTCPProtocol && (
+              <div className="form-row">
+                <div className="form-group">
+                  <label>源端口</label>
+                  <input
+                    type="text"
+                    value={form.src_ports}
+                    onChange={e => set('src_ports', e.target.value)}
+                    placeholder="如 80, 443"
+                  />
+                </div>
+                <div className="form-group">
+                  <label>目的端口</label>
+                  <input
+                    type="text"
+                    value={form.dst_ports}
+                    onChange={e => set('dst_ports', e.target.value)}
+                    placeholder="如 80, 443"
+                  />
+                </div>
               </div>
-              <div className="form-group">
-                <label>目的端口</label>
-                <input
-                  type="text"
-                  value={form.dst_ports}
-                  onChange={e => set('dst_ports', e.target.value)}
-                  placeholder="如 80, 443"
-                />
+            )}
+            {isTCPProtocol && (
+              <div className="form-row">
+                <div className="form-group">
+                  <label>TCP Flags</label>
+                  <div className="checkbox-group">
+                    {visibleTCPFlagFields.map(field => (
+                      <label key={field.key} className="checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={form[`tcp_flag_${field.key}`]}
+                          disabled={isTCPSynAckAction && field.key === 'syn'}
+                          onChange={e => set(`tcp_flag_${field.key}`, e.target.checked)}
+                        />
+                        {field.label}
+                      </label>
+                    ))}
+                  </div>
+                  {isTCPResetAction && (
+                    <div className="form-section-desc">仅匹配未带 RST 的 TCP 报文。</div>
+                  )}
+                  {isTCPSynAckAction && (
+                    <div className="form-section-desc">固定匹配初始 SYN。</div>
+                  )}
+                </div>
               </div>
-            </div>
-
-            <div className="form-section-title">响应动作</div>
-            <div className="form-group">
-              <label>动作类型</label>
-              <select value={form.action} onChange={e => set('action', e.target.value)}>
-                <option value="RST">RST (发送 TCP RST)</option>
-              </select>
-            </div>
+            )}
+            {(isICMPProtocol || isARPProtocol) && (
+              <div className="form-row">
+                {isICMPProtocol && (
+                  <div className="form-group">
+                    <label>ICMP 类型</label>
+                    {isICMPEchoReplyAction ? (
+                      <input type="text" value="Echo Request" disabled />
+                    ) : (
+                      <select value={form.icmp_type} onChange={e => set('icmp_type', e.target.value)}>
+                        {ICMP_TYPE_OPTIONS.map(option => (
+                          <option key={option.value || 'any'} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                )}
+                {isARPProtocol && (
+                  <div className="form-group">
+                    <label>ARP 操作</label>
+                    {isARPReplyAction ? (
+                      <input type="text" value="Request" disabled />
+                    ) : (
+                      <select value={form.arp_operation} onChange={e => set('arp_operation', e.target.value)}>
+                        {ARP_OPERATION_OPTIONS.map(option => (
+                          <option key={option.value || 'any'} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
           <div className="modal-footer">
             <button type="button" className="btn" onClick={onCancel}>取消</button>
