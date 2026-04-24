@@ -59,15 +59,15 @@ function ConfirmDialog({ title, message, hint, onConfirm, onCancel }) {
       <div className="modal" style={{ width: 400 }} onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <h3>{title}</h3>
-          <button className="modal-close" onClick={onCancel}>&times;</button>
+          <button type="button" className="modal-close" onClick={onCancel}>&times;</button>
         </div>
         <div className="confirm-body">
           <p>{message}</p>
           {hint && <p className="confirm-hint">{hint}</p>}
         </div>
         <div className="confirm-footer">
-          <button className="btn" onClick={onCancel}>取消</button>
-          <button className="btn btn-primary" style={{ background: 'var(--c-danger)', borderColor: 'var(--c-danger)' }} onClick={onConfirm}>确认删除</button>
+          <button type="button" className="btn" onClick={onCancel}>取消</button>
+          <button type="button" className="btn btn-primary" style={{ background: 'var(--c-danger)', borderColor: 'var(--c-danger)' }} onClick={onConfirm}>确认删除</button>
         </div>
       </div>
     </div>
@@ -110,7 +110,9 @@ export default function RulesPage() {
       } else {
         await enableRule(rule.id)
       }
-      load(page)
+      setRules(items => items.map(item => (
+        item.id === rule.id ? { ...item, enabled: !item.enabled } : item
+      )))
     } catch (err) {
       alert(err.message)
     }
@@ -151,7 +153,7 @@ export default function RulesPage() {
           <span className="toolbar-info">
             共 {total} 条规则
           </span>
-          <button className="btn btn-primary" onClick={() => setFormState('create')}>
+          <button type="button" className="btn btn-primary" onClick={() => setFormState('create')}>
             新建规则
           </button>
         </div>
@@ -203,6 +205,7 @@ export default function RulesPage() {
                         <td>{rule.name}</td>
                         <td>
                           <button
+                            type="button"
                             className={`toggle ${rule.enabled ? 'on' : ''}`}
                             onClick={() => handleToggle(rule)}
                             title={rule.enabled ? '点击禁用' : '点击启用'}
@@ -215,10 +218,10 @@ export default function RulesPage() {
                         </td>
                         <td>
                           <div className="actions-cell">
-                            <button className="btn btn-link btn-sm" onClick={() => setFormState(rule)}>
+                            <button type="button" className="btn btn-link btn-sm" onClick={() => setFormState(rule)}>
                               编辑
                             </button>
-                            <button className="btn btn-danger-text btn-sm" onClick={() => setDeleteTarget(rule)}>
+                            <button type="button" className="btn btn-danger-text btn-sm" onClick={() => setDeleteTarget(rule)}>
                               删除
                             </button>
                           </div>
@@ -233,6 +236,7 @@ export default function RulesPage() {
                   <span>第 {page} / {totalPages} 页</span>
                   <div className="pagination-buttons">
                     <button
+                      type="button"
                       className="btn btn-sm"
                       disabled={page <= 1}
                       onClick={() => setPage(p => p - 1)}
@@ -240,6 +244,7 @@ export default function RulesPage() {
                       上一页
                     </button>
                     <button
+                      type="button"
                       className="btn btn-sm"
                       disabled={page >= totalPages}
                       onClick={() => setPage(p => p + 1)}
