@@ -1,3 +1,4 @@
 /build/
+internal/console/static/*
+!internal/console/static/.keep
 .claude/settings.local.json
-

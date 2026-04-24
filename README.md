@@ -80,6 +80,12 @@ Or use the Makefile shortcut:
 sudo make run CONFIG=./configs/config.example.yaml
 ```
 
+After startup, open the built-in Web console at:
+
+```text
+http://127.0.0.1:8080/
+```
+
 Run unit tests:
 
 ```bash

@@ -151,6 +151,74 @@ func TestGetStatus(t *testing.T) {
 	}
 }
 
+func TestServeWebIndex(t *testing.T) {
+	t.Parallel()
+
+	server := NewServer("127.0.0.1:0", &stubService{})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	server.newRouter().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if !strings.Contains(rec.Body.String(), "SideRSP") {
+		t.Fatalf("body = %q, want embedded index html", rec.Body.String())
+	}
+}
+
+func TestServeWebFallback(t *testing.T) {
+	t.Parallel()
+
+	server := NewServer("127.0.0.1:0", &stubService{})
+
+	req := httptest.NewRequest(http.MethodGet, "/rules", nil)
+	rec := httptest.NewRecorder()
+	server.newRouter().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if !strings.Contains(rec.Body.String(), "SideRSP") {
+		t.Fatalf("body = %q, want embedded index html", rec.Body.String())
+	}
+}
+
+func TestAPINotFoundDoesNotFallbackToWeb(t *testing.T) {
+	t.Parallel()
+
+	server := NewServer("127.0.0.1:0", &stubService{})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/not-found", nil)
+	rec := httptest.NewRecorder()
+	server.newRouter().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+	if strings.Contains(rec.Body.String(), "SideRSP") {
+		t.Fatalf("body = %q, want api 404 instead of web fallback", rec.Body.String())
+	}
+}
+
+func TestAssetNotFoundDoesNotFallbackToWeb(t *testing.T) {
+	t.Parallel()
+
+	server := NewServer("127.0.0.1:0", &stubService{})
+
+	req := httptest.NewRequest(http.MethodGet, "/assets/missing.js", nil)
+	rec := httptest.NewRecorder()
+	server.newRouter().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+	if strings.Contains(rec.Body.String(), "SideRSP") {
+		t.Fatalf("body = %q, want asset 404 instead of web fallback", rec.Body.String())
+	}
+}
+
 func TestListRules(t *testing.T) {
 	t.Parallel()
 

@@ -6,10 +6,13 @@ VERSION ?= dev
 GOOS := linux
 GOARCH := amd64
 
-.PHONY: build build-all build-xdp package run clean test test-unit test-bpf
+.PHONY: build build-all build-web build-xdp package run clean test test-unit test-bpf
 
-build:
+build: build-web
 	CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) go build -trimpath -ldflags="-s -w" -o $(BIN) $(MAIN)
+
+build-web:
+	cd web && npm ci && npm run build
 
 build-xdp:
 	go generate ./internal/dataplane

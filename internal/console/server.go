@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -98,6 +100,57 @@ func (s *Server) newRouter() *gin.Engine {
 	v1.DELETE("/rules/:id", handler.deleteRule)
 	v1.POST("/rules/:id/enable", handler.enableRule)
 	v1.POST("/rules/:id/disable", handler.disableRule)
+	if assetsFS, ok := subFS(consoleStaticFiles, "static/assets"); ok {
+		router.StaticFS("/assets", http.FS(assetsFS))
+	} else {
+		router.GET("/assets/*filepath", func(c *gin.Context) {
+			c.Status(http.StatusNotFound)
+		})
+	}
+	router.GET("/", func(c *gin.Context) {
+		serveWebIndex(c)
+	})
+	router.NoRoute(func(c *gin.Context) {
+		if strings.HasPrefix(c.Request.URL.Path, "/api/") || strings.HasPrefix(c.Request.URL.Path, "/assets/") {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		if c.Request.Method != http.MethodGet && c.Request.Method != http.MethodHead {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		serveWebIndex(c)
+	})
 
 	return router
 }
+
+func subFS(root fs.FS, dir string) (fs.FS, bool) {
+	sub, err := fs.Sub(root, dir)
+	if err != nil {
+		return nil, false
+	}
+	return sub, true
+}
+
+func serveWebIndex(c *gin.Context) {
+	data, err := fs.ReadFile(consoleStaticFiles, "static/index.html")
+	if err != nil {
+		c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(defaultWebIndexHTML))
+		return
+	}
+	c.Data(http.StatusOK, "text/html; charset=utf-8", data)
+}
+
+const defaultWebIndexHTML = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SideRSP Console</title>
+  </head>
+  <body>
+    <div id="root">SideRSP web assets are not built yet. Run make build-web.</div>
+  </body>
+</html>
+`

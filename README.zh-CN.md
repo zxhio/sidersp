@@ -78,6 +78,12 @@ sudo ./build/sidersp -config configs/config.example.yaml
 sudo make run CONFIG=./configs/config.example.yaml
 ```
 
+启动后可直接访问内置 Web Console：
+
+```text
+http://127.0.0.1:8080/
+```
+
 运行单元测试：
 
 ```bash

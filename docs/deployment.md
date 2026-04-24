@@ -49,6 +49,9 @@ README.zh-CN.md
 RELEASE
 ```
 
+The built-in Web console is embedded into `build/sidersp`; there is no separate
+web directory to deploy.
+
 Copy the tarball to the target host, extract it, and run the installer from the
 extracted package directory:
 
@@ -184,6 +187,12 @@ Query the local console API:
 
 ```bash
 curl http://127.0.0.1:8080/api/v1/status
+```
+
+Open the built-in Web console:
+
+```text
+http://127.0.0.1:8080/
 ```
 
 Check the current log level:
