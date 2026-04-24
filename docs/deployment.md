@@ -100,6 +100,9 @@ Install, enable, and start:
 sudo scripts/install-systemd.sh --enable --start
 ```
 
+When `--start` is used during an upgrade, the installer restarts `sidersp` if
+it is already running so the new binary takes effect immediately.
+
 The installer copies the example config and rules with their default values.
 Existing `/etc/sidersp/config.yaml` and
 `/etc/sidersp/configs/rules.example.yaml` are preserved by default. Pass

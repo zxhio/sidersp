@@ -32,7 +32,7 @@ Install SideSP for single-host Linux systemd deployment.
 Options:
   --force     Overwrite existing config and rules.
   --enable    Enable sidersp.service.
-  --start     Start sidersp.service after installation.
+  --start     Start sidersp.service after installation, or restart it if already running.
   --dry-run   Print actions without changing the system.
   -h, --help  Show this help.
 USAGE
@@ -61,6 +61,22 @@ run() {
     return 0
   fi
   "$@"
+}
+
+start_or_restart_service() {
+  if [[ ${DRY_RUN} -eq 1 ]]; then
+    log "dry-run: would restart ${APP_NAME}.service if already running, otherwise start it"
+    return 0
+  fi
+
+  if systemctl is-active --quiet "${APP_NAME}.service"; then
+    log "restart ${APP_NAME}.service"
+    systemctl restart "${APP_NAME}.service"
+    return 0
+  fi
+
+  log "start ${APP_NAME}.service"
+  systemctl start "${APP_NAME}.service"
 }
 
 install_file() {
@@ -154,7 +170,7 @@ if [[ ${ENABLE_SERVICE} -eq 1 ]]; then
 fi
 
 if [[ ${START_SERVICE} -eq 1 ]]; then
-  run systemctl start "${APP_NAME}.service"
+  start_or_restart_service
 fi
 
 log "done"
