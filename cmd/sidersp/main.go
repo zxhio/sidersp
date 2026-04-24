@@ -58,9 +58,10 @@ func main() {
 	}
 
 	dp, err := dataplane.Open(dataplane.Options{
-		Interface:  cfg.Dataplane.Interface,
-		AttachMode: cfg.Dataplane.AttachMode,
-		TCPResetTX: tcpResetTX,
+		Interface:      cfg.Dataplane.Interface,
+		AttachMode:     cfg.Dataplane.AttachMode,
+		IngressVerdict: cfg.Dataplane.NormalizedIngressVerdict(),
+		TCPResetTX:     tcpResetTX,
 	})
 	if err != nil {
 		logrus.WithError(err).Fatal("Fail to open dataplane")

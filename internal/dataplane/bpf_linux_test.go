@@ -22,6 +22,7 @@ import (
 )
 
 const (
+	xdpDrop = 1
 	xdpPass = 2
 	xdpTX   = 3
 )
@@ -375,6 +376,11 @@ func buildTruncatedUDPPkt() []byte {
 
 func setupBPFRuntime(t *testing.T, rules []rule.Rule) (*siderspObjects, *ringbuf.Reader) {
 	t.Helper()
+	return setupBPFRuntimeWithOptions(t, rules, Options{})
+}
+
+func setupBPFRuntimeWithOptions(t *testing.T, rules []rule.Rule, opts Options) (*siderspObjects, *ringbuf.Reader) {
+	t.Helper()
 
 	require.NoError(t, rlimit.RemoveMemlock(), "remove memlock")
 
@@ -385,11 +391,13 @@ func setupBPFRuntime(t *testing.T, rules []rule.Rule) (*siderspObjects, *ringbuf
 		set := rule.RuleSet{Rules: make([]rule.Rule, len(rules))}
 		copy(set.Rules, rules)
 
-		snapshot, err := buildSnapshot(set)
+		snapshot, err := buildSnapshot(set, opts)
 		require.NoError(t, err, "build snapshot")
 		writeSnapshotToMaps(t, &objs, snapshot)
 	} else {
-		require.NoError(t, writeGlobalConfig(objs.GlobalCfgMap, siderspGlobalCfg{}), "write empty config")
+		require.NoError(t, writeGlobalConfig(objs.GlobalCfgMap, siderspGlobalCfg{
+			IngressVerdict: ingressFailureVerdict(opts.IngressVerdict),
+		}), "write empty config")
 	}
 
 	reader, err := ringbuf.NewReader(objs.EventRingbuf)
@@ -1065,6 +1073,181 @@ func TestBPFEmptyRules(t *testing.T) {
 	require.LessOrEqual(t, afterMatch, beforeMatch, "empty rule set should not match any packet")
 	_, found := tryReadEvent(t, reader)
 	require.False(t, found, "unexpected ringbuf event with empty rule set")
+}
+
+func TestBPFIngressVerdictControlsNonConsumedPaths(t *testing.T) {
+	requireBPFTestEnv(t)
+
+	noneRule := []rule.Rule{
+		{
+			ID:       3001,
+			Name:     "none_tcp_80",
+			Enabled:  true,
+			Priority: 100,
+			Match: rule.RuleMatch{
+				Protocol: "tcp",
+				DstPorts: []int{80},
+			},
+			Response: rule.RuleResponse{Action: "none"},
+		},
+	}
+	alertRule := []rule.Rule{
+		{
+			ID:       3002,
+			Name:     "alert_tcp_80",
+			Enabled:  true,
+			Priority: 100,
+			Match: rule.RuleMatch{
+				Protocol: "tcp",
+				DstPorts: []int{80},
+			},
+			Response: rule.RuleResponse{Action: "alert"},
+		},
+	}
+	tcpSynAckRule := []rule.Rule{
+		{
+			ID:       3003,
+			Name:     "syn_ack_tcp_80",
+			Enabled:  true,
+			Priority: 100,
+			Match: rule.RuleMatch{
+				Protocol: "tcp",
+				DstPorts: []int{80},
+				TCPFlags: rule.TCPFlags{
+					SYN: boolPtr(true),
+				},
+			},
+			Response: rule.RuleResponse{Action: "tcp_syn_ack"},
+		},
+	}
+	icmpReplyRule := []rule.Rule{
+		{
+			ID:       3004,
+			Name:     "icmp_reply",
+			Enabled:  true,
+			Priority: 100,
+			Match: rule.RuleMatch{
+				Protocol: "icmp",
+				ICMP: &rule.ICMPMatch{
+					Type: "echo_request",
+				},
+			},
+			Response: rule.RuleResponse{Action: "icmp_echo_reply"},
+		},
+	}
+
+	tests := []struct {
+		name      string
+		verdict   string
+		rules     []rule.Rule
+		pkt       []byte
+		wantRet   uint32
+		wantEvent bool
+	}{
+		{
+			name:    "parse failure pass",
+			verdict: "pass",
+			pkt:     buildTruncatedEthPkt(),
+			wantRet: xdpPass,
+		},
+		{
+			name:    "parse failure drop",
+			verdict: "drop",
+			pkt:     buildTruncatedEthPkt(),
+			wantRet: xdpDrop,
+		},
+		{
+			name:    "no match pass",
+			verdict: "pass",
+			rules:   noneRule,
+			pkt:     buildEthernetPkt(ip("10.0.1.1"), ip("10.0.5.2"), 40000, 81, "tcp_syn"),
+			wantRet: xdpPass,
+		},
+		{
+			name:    "no match drop",
+			verdict: "drop",
+			rules:   noneRule,
+			pkt:     buildEthernetPkt(ip("10.0.1.1"), ip("10.0.5.2"), 40000, 81, "tcp_syn"),
+			wantRet: xdpDrop,
+		},
+		{
+			name:    "action none pass",
+			verdict: "pass",
+			rules:   noneRule,
+			pkt:     buildEthernetPkt(ip("10.0.1.1"), ip("10.0.5.2"), 40000, 80, "tcp_syn"),
+			wantRet: xdpPass,
+		},
+		{
+			name:    "action none drop",
+			verdict: "drop",
+			rules:   noneRule,
+			pkt:     buildEthernetPkt(ip("10.0.1.1"), ip("10.0.5.2"), 40000, 80, "tcp_syn"),
+			wantRet: xdpDrop,
+		},
+		{
+			name:      "alert pass",
+			verdict:   "pass",
+			rules:     alertRule,
+			pkt:       buildEthernetPkt(ip("10.0.1.1"), ip("10.0.5.2"), 40000, 80, "tcp_syn"),
+			wantRet:   xdpPass,
+			wantEvent: true,
+		},
+		{
+			name:      "alert drop",
+			verdict:   "drop",
+			rules:     alertRule,
+			pkt:       buildEthernetPkt(ip("10.0.1.1"), ip("10.0.5.2"), 40000, 80, "tcp_syn"),
+			wantRet:   xdpDrop,
+			wantEvent: true,
+		},
+		{
+			name:    "tcp syn ack guard pass",
+			verdict: "pass",
+			rules:   tcpSynAckRule,
+			pkt:     buildEthernetPkt(ip("10.0.1.1"), ip("10.0.5.2"), 40000, 80, "tcp_syn_ack"),
+			wantRet: xdpPass,
+		},
+		{
+			name:    "tcp syn ack guard drop",
+			verdict: "drop",
+			rules:   tcpSynAckRule,
+			pkt:     buildEthernetPkt(ip("10.0.1.1"), ip("10.0.5.2"), 40000, 80, "tcp_syn_ack"),
+			wantRet: xdpDrop,
+		},
+		{
+			name:    "xsk redirect fallback pass",
+			verdict: "pass",
+			rules:   icmpReplyRule,
+			pkt:     buildICMPIPPkt(ip("10.0.1.1"), ip("10.0.5.2")),
+			wantRet: xdpPass,
+		},
+		{
+			name:    "xsk redirect fallback drop",
+			verdict: "drop",
+			rules:   icmpReplyRule,
+			pkt:     buildICMPIPPkt(ip("10.0.1.1"), ip("10.0.5.2")),
+			wantRet: xdpDrop,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			objs, reader := setupBPFRuntimeWithOptions(t, tc.rules, Options{IngressVerdict: tc.verdict})
+			defer reader.Close()
+			defer objs.Close()
+
+			ret, _, err := objs.XdpSidersp.Test(tc.pkt)
+			require.NoError(t, err, "prog.Test()")
+			require.Equal(t, tc.wantRet, ret, "XDP retval")
+
+			evt, found := tryReadEvent(t, reader)
+			require.Equal(t, tc.wantEvent, found, "event presence")
+			if tc.wantEvent {
+				require.Equal(t, uint8(verdictObserve), evt.Verdict, "event verdict")
+			}
+		})
+	}
 }
 
 // ---------------------------------------------------------------------------

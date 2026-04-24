@@ -34,13 +34,15 @@ type mapSnapshot struct {
 	dstPrefixIndex map[siderspIpv4LpmKey]siderspMaskT
 }
 
-func buildSnapshot(set rule.RuleSet) (mapSnapshot, error) {
+func buildSnapshot(set rule.RuleSet, opts Options) (mapSnapshot, error) {
 	if len(set.Rules) > maxRuleSlots {
 		return mapSnapshot{}, fmt.Errorf("enabled rules %d exceed max slots %d", len(set.Rules), maxRuleSlots)
 	}
 
 	compiled := make([]compiledRule, 0, len(set.Rules))
-	global := siderspGlobalCfg{}
+	global := siderspGlobalCfg{
+		IngressVerdict: ingressFailureVerdict(opts.IngressVerdict),
+	}
 	ruleIndex := make(map[uint32]siderspRuleMeta, len(set.Rules))
 	parsedPrefixCache := make(map[string]netip.Prefix)
 

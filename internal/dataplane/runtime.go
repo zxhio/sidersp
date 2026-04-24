@@ -29,9 +29,10 @@ type Runtime struct {
 }
 
 type Options struct {
-	Interface  string
-	AttachMode string
-	TCPResetTX TCPResetTXOptions
+	Interface      string
+	AttachMode     string
+	IngressVerdict string
+	TCPResetTX     TCPResetTXOptions
 }
 
 type TCPResetTXOptions struct {
@@ -110,7 +111,7 @@ func (r *Runtime) RunEventStream(ctx context.Context) error {
 // src/dst prefix LPM tries, global_cfg). This is correct but costly at scale. Future work:
 // stable ruleID→slot mapping, per-rule incremental index add/remove, unified delta path.
 func (r *Runtime) ReplaceRules(set rule.RuleSet) error {
-	snapshot, err := buildSnapshot(set)
+	snapshot, err := buildSnapshot(set, r.opts)
 	if err != nil {
 		return err
 	}

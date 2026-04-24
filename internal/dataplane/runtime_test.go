@@ -51,7 +51,7 @@ func TestBuildSnapshotBuildsKernelIndexes(t *testing.T) {
 		},
 	}
 
-	got, err := buildSnapshot(set)
+	got, err := buildSnapshot(set, Options{})
 	if err != nil {
 		t.Fatalf("buildSnapshot() error = %v", err)
 	}
@@ -89,6 +89,21 @@ func TestBuildSnapshotBuildsKernelIndexes(t *testing.T) {
 	wantMask := uint32(condProtoTCP | condSrcPrefix | condDstPort | condTCPSYN)
 	if meta.RequiredMask != wantMask {
 		t.Fatalf("required mask = %d, want %d", meta.RequiredMask, wantMask)
+	}
+	if got.globalCfg.IngressVerdict != ingressVerdictPass {
+		t.Fatalf("ingress verdict = %d, want %d", got.globalCfg.IngressVerdict, ingressVerdictPass)
+	}
+}
+
+func TestBuildSnapshotUsesConfiguredIngressVerdict(t *testing.T) {
+	t.Parallel()
+
+	got, err := buildSnapshot(rule.RuleSet{}, Options{IngressVerdict: "drop"})
+	if err != nil {
+		t.Fatalf("buildSnapshot() error = %v", err)
+	}
+	if got.globalCfg.IngressVerdict != ingressVerdictDrop {
+		t.Fatalf("ingress verdict = %d, want %d", got.globalCfg.IngressVerdict, ingressVerdictDrop)
 	}
 }
 

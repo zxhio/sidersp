@@ -6,7 +6,7 @@ Events are emitted by BPF through ringbuf after a rule match produces an observa
 
 ## Event Scope
 
-- `alert` emits an observation event and returns `XDP_PASS`.
+- `alert` emits an observation event before applying `dataplane.ingress_verdict`.
 - `tcp_reset` emits an event only after successful BPF kernel TX. It returns
   `XDP_TX` for same-interface TX or `XDP_REDIRECT` for configured egress
   interface TX.
@@ -74,7 +74,7 @@ The ringbuf ABI stores `action` and `verdict` as numeric codes. Presentation lay
 
 | Code | Name | Semantics |
 |------|------|-----------|
-| `0` | `observe` | Observation event; packet continues with `XDP_PASS` |
+| `0` | `observe` | Observation event emitted before final `dataplane.ingress_verdict` is applied to the original packet |
 | `1` | `tx` | BPF same-interface TX succeeded |
 | `2` | `xsk` | Packet was submitted to XSK; user-space response execution is tracked separately |
 | `3` | `redirect_tx` | Packet was submitted to a configured egress interface with `XDP_REDIRECT` |

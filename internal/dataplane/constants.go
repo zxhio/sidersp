@@ -68,6 +68,13 @@ const (
 	tcpResetFailureDrop
 )
 
+const (
+	verdictObserve uint8 = iota
+	verdictTX
+	verdictXSK
+	verdictRedirectTX
+)
+
 var tcpFlagBits = map[string]uint32{
 	"SYN": condTCPSYN,
 	"ACK": condTCPACK,

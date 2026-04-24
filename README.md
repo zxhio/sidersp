@@ -59,7 +59,13 @@ Edit the interface in `configs/config.example.yaml` first:
 dataplane:
   interface: eth0
   attach_mode: generic
+  ingress_verdict: pass
 ```
+
+`dataplane.ingress_verdict` controls what happens to ingress packets that are
+not explicitly consumed by BPF kernel TX or XSK redirect. Use `drop` on
+dedicated mirror ports so observed packets do not continue into the host stack.
+Keep `pass` for host-firewall or protocol-stack-integrated deployments.
 
 Build and run:
 

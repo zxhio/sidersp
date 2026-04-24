@@ -83,14 +83,15 @@ Execution path is not exposed as a rule field. The control plane validates `resp
 
 | Action | Code | Execution Path | Semantics |
 |--------|------|----------------|-----------|
-| `none` | `0` | dataplane | Match silently and continue with `XDP_PASS` |
-| `alert` | `1` | dataplane | Emit an observation event and continue with `XDP_PASS` |
+| `none` | `0` | dataplane | Match silently; final host-stack disposition follows runtime `dataplane.ingress_verdict` |
+| `alert` | `1` | dataplane | Emit an observation event; final host-stack disposition follows runtime `dataplane.ingress_verdict` |
 | `tcp_reset` | `2` | dataplane kernel TX | Build TCP RST in BPF and send by configured same-interface or egress-interface TX mode |
 | `icmp_echo_reply` | `3` | XSK RX + user-space TX | Redirect original packet to XSK; user space builds ICMP echo reply and transmits through same-interface XSK TX or configured shared TX egress |
 | `arp_reply` | `4` | XSK RX + user-space TX | Redirect original packet to XSK; user space builds ARP reply and transmits through same-interface XSK TX or configured shared TX egress |
 | `tcp_syn_ack` | `5` | XSK TX | Redirect original packet to XSK; user space builds TCP SYN-ACK |
 
 External rules must not expose implementation details such as `xdp`, `xsk`, or `user_space` as fields.
+`dataplane.ingress_verdict` is a runtime dataplane setting, not a per-rule field.
 
 ## Action Compatibility
 

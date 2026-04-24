@@ -99,6 +99,11 @@ enum tcp_reset_failure_verdict {
     TCP_RESET_FAILURE_DROP = 1,
 };
 
+enum ingress_failure_verdict {
+    INGRESS_FAILURE_PASS = 0,
+    INGRESS_FAILURE_DROP = 1,
+};
+
 /* Per-packet parsing result (stack-only, never shared with userspace). */
 struct pkt_ctx {
     __u16 vlan_id;
@@ -137,6 +142,7 @@ struct global_cfg {
     mask_t dst_port_optional_rules;
     mask_t src_prefix_optional_rules;
     mask_t dst_prefix_optional_rules;
+    __u32  ingress_verdict;
 };
 
 struct tx_config {

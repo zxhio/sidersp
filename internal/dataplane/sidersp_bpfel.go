@@ -21,6 +21,8 @@ type siderspGlobalCfg struct {
 	DstPortOptionalRules   siderspMaskT
 	SrcPrefixOptionalRules siderspMaskT
 	DstPrefixOptionalRules siderspMaskT
+	IngressVerdict         uint32
+	_                      [4]byte
 }
 
 type siderspIpv4LpmKey struct {

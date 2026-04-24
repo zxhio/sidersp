@@ -59,7 +59,11 @@ flowchart LR
 dataplane:
   interface: eth0
   attach_mode: generic
+  ingress_verdict: pass
 ```
+
+`dataplane.ingress_verdict` 用来控制未被 BPF 内核态 TX 或 XSK redirect
+明确消费的入口报文最终如何处置。独立镜像口部署建议设为 `drop`，避免报文继续进入宿主机协议栈；宿主机防火墙或需要协议栈继续处理的部署建议保持 `pass`。
 
 构建并运行：
 

@@ -213,6 +213,13 @@ static __always_inline int tcp_reset_failure_verdict(const struct tx_config *cfg
     return XDP_PASS;
 }
 
+static __always_inline int ingress_failure_verdict(const struct global_cfg *cfg)
+{
+    if (cfg && cfg->ingress_verdict == INGRESS_FAILURE_DROP)
+        return XDP_DROP;
+    return XDP_PASS;
+}
+
 static __always_inline int tcp_reset_mutated_failure(void)
 {
     return XDP_DROP;
@@ -434,16 +441,18 @@ static __always_inline int do_tcp_reset_tx(struct xdp_md *xdp,
 }
 
 static __always_inline int redirect_xsk_with_meta(struct xdp_md *xdp,
-                                                  const struct rule_meta *rule)
+                                                  const struct rule_meta *rule,
+                                                  const struct global_cfg *cfg)
 {
     void *data;
     void *data_end;
     struct xsk_meta *meta;
     int redir;
+    int fallback = ingress_failure_verdict(cfg);
 
     if (bpf_xdp_adjust_head(xdp, -(int)sizeof(*meta))) {
         stat_inc(STAT_XSK_FAILED);
-        return XDP_PASS;
+        return fallback;
     }
 
     data = (void *)(long)xdp->data;
@@ -458,7 +467,7 @@ static __always_inline int redirect_xsk_with_meta(struct xdp_md *xdp,
     meta->action = rule->action;
     meta->reserved = 0;
 
-    redir = bpf_redirect_map(&xsks_map, xdp->rx_queue_index, XDP_PASS);
+    redir = bpf_redirect_map(&xsks_map, xdp->rx_queue_index, fallback);
     if (redir == XDP_REDIRECT)
         return XDP_REDIRECT;
 
@@ -467,7 +476,7 @@ static __always_inline int redirect_xsk_with_meta(struct xdp_md *xdp,
 rollback:
     if (bpf_xdp_adjust_head(xdp, sizeof(*meta)))
         return XDP_DROP;
-    return XDP_PASS;
+    return fallback;
 }
 
 static __always_inline int can_tcp_syn_ack(const struct pkt_ctx *ctx)
@@ -707,16 +716,17 @@ int xdp_sidersp(struct xdp_md *xdp)
 
     stat_inc(STAT_RX_PACKETS);
 
+    cfg = bpf_map_lookup_elem(&global_cfg_map, &zero);
+
     err = parse_packet(&ctx, data, data_end);
     if (err != PARSE_OK) {
         stat_inc(STAT_PARSE_FAILED);
-        return XDP_PASS;
+        return ingress_failure_verdict(cfg);
     }
     pkt_conds = ctx.conds;
 
-    cfg = bpf_map_lookup_elem(&global_cfg_map, &zero);
     if (!cfg)
-        return XDP_PASS;
+        return ingress_failure_verdict(cfg);
 
     mask_copy(&candidates, &cfg->all_active_rules);
 
@@ -738,12 +748,12 @@ int xdp_sidersp(struct xdp_md *xdp)
         mask_and(&candidates, &cfg->dst_prefix_optional_rules);
 
     if (mask_is_zero(&candidates))
-        return XDP_PASS;
+        return ingress_failure_verdict(cfg);
 
     stat_inc(STAT_RULE_CANDIDATES);
 
     if (!pick_best_rule(&candidates, pkt_conds, &best_rule))
-        return XDP_PASS;
+        return ingress_failure_verdict(cfg);
 
     stat_inc(STAT_MATCHED_RULES);
 
@@ -775,8 +785,8 @@ int xdp_sidersp(struct xdp_md *xdp)
     case ACTION_TCP_SYN_ACK: {
         int redir;
         if (best_rule.action == ACTION_TCP_SYN_ACK && !can_tcp_syn_ack(&ctx))
-            return XDP_PASS;
-        redir = redirect_xsk_with_meta(xdp, &best_rule);
+            return ingress_failure_verdict(cfg);
+        redir = redirect_xsk_with_meta(xdp, &best_rule, cfg);
         if (redir == XDP_REDIRECT) {
             stat_inc(STAT_XSK_TX);
             emit_event(&ctx, &best_rule, pkt_conds, VERDICT_XSK);
@@ -786,10 +796,10 @@ int xdp_sidersp(struct xdp_md *xdp)
     }
     case ACTION_ALERT:
         emit_event(&ctx, &best_rule, pkt_conds, VERDICT_OBSERVE);
-        return XDP_PASS;
+        return ingress_failure_verdict(cfg);
     case ACTION_NONE:
     default:
-        return XDP_PASS;
+        return ingress_failure_verdict(cfg);
     }
 }
 

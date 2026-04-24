@@ -5,6 +5,9 @@ controlplane:
 dataplane:
   interface: eth0
   attach_mode: generic
+  # Values: pass, drop. pass keeps unmatched/non-consumed packets in the host stack.
+  # Use drop on dedicated mirror ports; use pass on host-firewall or protocol-stack-integrated deployments.
+  ingress_verdict: pass
 
 response:
   enabled: false

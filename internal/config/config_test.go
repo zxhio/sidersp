@@ -34,6 +34,9 @@ console:
 	if cfg.Dataplane.Interface != "eth0" {
 		t.Fatalf("Dataplane.Interface = %q, want %q", cfg.Dataplane.Interface, "eth0")
 	}
+	if cfg.Dataplane.NormalizedIngressVerdict() != "pass" {
+		t.Fatalf("Dataplane ingress verdict = %q, want pass", cfg.Dataplane.NormalizedIngressVerdict())
+	}
 	windows, err := cfg.Console.ParsedStatsHistoryWindows()
 	if err != nil {
 		t.Fatalf("ParsedStatsHistoryWindows() error = %v", err)
@@ -137,6 +140,45 @@ console:
 
 	if !strings.Contains(err.Error(), `dataplane.attach_mode "invalid" is not valid`) {
 		t.Fatalf("Load() error = %q, want attach mode validation error", err)
+	}
+}
+
+func TestLoadDataplaneIngressVerdict(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		verdict string
+		want    string
+	}{
+		{name: "pass", verdict: "pass", want: "pass"},
+		{name: "drop", verdict: "drop", want: "drop"},
+		{name: "default pass", verdict: "", want: "pass"},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			path := writeConfigFile(t, `controlplane:
+  rules_path: configs/rules.example.yaml
+
+dataplane:
+  interface: eth0
+`+dataplaneIngressVerdictLine(tc.verdict)+`
+console:
+  listen_addr: 127.0.0.1:8080
+`)
+
+			cfg, err := Load(path)
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if got := cfg.Dataplane.NormalizedIngressVerdict(); got != tc.want {
+				t.Fatalf("Dataplane.NormalizedIngressVerdict() = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -259,6 +301,15 @@ func TestResponseConfigDefaults(t *testing.T) {
 	}
 	if cfg.TCPSynAck.TCPSeq != 0 {
 		t.Fatalf("tcp_syn_ack.tcp_seq = %d, want 0 zero-value", cfg.TCPSynAck.TCPSeq)
+	}
+}
+
+func TestDataplaneConfigDefaults(t *testing.T) {
+	t.Parallel()
+
+	cfg := DataplaneConfig{}
+	if got := cfg.NormalizedIngressVerdict(); got != "pass" {
+		t.Fatalf("NormalizedIngressVerdict() = %q, want pass", got)
 	}
 }
 
@@ -387,6 +438,36 @@ console:
 	if !strings.Contains(err.Error(), "console.stats_history") {
 		t.Fatalf("Load() error = %q, want stats history window error", err)
 	}
+}
+
+func TestLoadRejectsInvalidDataplaneIngressVerdict(t *testing.T) {
+	t.Parallel()
+
+	path := writeConfigFile(t, `controlplane:
+  rules_path: configs/rules.example.yaml
+
+dataplane:
+  interface: eth0
+  ingress_verdict: reject
+
+console:
+  listen_addr: 127.0.0.1:8080
+`)
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load() error = nil, want dataplane validation error")
+	}
+	if !strings.Contains(err.Error(), `dataplane.ingress_verdict "reject" is not valid`) {
+		t.Fatalf("Load() error = %q, want dataplane ingress verdict validation error", err)
+	}
+}
+
+func dataplaneIngressVerdictLine(verdict string) string {
+	if verdict == "" {
+		return ""
+	}
+	return "  ingress_verdict: " + verdict + "\n"
 }
 
 func writeConfigFile(t *testing.T, contents string) string {

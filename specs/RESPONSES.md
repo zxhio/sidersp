@@ -8,8 +8,8 @@ Rules reference responses through `response.action`. The control plane validates
 
 | Action | Code | Path | Current Status | Semantics |
 |--------|------|------|----------------|-----------|
-| `none` | `0` | dataplane pass | active | Match silently and continue with `XDP_PASS` |
-| `alert` | `1` | dataplane observe | active | Emit an observation event and continue with `XDP_PASS` |
+| `none` | `0` | dataplane pass | active | Match silently; final original-packet disposition is `XDP_PASS` or `XDP_DROP` by `dataplane.ingress_verdict` |
+| `alert` | `1` | dataplane observe | active | Emit an observation event; final original-packet disposition is `XDP_PASS` or `XDP_DROP` by `dataplane.ingress_verdict` |
 | `tcp_reset` | `2` | BPF kernel TX | active | Build TCP RST in BPF and send by same-interface `XDP_TX` or configured egress-interface `XDP_REDIRECT` |
 | `icmp_echo_reply` | `3` | XSK RX + user-space TX | active | Redirect the original packet to XSK; user space builds ICMP echo reply and transmits through same-interface XSK TX or configured shared TX egress |
 | `arp_reply` | `4` | XSK RX + user-space TX | active | Redirect the original packet to XSK; user space builds ARP reply and transmits through same-interface XSK TX or configured shared TX egress |
@@ -24,7 +24,7 @@ Action names are stable snake-case API values. Numeric codes are the dataplane A
 Used by `none`.
 
 ```text
-packet -> BPF parse/match -> XDP_PASS
+packet -> BPF parse/match -> XDP_PASS or XDP_DROP by dataplane.ingress_verdict
 ```
 
 No response packet is generated and no observation event is required.
@@ -34,7 +34,7 @@ No response packet is generated and no observation event is required.
 Used by `alert`.
 
 ```text
-packet -> BPF parse/match -> ringbuf event -> XDP_PASS
+packet -> BPF parse/match -> ringbuf event -> XDP_PASS or XDP_DROP by dataplane.ingress_verdict
 ```
 
 The ringbuf event is only for observation, statistics, and audit.
@@ -78,7 +78,8 @@ successfully submitted the packet to XSK. They do not mean the user-space
 response packet was transmitted.
 
 `tcp_syn_ack` is guarded in BPF and only redirects initial SYN packets. SYN
-packets that also carry ACK, RST, or FIN pass without XSK redirect.
+packets that also carry ACK, RST, or FIN fall back to
+`dataplane.ingress_verdict` without XSK redirect.
 
 `icmp_echo_reply` and `arp_reply` use the shared `response.tx.*` policy
 surface. With `response.tx.egress_interface: ""`, replies are transmitted
@@ -107,7 +108,7 @@ u16 reserved
 
 The XSK worker must strip these 8 bytes before parsing the original Ethernet
 frame. If BPF cannot prepend metadata or cannot submit the redirect, the packet
-falls back to `XDP_PASS` and the XSK failure counter is incremented.
+falls back to `dataplane.ingress_verdict` and the XSK failure counter is incremented.
 
 ## Response Result
 
@@ -186,6 +187,13 @@ response:
 ```
 
 `response.tx` config fields:
+
+`dataplane` config also includes:
+
+- `ingress_verdict`: global ingress disposition for packets not explicitly
+  consumed by kernel TX or XSK redirect. `pass` preserves current host-stack
+  delivery behavior. `drop` is recommended for dedicated mirror-port
+  deployments.
 
 - `egress_interface`: shared TX egress policy. `""` keeps same-interface TX.
   For `tcp_reset`, a non-empty interface name enables BPF redirect TX. For

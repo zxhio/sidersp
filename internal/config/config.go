@@ -25,8 +25,9 @@ type ControlPlaneConfig struct {
 }
 
 type DataplaneConfig struct {
-	Interface  string `yaml:"interface"`
-	AttachMode string `yaml:"attach_mode"`
+	Interface      string `yaml:"interface"`
+	AttachMode     string `yaml:"attach_mode"`
+	IngressVerdict string `yaml:"ingress_verdict"`
 }
 
 type ConsoleConfig struct {
@@ -117,6 +118,7 @@ func Load(path string) (Config, error) {
 }
 
 func (c *Config) applyDefaults() {
+	c.Dataplane.applyDefaults()
 	c.Logging.applyDefaults()
 }
 
@@ -125,6 +127,9 @@ func (c Config) validate() error {
 		return fmt.Errorf("dataplane.interface is required")
 	}
 	if err := validateAttachMode(c.Dataplane.AttachMode); err != nil {
+		return err
+	}
+	if err := c.Dataplane.validate(); err != nil {
 		return err
 	}
 	if strings.TrimSpace(c.ControlPlane.RulesPath) == "" {
@@ -152,6 +157,29 @@ func validateAttachMode(raw string) error {
 		return nil
 	default:
 		return fmt.Errorf("dataplane.attach_mode %q is not valid", raw)
+	}
+}
+
+func (c *DataplaneConfig) applyDefaults() {
+	if strings.TrimSpace(c.IngressVerdict) == "" {
+		c.IngressVerdict = "pass"
+	}
+}
+
+func (c DataplaneConfig) NormalizedIngressVerdict() string {
+	verdict := strings.ToLower(strings.TrimSpace(c.IngressVerdict))
+	if verdict == "" {
+		return "pass"
+	}
+	return verdict
+}
+
+func (c DataplaneConfig) validate() error {
+	switch c.NormalizedIngressVerdict() {
+	case "pass", "drop":
+		return nil
+	default:
+		return fmt.Errorf("dataplane.ingress_verdict %q is not valid", c.IngressVerdict)
 	}
 }
 
