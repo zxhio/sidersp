@@ -11,18 +11,13 @@ const PRIMARY_METRICS = [
 
 const EXTENDED_METRICS = [
   { key: 'ringbuf_dropped', label: '缓冲区丢弃', color: '#8b5cf6' },
-  { key: 'xdp_tx',          label: '同口 TX',    color: '#0ea5e9' },
-  { key: 'redirect_tx',     label: '出口重定向', color: '#14b8a6' },
-  { key: 'tx_failed',       label: 'TX 失败',    color: '#dc2626' },
-  { key: 'redirect_failed', label: '重定向失败', color: '#ea580c' },
+  { key: 'xdp_tx',          label: '网口直发', color: '#0ea5e9' },
+  { key: 'tx_failed',       label: '网口直发失败', color: '#dc2626' },
+  { key: 'redirect_tx',     label: '转发网口发送', color: '#14b8a6' },
+  { key: 'redirect_failed', label: '转发网口失败', color: '#ea580c' },
+  { key: 'xsk_tx',          label: '转发到响应模块', color: '#64748b' },
+  { key: 'xsk_failed',      label: '转发到响应模块失败', color: '#be123c' },
   { key: 'fib_lookup_failed', label: '路由查询失败', color: '#9333ea' },
-  { key: 'xsk_tx',          label: 'XSK 提交',   color: '#64748b' },
-  { key: 'xsk_failed',      label: 'XSK 失败',   color: '#be123c' },
-]
-
-const RULE_METRICS = [
-  { key: 'total_rules',   label: '规则总数', color: '#6366f1' },
-  { key: 'enabled_rules', label: '已启用',   color: '#10b981' },
 ]
 
 const DEFAULT_WINDOWS = ['10min']
@@ -189,14 +184,6 @@ export default function StatsPage() {
                         </div>
                       </div>
                     ))}
-                    {RULE_METRICS.map(m => (
-                      <div className="status-card" key={m.key}>
-                        <div className="status-card-label">{m.label}</div>
-                        <div className="status-card-value" style={{ fontSize: 20 }}>
-                          {formatValue(stats[m.key])}
-                        </div>
-                      </div>
-                    ))}
                   </div>
                 </div>
                 {EXTENDED_METRICS.map(m => {
@@ -205,22 +192,6 @@ export default function StatsPage() {
                   return (
                     <div className="section" key={m.key}>
                       <div className="section-title">{m.label}（增量/采样间隔）</div>
-                      <div className="chart-container">
-                        <Sparkline
-                          data={deltas}
-                          color={m.color}
-                          labels={timestamps.map(formatTimestamp)}
-                        />
-                      </div>
-                    </div>
-                  )
-                })}
-                {RULE_METRICS.map(m => {
-                  const { deltas, timestamps } = extractValues(points, m.key)
-                  if (deltas.length < 1) return null
-                  return (
-                    <div className="section" key={m.key}>
-                      <div className="section-title">{m.label}</div>
                       <div className="chart-container">
                         <Sparkline
                           data={deltas}
@@ -257,14 +228,6 @@ export default function StatsPage() {
                 <div className="section-title">更多统计</div>
                 <div className="status-cards">
                   {EXTENDED_METRICS.map(m => (
-                    <div className="status-card" key={m.key}>
-                      <div className="status-card-label">{m.label}</div>
-                      <div className="status-card-value" style={{ fontSize: 20 }}>
-                        {formatValue(stats[m.key])}
-                      </div>
-                    </div>
-                  ))}
-                  {RULE_METRICS.map(m => (
                     <div className="status-card" key={m.key}>
                       <div className="status-card-label">{m.label}</div>
                       <div className="status-card-value" style={{ fontSize: 20 }}>
