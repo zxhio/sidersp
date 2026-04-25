@@ -341,20 +341,40 @@ func (r *Runtime) ReadStats() (model.DataplaneStats, error) {
 	}
 	r.matchMu.RUnlock()
 
+	counters := model.DataplaneCounters{
+		RXPackets:         stats.RXPackets,
+		ParseFailed:       stats.ParseFailed,
+		RuleCandidates:    stats.RuleCandidates,
+		MatchedRules:      stats.MatchedRules,
+		RingbufDropped:    stats.RingbufDropped,
+		XDPTX:             stats.XDPTX,
+		XskTX:             stats.XskTX,
+		TXFailed:          stats.TXFailed,
+		XskFailed:         stats.XskFailed,
+		XskMetaFailed:     stats.XskMetaFailed,
+		XskRedirectFailed: stats.XskRedirectFailed,
+		RedirectTX:        stats.RedirectTX,
+		RedirectFailed:    stats.RedirectFailed,
+		FibLookupFailed:   stats.FibLookupFailed,
+	}
+
 	return model.DataplaneStats{
-		RXPackets:       stats.RXPackets,
-		ParseFailed:     stats.ParseFailed,
-		RuleCandidates:  stats.RuleCandidates,
-		MatchedRules:    stats.MatchedRules,
-		RuleMatches:     ruleMatches,
-		RingbufDropped:  stats.RingbufDropped,
-		XDPTX:           stats.XDPTX,
-		XskTX:           stats.XskTX,
-		TXFailed:        stats.TXFailed,
-		XskFailed:       stats.XskFailed,
-		RedirectTX:      stats.RedirectTX,
-		RedirectFailed:  stats.RedirectFailed,
-		FibLookupFailed: stats.FibLookupFailed,
+		RXPackets:         counters.RXPackets,
+		ParseFailed:       counters.ParseFailed,
+		RuleCandidates:    counters.RuleCandidates,
+		MatchedRules:      counters.MatchedRules,
+		RuleMatches:       ruleMatches,
+		RingbufDropped:    counters.RingbufDropped,
+		XDPTX:             counters.XDPTX,
+		XskTX:             counters.XskTX,
+		TXFailed:          counters.TXFailed,
+		XskFailed:         counters.XskFailed,
+		XskMetaFailed:     counters.XskMetaFailed,
+		XskRedirectFailed: counters.XskRedirectFailed,
+		RedirectTX:        counters.RedirectTX,
+		RedirectFailed:    counters.RedirectFailed,
+		FibLookupFailed:   counters.FibLookupFailed,
+		Stages:            model.BuildDiagnosticStages(counters),
 	}, nil
 }
 
