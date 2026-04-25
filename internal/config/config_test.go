@@ -269,6 +269,162 @@ console:
 	}
 }
 
+func TestLoadLoggingConfig(t *testing.T) {
+	t.Parallel()
+
+	path := writeConfigFile(t, `controlplane:
+  rules_path: configs/rules.example.yaml
+
+dataplane:
+  interface: eth0
+
+logging:
+  app:
+    level: debug
+    file_path: /tmp/sidersp.log
+    max_size_mb: 10
+    max_backups: 2
+    max_age_days: 3
+    compress: false
+  stats:
+    level: info
+    file_path: /tmp/sidersp.stats.log
+    max_size_mb: 11
+    max_backups: 4
+    max_age_days: 5
+    compress: true
+  event:
+    level: warn
+    file_path: /tmp/sidersp.event.log
+    max_size_mb: 12
+    max_backups: 6
+    max_age_days: 7
+    compress: true
+
+console:
+  listen_addr: 127.0.0.1:8080
+`)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.Logging.App.Level != "debug" || cfg.Logging.App.FilePath != "/tmp/sidersp.log" || cfg.Logging.App.CompressEnabled() {
+		t.Fatalf("app logging = %+v, want debug /tmp/sidersp.log compress=false", cfg.Logging.App)
+	}
+	if cfg.Logging.Stats.Level != "info" || cfg.Logging.Stats.FilePath != "/tmp/sidersp.stats.log" || !cfg.Logging.Stats.CompressEnabled() {
+		t.Fatalf("stats logging = %+v, want info /tmp/sidersp.stats.log compress=true", cfg.Logging.Stats)
+	}
+	if cfg.Logging.Event.Level != "warn" || cfg.Logging.Event.FilePath != "/tmp/sidersp.event.log" || !cfg.Logging.Event.CompressEnabled() {
+		t.Fatalf("event logging = %+v, want warn /tmp/sidersp.event.log compress=true", cfg.Logging.Event)
+	}
+}
+
+func TestLoadRejectsLegacyLoggingConfig(t *testing.T) {
+	t.Parallel()
+
+	path := writeConfigFile(t, `controlplane:
+  rules_path: configs/rules.example.yaml
+
+dataplane:
+  interface: eth0
+
+logging:
+  level: debug
+  file_path: /tmp/legacy.log
+  max_size_mb: 55
+  max_backups: 6
+  max_age_days: 9
+  compress: false
+
+console:
+  listen_addr: 127.0.0.1:8080
+`)
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load() error = nil, want unknown key error")
+	}
+	if !strings.Contains(err.Error(), `field level not found`) {
+		t.Fatalf("Load() error = %q, want legacy logging key rejection", err)
+	}
+}
+
+func TestLoadLoggingChannelsFallbackToAppWhenOmitted(t *testing.T) {
+	t.Parallel()
+
+	path := writeConfigFile(t, `controlplane:
+  rules_path: configs/rules.example.yaml
+
+dataplane:
+  interface: eth0
+
+logging:
+  app:
+    level: warn
+    file_path: /tmp/sidersp.log
+    max_size_mb: 90
+    max_backups: 8
+    max_age_days: 7
+    compress: false
+
+console:
+  listen_addr: 127.0.0.1:8080
+`)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.Logging.Stats.Level != "warn" || cfg.Logging.Stats.FilePath != "/tmp/sidersp.log" || cfg.Logging.Stats.MaxSizeMB != 90 || cfg.Logging.Stats.CompressEnabled() {
+		t.Fatalf("stats logging = %+v, want app fallback", cfg.Logging.Stats)
+	}
+	if cfg.Logging.Event.Level != "warn" || cfg.Logging.Event.FilePath != "/tmp/sidersp.log" || cfg.Logging.Event.MaxBackups != 8 || cfg.Logging.Event.CompressEnabled() {
+		t.Fatalf("event logging = %+v, want app fallback", cfg.Logging.Event)
+	}
+}
+
+func TestLoadLoggingChannelUsesOwnDefaultsWhenConfigured(t *testing.T) {
+	t.Parallel()
+
+	path := writeConfigFile(t, `controlplane:
+  rules_path: configs/rules.example.yaml
+
+dataplane:
+  interface: eth0
+
+logging:
+  app:
+    level: warn
+    file_path: /tmp/sidersp.log
+    max_size_mb: 90
+    max_backups: 8
+    max_age_days: 7
+    compress: false
+  stats:
+    level: info
+  event:
+    file_path: /tmp/sidersp.event.log
+
+console:
+  listen_addr: 127.0.0.1:8080
+`)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.Logging.Stats.Level != "info" || cfg.Logging.Stats.FilePath != "/var/log/sidersp/sidersp.stats.log" || cfg.Logging.Stats.MaxSizeMB != 100 || !cfg.Logging.Stats.CompressEnabled() {
+		t.Fatalf("stats logging = %+v, want own defaults", cfg.Logging.Stats)
+	}
+	if cfg.Logging.Event.Level != "info" || cfg.Logging.Event.FilePath != "/tmp/sidersp.event.log" || cfg.Logging.Event.MaxBackups != 7 || !cfg.Logging.Event.CompressEnabled() {
+		t.Fatalf("event logging = %+v, want own defaults with file override", cfg.Logging.Event)
+	}
+}
+
 func TestResponseConfigDefaults(t *testing.T) {
 	t.Parallel()
 

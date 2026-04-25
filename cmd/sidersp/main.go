@@ -15,7 +15,7 @@ import (
 	"sidersp/internal/console"
 	"sidersp/internal/controlplane"
 	"sidersp/internal/dataplane"
-	applogging "sidersp/internal/logging"
+	"sidersp/internal/logs"
 	"sidersp/internal/response"
 	"sidersp/internal/response/afxdp"
 )
@@ -24,6 +24,8 @@ func main() {
 	configPath := flag.String("config", "configs/config.example.yaml", "path to config file")
 	flag.Parse()
 
+	bootstrapLog := logs.App()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -31,30 +33,32 @@ func main() {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(sigCh)
 
-	go func() {
-		sig := <-sigCh
-		logrus.WithField("signal", sig.String()).Info("Stopped service")
-		cancel()
-	}()
-
 	cfg, err := config.Load(*configPath)
 	if err != nil {
-		logrus.WithError(err).WithField("config_path", *configPath).Fatal("Fail to load config")
+		bootstrapLog.WithError(err).WithField("config_path", *configPath).Fatal("Fail to load config")
 	}
 
-	logManager, err := applogging.NewManager(cfg.Logging)
+	logManager, err := logs.NewManager(cfg.Logging)
 	if err != nil {
-		logrus.WithError(err).Fatal("Fail to configure logging")
+		bootstrapLog.WithError(err).Fatal("Fail to configure logging")
 	}
+	logs.SetDefaultManager(logManager)
+	defer logs.ResetDefaultManager()
 	defer func() {
 		if err := logManager.Close(); err != nil {
-			logrus.WithError(err).Error("Fail to close logger")
+			logs.App().WithError(err).Error("Fail to close logger")
 		}
+	}()
+
+	go func() {
+		sig := <-sigCh
+		logs.App().WithField("signal", sig.String()).Info("Stopped service")
+		cancel()
 	}()
 
 	tcpResetTX, err := buildTCPResetTXOptions(cfg.Egress)
 	if err != nil {
-		logrus.WithError(err).Fatal("Fail to configure tcp_reset TX")
+		logs.App().WithError(err).Fatal("Fail to configure tcp_reset TX")
 	}
 
 	dp, err := dataplane.Open(dataplane.Options{
@@ -64,11 +68,11 @@ func main() {
 		TCPResetTX:     tcpResetTX,
 	})
 	if err != nil {
-		logrus.WithError(err).Fatal("Fail to open dataplane")
+		logs.App().WithError(err).Fatal("Fail to open dataplane")
 	}
 	defer func() {
 		if err := dp.Close(); err != nil {
-			logrus.WithError(err).WithField("interface", cfg.Dataplane.Interface).Error("Fail to close dataplane")
+			logs.App().WithError(err).WithField("interface", cfg.Dataplane.Interface).Error("Fail to close dataplane")
 		}
 	}()
 
@@ -76,9 +80,9 @@ func main() {
 	consoleServer := console.NewServer(cfg.Console.ListenAddr, cp, logManager)
 	responseRuntime, err := buildResponseRuntime(cfg, dp)
 	if err != nil {
-		logrus.WithError(err).Fatal("Fail to build response runtime")
+		logs.App().WithError(err).Fatal("Fail to build response runtime")
 	}
-	logrus.WithFields(logrus.Fields{
+	logs.App().WithFields(logrus.Fields{
 		"config_path": *configPath,
 		"interface":   cfg.Dataplane.Interface,
 	}).Info("Started service")
@@ -110,7 +114,7 @@ func main() {
 
 	select {
 	case err := <-errCh:
-		logrus.WithError(err).Fatal("Fail to run service")
+		logs.App().WithError(err).Fatal("Fail to run service")
 	case <-ctx.Done():
 	}
 }

@@ -6,6 +6,8 @@ import (
 	"fmt"
 
 	"github.com/sirupsen/logrus"
+
+	"sidersp/internal/logs"
 )
 
 type XSKRegistrar interface {
@@ -59,7 +61,7 @@ func (w *XSKWorker) Run(ctx context.Context) error {
 		return err
 	}
 
-	logrus.WithFields(logrus.Fields{
+	logs.App().WithFields(logrus.Fields{
 		"ifindex": w.ifindex,
 		"queue":   w.queueID,
 	}).Info("Started xsk worker")
@@ -80,7 +82,7 @@ func (w *XSKWorker) Run(ctx context.Context) error {
 			continue
 		}
 		if err := w.handler(ctx, frame); err != nil {
-			logrus.WithFields(logrus.Fields{
+			logs.App().WithFields(logrus.Fields{
 				"ifindex": w.ifindex,
 				"queue":   w.queueID,
 			}).WithError(err).Debug("XSK frame handler error")

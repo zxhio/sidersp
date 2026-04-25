@@ -165,3 +165,15 @@ type LogLevelRequest struct {
 type LogLevelResponse struct {
 	Level string `json:"level"`
 }
+
+type LogLevelsRequest struct {
+	App   string `json:"app" binding:"required"`
+	Stats string `json:"stats" binding:"required"`
+	Event string `json:"event" binding:"required"`
+}
+
+type LogLevelsResponse struct {
+	App   string `json:"app"`
+	Stats string `json:"stats"`
+	Event string `json:"event"`
+}

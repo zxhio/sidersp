@@ -10,6 +10,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"sidersp/internal/config"
+	"sidersp/internal/logs"
 	"sidersp/internal/model"
 	"sidersp/internal/rule"
 )
@@ -84,7 +85,7 @@ func (r *Runtime) bootstrap() (rule.RuleSet, error) {
 	r.rules = cloneRuleSet(rules)
 	r.mu.Unlock()
 
-	logrus.WithFields(logrus.Fields{
+	logs.App().WithFields(logrus.Fields{
 		"rules":      len(enabledRuleSet(rules).Rules),
 		"rules_path": r.cfg.ControlPlane.RulesPath,
 	}).Info("Bootstrapped controlplane")
@@ -102,7 +103,7 @@ func (r *Runtime) Run(ctx context.Context) error {
 		return err
 	}
 
-	logrus.WithField("rules", len(rules.Rules)).Info("Started controlplane runtime")
+	logs.App().WithField("rules", len(rules.Rules)).Info("Started controlplane runtime")
 
 	go r.runStatsCollector(ctx)
 

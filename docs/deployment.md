@@ -12,7 +12,7 @@ the runtime modules.
 | Config | `/etc/sidersp/config.yaml` |
 | Rules | `/etc/sidersp/configs/rules.example.yaml` |
 | Unit | `/etc/systemd/system/sidersp.service` |
-| Logs | `/var/log/sidersp/sidersp.log` |
+| Logs | `/var/log/sidersp/sidersp.log`, `/var/log/sidersp/sidersp.stats.log`, `/var/log/sidersp/sidersp.event.log` |
 
 ## Requirements
 
@@ -184,6 +184,8 @@ View logs:
 ```bash
 tail -n 100 /var/log/sidersp/sidersp.log
 tail -f /var/log/sidersp/sidersp.log
+tail -f /var/log/sidersp/sidersp.stats.log
+tail -f /var/log/sidersp/sidersp.event.log
 ```
 
 Query the local console API:
@@ -204,7 +206,13 @@ Check the current log level:
 curl http://127.0.0.1:8080/api/v1/logging/level
 ```
 
-Change the runtime log level:
+Check all runtime log levels:
+
+```bash
+curl http://127.0.0.1:8080/api/v1/logging/levels
+```
+
+Change the app-channel runtime log level:
 
 ```bash
 curl -X PUT http://127.0.0.1:8080/api/v1/logging/level \
@@ -212,29 +220,63 @@ curl -X PUT http://127.0.0.1:8080/api/v1/logging/level \
   -d '{"level":"debug"}'
 ```
 
+Change all runtime log levels:
+
+```bash
+curl -X PUT http://127.0.0.1:8080/api/v1/logging/levels \
+  -H 'Content-Type: application/json' \
+  -d '{"app":"debug","stats":"info","event":"warn"}'
+```
+
 Runtime log-level changes are not written back to `/etc/sidersp/config.yaml`.
-After restart, the service uses the configured `logging.level`.
+After restart, the service uses the configured `logging.app`, `logging.stats`,
+and `logging.event` levels.
 
 ## Logging
 
-SideSP writes service logs to the file configured by `logging.file_path`.
-The default deployment path is `/var/log/sidersp/sidersp.log`.
+SideSP writes three log channels:
+
+- `logging.app.file_path`: service runtime, startup, shutdown, and failures
+- `logging.stats.file_path`: periodic kernel stats snapshots
+- `logging.event.file_path`: high-value rule-match events
+
+If the `logging.stats` or `logging.event` block is omitted, that channel reuses
+the fully resolved `logging.app` configuration. Once a channel block is
+present, it uses its own configured values and its own channel defaults.
 
 The default rotation policy is:
 
 ```yaml
 logging:
-  level: info
-  file_path: /var/log/sidersp/sidersp.log
-  max_size_mb: 100
-  max_backups: 7
-  max_age_days: 30
-  compress: true
+  app:
+    level: info
+    file_path: /var/log/sidersp/sidersp.log
+    max_size_mb: 100
+    max_backups: 7
+    max_age_days: 30
+    compress: true
+  stats:
+    level: info
+    file_path: /var/log/sidersp/sidersp.stats.log
+    max_size_mb: 100
+    max_backups: 7
+    max_age_days: 30
+    compress: true
+  event:
+    level: info
+    file_path: /var/log/sidersp/sidersp.event.log
+    max_size_mb: 100
+    max_backups: 7
+    max_age_days: 30
+    compress: true
 ```
 
-When file logging is configured, SideSP writes application logs to the file and
-does not duplicate them to journald. Use `systemctl status sidersp` for service
-state and the log file for application diagnostics.
+The legacy `GET/PUT /api/v1/logging/level` endpoints remain compatible and
+continue to read and modify only the `app` channel.
+
+When file logging is configured, SideSP writes application logs to the log
+files and does not duplicate them to journald. Use `systemctl status sidersp`
+for service state and the log files for application diagnostics.
 
 Restart after config or rule changes:
 

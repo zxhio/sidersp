@@ -17,6 +17,7 @@ import (
 	"github.com/cilium/ebpf/rlimit"
 	"github.com/sirupsen/logrus"
 
+	"sidersp/internal/logs"
 	"sidersp/internal/model"
 	"sidersp/internal/rule"
 )
@@ -77,7 +78,7 @@ func (r *Runtime) Close() error {
 
 	if r.promiscSet {
 		if err := setInterfacePromisc(r.iface, false); err != nil {
-			logrus.WithError(err).WithField("interface", r.iface).Warn("Fail to restore interface promiscuous mode")
+			logs.App().WithError(err).WithField("interface", r.iface).Warn("Fail to restore interface promiscuous mode")
 			if closeErr == nil {
 				closeErr = fmt.Errorf("restore promiscuous mode on %s: %w", r.iface, err)
 			}
@@ -167,7 +168,7 @@ func (r *Runtime) attachOnce() error {
 	if err != nil {
 		if r.promiscSet {
 			if restoreErr := setInterfacePromisc(r.iface, false); restoreErr != nil {
-				logrus.WithError(restoreErr).WithField("interface", r.iface).Warn("Fail to restore interface promiscuous mode")
+				logs.App().WithError(restoreErr).WithField("interface", r.iface).Warn("Fail to restore interface promiscuous mode")
 			}
 			r.promiscSet = false
 		}
@@ -184,7 +185,7 @@ func (r *Runtime) configurePromisc() error {
 		return fmt.Errorf("read promiscuous mode on %s: %w", r.iface, err)
 	}
 	if enabled {
-		logrus.WithField("interface", r.iface).Info("Interface promiscuous mode already enabled")
+		logs.App().WithField("interface", r.iface).Info("Interface promiscuous mode already enabled")
 		return nil
 	}
 
@@ -192,7 +193,7 @@ func (r *Runtime) configurePromisc() error {
 		return fmt.Errorf("enable promiscuous mode on %s: %w", r.iface, err)
 	}
 	r.promiscSet = true
-	logrus.WithField("interface", r.iface).Info("Enabled interface promiscuous mode")
+	logs.App().WithField("interface", r.iface).Info("Enabled interface promiscuous mode")
 	return nil
 }
 
@@ -205,13 +206,13 @@ func (r *Runtime) streamEvents(ctx context.Context, reader *ringbuf.Reader) {
 			if ctx.Err() != nil || err == ringbuf.ErrClosed {
 				return
 			}
-			logrus.WithError(err).Error("Fail to read dataplane event")
+			logs.App().WithError(err).Error("Fail to read dataplane event")
 			return
 		}
 
 		evt, err := decodeRuleEvent(record.RawSample)
 		if err != nil {
-			logrus.WithError(err).Error("Fail to decode dataplane event")
+			logs.App().WithError(err).Error("Fail to decode dataplane event")
 			continue
 		}
 
@@ -219,17 +220,7 @@ func (r *Runtime) streamEvents(ctx context.Context, reader *ringbuf.Reader) {
 		r.matchCounts[evt.RuleID]++
 		r.matchMu.Unlock()
 
-		logrus.WithFields(logrus.Fields{
-			"rule_id":   evt.RuleID,
-			"action":    actionName(evt.Action),
-			"sip":       ipv4String(evt.SIP),
-			"dip":       ipv4String(evt.DIP),
-			"sport":     evt.SPort,
-			"dport":     evt.DPort,
-			"proto":     evt.IPProto,
-			"pkt_conds": conditionNames(evt.PktConds),
-			"verdict":   evt.Verdict,
-		}).Info("Matched rule")
+		r.logMatchedRule(evt)
 	}
 }
 
@@ -244,11 +235,11 @@ func (r *Runtime) logKernelStats(ctx context.Context, interval time.Duration) {
 		case <-ticker.C:
 			stats, err := r.readKernelStats()
 			if err != nil {
-				logrus.WithError(err).Warn("Fail to read kernel stats")
+				logs.App().WithError(err).Warn("Fail to read kernel stats")
 				continue
 			}
 
-			logrus.WithFields(stats.fields()).Info("Reported kernel stats")
+			r.logKernelStatsSnapshot(stats)
 		}
 	}
 }
@@ -412,7 +403,7 @@ func (r *Runtime) resetMaps() error {
 }
 
 func (r *Runtime) logSnapshot(snapshot mapSnapshot) {
-	logrus.WithFields(logrus.Fields{
+	logs.App().WithFields(logrus.Fields{
 		"rules":              len(snapshot.ruleIndex),
 		"vlan_entries":       len(snapshot.vlanIndex),
 		"src_port_entries":   len(snapshot.srcPortIndex),
@@ -436,7 +427,7 @@ func (r *Runtime) logSnapshot(snapshot mapSnapshot) {
 
 	for _, slot := range slots {
 		meta := snapshot.ruleIndex[slot]
-		logrus.WithFields(logrus.Fields{
+		logs.App().WithFields(logrus.Fields{
 			"slot":          slot,
 			"rule_id":       meta.RuleId,
 			"action":        actionName(meta.Action),
@@ -459,7 +450,7 @@ func (r *Runtime) logU16MaskIndex(name string, index map[uint16]siderspMaskT) {
 	slices.Sort(keys)
 
 	if len(keys) == 0 {
-		logrus.WithFields(logrus.Fields{
+		logs.App().WithFields(logrus.Fields{
 			"index":   name,
 			"entries": "[]",
 		}).Debug("Updated dataplane index")
@@ -468,7 +459,7 @@ func (r *Runtime) logU16MaskIndex(name string, index map[uint16]siderspMaskT) {
 
 	for _, key := range keys {
 		mask := index[uint16(key)]
-		logrus.WithFields(logrus.Fields{
+		logs.App().WithFields(logrus.Fields{
 			"index": name,
 			"key":   key,
 			"slots": formatMaskSlots(mask),
@@ -496,7 +487,7 @@ func (r *Runtime) logPrefixMaskIndex(name string, index map[siderspIpv4LpmKey]si
 	})
 
 	if len(keys) == 0 {
-		logrus.WithFields(logrus.Fields{
+		logs.App().WithFields(logrus.Fields{
 			"index":   name,
 			"entries": "[]",
 		}).Debug("Updated dataplane index")
@@ -505,7 +496,7 @@ func (r *Runtime) logPrefixMaskIndex(name string, index map[siderspIpv4LpmKey]si
 
 	for _, key := range keys {
 		mask := index[key]
-		logrus.WithFields(logrus.Fields{
+		logs.App().WithFields(logrus.Fields{
 			"index":  name,
 			"prefix": formatLPMKey(key),
 			"slots":  formatMaskSlots(mask),
@@ -515,11 +506,29 @@ func (r *Runtime) logPrefixMaskIndex(name string, index map[siderspIpv4LpmKey]si
 }
 
 func (r *Runtime) logMask(name string, mask siderspMaskT) {
-	logrus.WithFields(logrus.Fields{
+	logs.App().WithFields(logrus.Fields{
 		"mask":  name,
 		"slots": formatMaskSlots(mask),
 		"bits":  formatMaskBits(mask),
 	}).Debug("Updated dataplane mask")
+}
+
+func (r *Runtime) logMatchedRule(evt ruleEvent) {
+	logs.Event().WithFields(logrus.Fields{
+		"rule_id":   evt.RuleID,
+		"action":    actionName(evt.Action),
+		"sip":       ipv4String(evt.SIP),
+		"dip":       ipv4String(evt.DIP),
+		"sport":     evt.SPort,
+		"dport":     evt.DPort,
+		"proto":     evt.IPProto,
+		"pkt_conds": conditionNames(evt.PktConds),
+		"verdict":   evt.Verdict,
+	}).Info("Matched rule")
+}
+
+func (r *Runtime) logKernelStatsSnapshot(stats kernelStats) {
+	logs.Stats().WithFields(stats.fields()).Info("Reported kernel stats")
 }
 
 func attachXDP(prog *ebpf.Program, opts Options) (link.Link, error) {

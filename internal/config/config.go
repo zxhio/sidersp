@@ -79,12 +79,18 @@ type AFXDPConfig struct {
 }
 
 type LoggingConfig struct {
+	App   LogChannelConfig `yaml:"app"`
+	Stats LogChannelConfig `yaml:"stats"`
+	Event LogChannelConfig `yaml:"event"`
+}
+
+type LogChannelConfig struct {
 	Level      string `yaml:"level"`
 	FilePath   string `yaml:"file_path"`
 	MaxSizeMB  int    `yaml:"max_size_mb"`
 	MaxBackups int    `yaml:"max_backups"`
 	MaxAgeDays int    `yaml:"max_age_days"`
-	Compress   bool   `yaml:"compress"`
+	Compress   *bool  `yaml:"compress"`
 }
 
 type ConsoleStatsConfig struct {
@@ -289,11 +295,30 @@ func (c EgressConfig) validate() error {
 }
 
 func (c *LoggingConfig) applyDefaults() {
+	c.App.applyDefaults("app", true)
+	c.Stats = c.resolveChannel(c.Stats, "stats", c.App)
+	c.Event = c.resolveChannel(c.Event, "event", c.App)
+}
+
+func (c LoggingConfig) validate() error {
+	if err := c.App.validate("app"); err != nil {
+		return err
+	}
+	if err := c.Stats.validate("stats"); err != nil {
+		return err
+	}
+	if err := c.Event.validate("event"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *LogChannelConfig) applyDefaults(channel string, fillDefaultPath bool) {
 	if strings.TrimSpace(c.Level) == "" {
 		c.Level = "info"
 	}
-	if strings.TrimSpace(c.FilePath) == "" {
-		c.FilePath = "/var/log/sidersp/sidersp.log"
+	if fillDefaultPath && strings.TrimSpace(c.FilePath) == "" {
+		c.FilePath = defaultLogFilePath(channel)
 	}
 	if c.MaxSizeMB == 0 {
 		c.MaxSizeMB = 100
@@ -304,25 +329,72 @@ func (c *LoggingConfig) applyDefaults() {
 	if c.MaxAgeDays == 0 {
 		c.MaxAgeDays = 30
 	}
+	if c.Compress == nil {
+		c.Compress = boolPtr(true)
+	}
 }
 
-func (c LoggingConfig) validate() error {
+func (c LogChannelConfig) validate(channel string) error {
 	if _, err := logrus.ParseLevel(c.Level); err != nil {
-		return fmt.Errorf("level %q is not valid", c.Level)
+		return fmt.Errorf("%s.level %q is not valid", channel, c.Level)
 	}
 	if strings.TrimSpace(c.FilePath) == "" {
-		return fmt.Errorf("file_path is required")
+		return fmt.Errorf("%s.file_path is required", channel)
 	}
 	if c.MaxSizeMB < 0 {
-		return fmt.Errorf("max_size_mb must be >= 0")
+		return fmt.Errorf("%s.max_size_mb must be >= 0", channel)
 	}
 	if c.MaxBackups < 0 {
-		return fmt.Errorf("max_backups must be >= 0")
+		return fmt.Errorf("%s.max_backups must be >= 0", channel)
 	}
 	if c.MaxAgeDays < 0 {
-		return fmt.Errorf("max_age_days must be >= 0")
+		return fmt.Errorf("%s.max_age_days must be >= 0", channel)
 	}
 	return nil
+}
+
+func (c LogChannelConfig) CompressEnabled() bool {
+	return c.Compress != nil && *c.Compress
+}
+
+func (c LogChannelConfig) hasAnyConfig() bool {
+	return strings.TrimSpace(c.Level) != "" ||
+		strings.TrimSpace(c.FilePath) != "" ||
+		c.MaxSizeMB != 0 ||
+		c.MaxBackups != 0 ||
+		c.MaxAgeDays != 0 ||
+		c.Compress != nil
+}
+
+func (c *LoggingConfig) resolveChannel(channel LogChannelConfig, name string, fallback LogChannelConfig) LogChannelConfig {
+	if !channel.hasAnyConfig() {
+		return cloneLogChannelConfig(fallback)
+	}
+	channel.applyDefaults(name, true)
+	return channel
+}
+
+func defaultLogFilePath(channel string) string {
+	switch channel {
+	case "stats":
+		return "/var/log/sidersp/sidersp.stats.log"
+	case "event":
+		return "/var/log/sidersp/sidersp.event.log"
+	default:
+		return "/var/log/sidersp/sidersp.log"
+	}
+}
+
+func boolPtr(value bool) *bool {
+	return &value
+}
+
+func cloneLogChannelConfig(src LogChannelConfig) LogChannelConfig {
+	out := src
+	if src.Compress != nil {
+		out.Compress = boolPtr(*src.Compress)
+	}
+	return out
 }
 
 func (c ConsoleConfig) ParsedStats() (ParsedConsoleStatsConfig, error) {

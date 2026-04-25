@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/sirupsen/logrus"
 
 	"sidersp/internal/controlplane"
+	"sidersp/internal/logs"
 	"sidersp/internal/rule"
 )
 
@@ -30,7 +30,9 @@ type RuleService interface {
 
 type LogService interface {
 	Level() string
+	Levels() logs.Levels
 	SetLevel(level string) (string, error)
+	SetLevels(levels logs.Levels) (logs.Levels, error)
 }
 
 type Server struct {
@@ -65,7 +67,7 @@ func (s *Server) Run(ctx context.Context) error {
 		close(errCh)
 	}()
 
-	logrus.WithField("listen_addr", s.addr).Info("Started console server")
+	logs.App().WithField("listen_addr", s.addr).Info("Started console server")
 
 	select {
 	case <-ctx.Done():
@@ -90,6 +92,8 @@ func (s *Server) newRouter() *gin.Engine {
 	v1.GET("/status", handler.getStatus)
 	v1.GET("/logging/level", handler.getLogLevel)
 	v1.PUT("/logging/level", handler.setLogLevel)
+	v1.GET("/logging/levels", handler.getLogLevels)
+	v1.PUT("/logging/levels", handler.setLogLevels)
 	v1.GET("/stats", handler.getStats)
 	v1.GET("/rules", handler.listRules)
 	v1.POST("/rules", handler.createRule)

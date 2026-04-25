@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/sirupsen/logrus"
 
 	"sidersp/internal/controlplane"
+	"sidersp/internal/logs"
 	"sidersp/internal/rule"
 )
 
@@ -31,6 +31,15 @@ func (h Handler) getLogLevel(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, dataEnvelope{Data: LogLevelResponse{Level: h.logService.Level()}})
+}
+
+func (h Handler) getLogLevels(c *gin.Context) {
+	if h.logService == nil {
+		writeError(c, http.StatusNotFound, "NOT_FOUND", "logging service not configured")
+		return
+	}
+
+	c.JSON(http.StatusOK, dataEnvelope{Data: newLogLevelsResponse(h.logService.Levels())})
 }
 
 func (h Handler) setLogLevel(c *gin.Context) {
@@ -54,6 +63,27 @@ func (h Handler) setLogLevel(c *gin.Context) {
 	c.JSON(http.StatusOK, dataEnvelope{Data: LogLevelResponse{Level: level}})
 }
 
+func (h Handler) setLogLevels(c *gin.Context) {
+	if h.logService == nil {
+		writeError(c, http.StatusNotFound, "NOT_FOUND", "logging service not configured")
+		return
+	}
+
+	var req LogLevelsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeError(c, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
+		return
+	}
+
+	levels, err := h.logService.SetLevels(newLogLevelsModel(req))
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
+		return
+	}
+
+	c.JSON(http.StatusOK, dataEnvelope{Data: newLogLevelsResponse(levels)})
+}
+
 func (h Handler) getStats(c *gin.Context) {
 	rangeSeconds, err := parseRangeSecondsQuery(c.Query("range_seconds"))
 	if err != nil {
@@ -63,7 +93,7 @@ func (h Handler) getStats(c *gin.Context) {
 
 	item, err := h.service.Stats(rangeSeconds)
 	if err != nil {
-		writeServiceError(c, err)
+		h.writeServiceError(c, err)
 		return
 	}
 
@@ -80,7 +110,7 @@ func (h Handler) listRules(c *gin.Context) {
 	all := h.service.ListRules()
 	counts, err := h.service.RuleMatchCounts()
 	if err != nil {
-		writeServiceError(c, err)
+		h.writeServiceError(c, err)
 		return
 	}
 	start := (page - 1) * pageSize
@@ -109,13 +139,13 @@ func (h Handler) getRule(c *gin.Context) {
 
 	item, err := h.service.GetRule(id)
 	if err != nil {
-		writeServiceError(c, err)
+		h.writeServiceError(c, err)
 		return
 	}
 
 	counts, err := h.service.RuleMatchCounts()
 	if err != nil {
-		writeServiceError(c, err)
+		h.writeServiceError(c, err)
 		return
 	}
 
@@ -131,13 +161,13 @@ func (h Handler) createRule(c *gin.Context) {
 
 	item, err := h.service.CreateRule(newRuleModel(req))
 	if err != nil {
-		writeServiceError(c, err)
+		h.writeServiceError(c, err)
 		return
 	}
 
 	counts, err := h.service.RuleMatchCounts()
 	if err != nil {
-		writeServiceError(c, err)
+		h.writeServiceError(c, err)
 		return
 	}
 
@@ -159,13 +189,13 @@ func (h Handler) updateRule(c *gin.Context) {
 
 	item, err := h.service.UpdateRule(id, newRuleModel(req))
 	if err != nil {
-		writeServiceError(c, err)
+		h.writeServiceError(c, err)
 		return
 	}
 
 	counts, err := h.service.RuleMatchCounts()
 	if err != nil {
-		writeServiceError(c, err)
+		h.writeServiceError(c, err)
 		return
 	}
 
@@ -180,7 +210,7 @@ func (h Handler) deleteRule(c *gin.Context) {
 	}
 
 	if err := h.service.DeleteRule(id); err != nil {
-		writeServiceError(c, err)
+		h.writeServiceError(c, err)
 		return
 	}
 
@@ -204,20 +234,20 @@ func (h Handler) setRuleEnabled(c *gin.Context, enabled bool) {
 
 	item, err := h.service.SetRuleEnabled(id, enabled)
 	if err != nil {
-		writeServiceError(c, err)
+		h.writeServiceError(c, err)
 		return
 	}
 
 	counts, err := h.service.RuleMatchCounts()
 	if err != nil {
-		writeServiceError(c, err)
+		h.writeServiceError(c, err)
 		return
 	}
 
 	c.JSON(http.StatusOK, dataEnvelope{Data: newRuleBody(item, counts[item.ID])})
 }
 
-func writeServiceError(c *gin.Context, err error) {
+func (h Handler) writeServiceError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, controlplane.ErrRuleNotFound):
 		writeError(c, http.StatusNotFound, "NOT_FOUND", "rule not found")
@@ -228,7 +258,7 @@ func writeServiceError(c *gin.Context, err error) {
 	case errors.Is(err, controlplane.ErrStatsRangeInvalid):
 		writeError(c, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
 	default:
-		logrus.WithError(err).Error("Console request failed")
+		logs.App().WithError(err).Error("Fail to handle console request")
 		writeError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "internal error")
 	}
 }
@@ -428,6 +458,22 @@ func intPtr(v int) *int {
 
 func uint64Ptr(v uint64) *uint64 {
 	return &v
+}
+
+func newLogLevelsModel(req LogLevelsRequest) logs.Levels {
+	return logs.Levels{
+		App:   req.App,
+		Stats: req.Stats,
+		Event: req.Event,
+	}
+}
+
+func newLogLevelsResponse(levels logs.Levels) LogLevelsResponse {
+	return LogLevelsResponse{
+		App:   levels.App,
+		Stats: levels.Stats,
+		Event: levels.Event,
+	}
 }
 
 func newRuleBodies(items []rule.Rule, counts map[int]uint64) []RuleBody {

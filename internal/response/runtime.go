@@ -7,6 +7,8 @@ import (
 	"net"
 
 	"github.com/sirupsen/logrus"
+
+	"sidersp/internal/logs"
 )
 
 type XSKBackend interface {
@@ -153,7 +155,7 @@ func (r *Runtime) Run(ctx context.Context) error {
 	}
 	defer r.Close()
 
-	logrus.WithFields(logrus.Fields{
+	logs.App().WithFields(logrus.Fields{
 		"ifindex":          r.ifindex,
 		"queues":           r.queues,
 		"sender_mode":      r.senderMode,

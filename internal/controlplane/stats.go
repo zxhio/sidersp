@@ -5,9 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/sirupsen/logrus"
-
 	"sidersp/internal/config"
+	"sidersp/internal/logs"
 	"sidersp/internal/model"
 	"sidersp/internal/rule"
 )
@@ -394,7 +393,7 @@ func (r *Runtime) runStatsCollector(ctx context.Context) {
 func (r *Runtime) collectStats(now time.Time) {
 	dpStats, err := r.stats.ReadStats()
 	if err != nil {
-		logrus.WithError(err).Warn("Fail to collect stats")
+		logs.App().WithError(err).Warn("Fail to collect stats")
 		return
 	}
 

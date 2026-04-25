@@ -1,8 +1,13 @@
 package response
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"sidersp/internal/config"
+	"sidersp/internal/logs"
 )
 
 func TestResultBufferRecordsInOrder(t *testing.T) {
@@ -205,6 +210,39 @@ func TestResponseActionName(t *testing.T) {
 	}
 }
 
+func TestResultBufferFailedResultLogsToAppChannel(t *testing.T) {
+	manager, paths := newResultLogsManager(t)
+	logs.SetDefaultManager(manager)
+	t.Cleanup(func() {
+		logs.ResetDefaultManager()
+		_ = manager.Close()
+	})
+
+	buffer := newTestResultBuffer(t, 1)
+	recordTestResult(t, buffer, ResponseResult{
+		TimestampNS: 1,
+		RuleID:      1001,
+		Action:      "tcp_syn_ack",
+		Result:      ResultFailed,
+		RXQueue:     0,
+		Error:       "send failed",
+	})
+
+	appData := readResultLogFile(t, paths[logs.ChannelApp])
+	statsData := readResultLogFile(t, paths[logs.ChannelStats])
+	eventData := readResultLogFile(t, paths[logs.ChannelEvent])
+
+	if !strings.Contains(appData, "Fail to execute response") {
+		t.Fatalf("app log = %q, want response failure", appData)
+	}
+	if strings.Contains(statsData, "Fail to execute response") {
+		t.Fatalf("stats log = %q, want no response failure", statsData)
+	}
+	if strings.Contains(eventData, "Fail to execute response") {
+		t.Fatalf("event log = %q, want no response failure", eventData)
+	}
+}
+
 func newTestResultBuffer(t testing.TB, capacity int) *ResultBuffer {
 	t.Helper()
 
@@ -221,4 +259,60 @@ func recordTestResult(t testing.TB, buffer *ResultBuffer, result ResponseResult)
 	if err := buffer.Record(result); err != nil {
 		t.Fatalf("Record() error = %v", err)
 	}
+}
+
+func newResultLogsManager(t testing.TB) (*logs.Manager, map[string]string) {
+	t.Helper()
+
+	dir := t.TempDir()
+	paths := map[string]string{
+		logs.ChannelApp:   filepath.Join(dir, "sidersp.log"),
+		logs.ChannelStats: filepath.Join(dir, "sidersp.stats.log"),
+		logs.ChannelEvent: filepath.Join(dir, "sidersp.event.log"),
+	}
+
+	manager, err := logs.NewManager(config.LoggingConfig{
+		App: config.LogChannelConfig{
+			Level:      "info",
+			FilePath:   paths[logs.ChannelApp],
+			MaxSizeMB:  10,
+			MaxBackups: 1,
+			MaxAgeDays: 1,
+			Compress:   resultBool(false),
+		},
+		Stats: config.LogChannelConfig{
+			Level:      "info",
+			FilePath:   paths[logs.ChannelStats],
+			MaxSizeMB:  10,
+			MaxBackups: 1,
+			MaxAgeDays: 1,
+			Compress:   resultBool(false),
+		},
+		Event: config.LogChannelConfig{
+			Level:      "info",
+			FilePath:   paths[logs.ChannelEvent],
+			MaxSizeMB:  10,
+			MaxBackups: 1,
+			MaxAgeDays: 1,
+			Compress:   resultBool(false),
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+	return manager, paths
+}
+
+func readResultLogFile(t testing.TB, path string) string {
+	t.Helper()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read log file %s: %v", path, err)
+	}
+	return string(data)
+}
+
+func resultBool(value bool) *bool {
+	return &value
 }

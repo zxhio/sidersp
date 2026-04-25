@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"sidersp/internal/controlplane"
+	"sidersp/internal/logs"
 	"sidersp/internal/rule"
 )
 
@@ -112,6 +113,51 @@ func mapsClone(src map[int]uint64) map[int]uint64 {
 	return out
 }
 
+type stubLogService struct {
+	levels logs.Levels
+}
+
+func (s *stubLogService) Level() string {
+	return s.levels.App
+}
+
+func (s *stubLogService) Levels() logs.Levels {
+	return s.levels
+}
+
+func (s *stubLogService) SetLevel(level string) (string, error) {
+	s.levels.App = level
+	return level, nil
+}
+
+func (s *stubLogService) SetLevels(levels logs.Levels) (logs.Levels, error) {
+	for _, item := range []struct {
+		name  string
+		level string
+	}{
+		{name: "app", level: levels.App},
+		{name: "stats", level: levels.Stats},
+		{name: "event", level: levels.Event},
+	} {
+		switch item.level {
+		case "debug", "info", "warn", "error":
+		default:
+			return logs.Levels{}, &testValidationError{message: item.name + ": invalid level"}
+		}
+	}
+
+	s.levels = levels
+	return s.levels, nil
+}
+
+type testValidationError struct {
+	message string
+}
+
+func (e *testValidationError) Error() string {
+	return e.message
+}
+
 func TestGetStatus(t *testing.T) {
 	t.Parallel()
 
@@ -144,6 +190,114 @@ func TestGetStatus(t *testing.T) {
 	}
 	if body.Data.Enabled != 1 || body.Data.TotalRules != 13 {
 		t.Fatalf("status body = %+v, want rule counts", body.Data)
+	}
+}
+
+func TestGetLogLevels(t *testing.T) {
+	t.Parallel()
+
+	server := NewServer("127.0.0.1:0", &stubService{}, &stubLogService{
+		levels: logs.Levels{App: "info", Stats: "warn", Event: "debug"},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/logging/levels", nil)
+	rec := httptest.NewRecorder()
+	server.newRouter().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var body struct {
+		Data LogLevelsResponse `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if body.Data.App != "info" || body.Data.Stats != "warn" || body.Data.Event != "debug" {
+		t.Fatalf("log levels = %+v, want info/warn/debug", body.Data)
+	}
+}
+
+func TestSetLogLevels(t *testing.T) {
+	t.Parallel()
+
+	logService := &stubLogService{
+		levels: logs.Levels{App: "info", Stats: "info", Event: "info"},
+	}
+	server := NewServer("127.0.0.1:0", &stubService{}, logService)
+
+	body := []byte(`{"app":"debug","stats":"warn","event":"error"}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/logging/levels", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.newRouter().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var payload struct {
+		Data LogLevelsResponse `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if payload.Data.App != "debug" || payload.Data.Stats != "warn" || payload.Data.Event != "error" {
+		t.Fatalf("response levels = %+v, want debug/warn/error", payload.Data)
+	}
+	if logService.levels.App != "debug" || logService.levels.Stats != "warn" || logService.levels.Event != "error" {
+		t.Fatalf("service levels = %+v, want debug/warn/error", logService.levels)
+	}
+}
+
+func TestLegacySetLogLevelOnlyChangesAppChannel(t *testing.T) {
+	t.Parallel()
+
+	logService := &stubLogService{
+		levels: logs.Levels{App: "info", Stats: "warn", Event: "debug"},
+	}
+	server := NewServer("127.0.0.1:0", &stubService{}, logService)
+
+	body := []byte(`{"level":"error"}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/logging/level", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.newRouter().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if logService.levels.App != "error" || logService.levels.Stats != "warn" || logService.levels.Event != "debug" {
+		t.Fatalf("service levels = %+v, want app=error stats=warn event=debug", logService.levels)
+	}
+}
+
+func TestSetLogLevelsValidationFailed(t *testing.T) {
+	t.Parallel()
+
+	server := NewServer("127.0.0.1:0", &stubService{}, &stubLogService{})
+
+	body := []byte(`{"app":"debug","stats":"bad","event":"info"}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/logging/levels", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.newRouter().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+
+	var payload struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if payload.Error.Code != "VALIDATION_FAILED" {
+		t.Fatalf("error code = %q, want VALIDATION_FAILED", payload.Error.Code)
 	}
 }
 

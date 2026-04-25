@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+
+	"sidersp/internal/logs"
 )
 
 type ResultStatus string
@@ -129,7 +131,7 @@ func isResponseAction(action string) bool {
 }
 
 func logResult(result ResponseResult) {
-	if result.Result != ResultFailed && !logrus.IsLevelEnabled(logrus.DebugLevel) {
+	if result.Result != ResultFailed && !logs.App().IsLevelEnabled(logrus.DebugLevel) {
 		return
 	}
 
@@ -147,8 +149,8 @@ func logResult(result ResponseResult) {
 		"error_text": result.Error,
 	}
 	if result.Result == ResultFailed {
-		logrus.WithFields(fields).Warn("Fail to execute response")
+		logs.App().WithFields(fields).Warn("Fail to execute response")
 		return
 	}
-	logrus.WithFields(fields).Debug("Recorded response result")
+	logs.App().WithFields(fields).Debug("Recorded response result")
 }

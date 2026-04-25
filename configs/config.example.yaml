@@ -37,12 +37,27 @@ response:
       tcp_seq: 1
 
 logging:
-  level: info
-  file_path: /var/log/sidersp/sidersp.log
-  max_size_mb: 100
-  max_backups: 7
-  max_age_days: 30
-  compress: true
+  app:
+    level: info
+    file_path: /var/log/sidersp/sidersp.log
+    max_size_mb: 100
+    max_backups: 7
+    max_age_days: 30
+    compress: true
+  stats:
+    level: info
+    file_path: /var/log/sidersp/sidersp.stats.log
+    max_size_mb: 100
+    max_backups: 7
+    max_age_days: 30
+    compress: true
+  event:
+    level: info
+    file_path: /var/log/sidersp/sidersp.event.log
+    max_size_mb: 100
+    max_backups: 7
+    max_age_days: 30
+    compress: true
 
 console:
   listen_addr: 127.0.0.1:8080
