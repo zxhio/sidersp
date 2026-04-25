@@ -68,10 +68,9 @@ export async function disableRule(id) {
   return res.data
 }
 
-export async function getStats(window = '', more = false) {
+export async function getStats(window = '') {
   const params = new URLSearchParams()
   if (window) params.set('window', window)
-  if (more) params.set('more', '1')
   const query = params.toString() ? `?${params.toString()}` : ''
   const res = await request(`/stats${query}`)
   return res.data

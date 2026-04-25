@@ -2,46 +2,41 @@ import { useState, useEffect, useCallback } from 'react'
 import { getStats, getStatsWindows } from '../api'
 import Sparkline from '../components/Sparkline'
 
-const PRIMARY_METRICS = [
-  { key: 'rx_packets',      label: '收包数',     color: '#6366f1' },
-  { key: 'parse_failed',    label: '解析失败',   color: '#ef4444' },
-  { key: 'rule_candidates', label: '匹配数量',   color: '#f59e0b' },
-  { key: 'matched_rules',   label: '规则命中',   color: '#10b981' },
-]
-
-const EXTENDED_METRICS = [
-  { key: 'ringbuf_dropped', label: '缓冲区丢弃', color: '#8b5cf6' },
-  { key: 'xdp_tx',          label: '网口直发', color: '#0ea5e9' },
-  { key: 'tx_failed',       label: '网口直发失败', color: '#dc2626' },
-  { key: 'redirect_tx',     label: '转发网口发送', color: '#14b8a6' },
-  { key: 'redirect_failed', label: '转发网口失败', color: '#ea580c' },
-  { key: 'xsk_tx',          label: '转发到响应模块', color: '#64748b' },
-  { key: 'xsk_failed',      label: '转发到响应模块失败', color: '#be123c' },
-  { key: 'fib_lookup_failed', label: '路由查询失败', color: '#9333ea' },
-]
-
 const DEFAULT_WINDOWS = ['10min']
 
-function computeDeltas(points, key) {
-  if (!points || points.length < 1) return { deltas: [], timestamps: [] }
-  if (points.length === 1) return { deltas: [points[0][key]], timestamps: [points[0].timestamp] }
-  const deltas = []
-  const timestamps = []
-  for (let i = 1; i < points.length; i++) {
-    const diff = points[i][key] - points[i - 1][key]
-    deltas.push(diff)
-    timestamps.push(points[i].timestamp)
-  }
-  return { deltas, timestamps }
+const ROLE_COLORS = {
+  traffic: '#2563eb',
+  success: '#16a34a',
+  failure: '#dc2626',
 }
 
-function extractValues(points, key) {
+const METRIC_COLORS = {
+  parse_failed: '#ef4444',
+  ringbuf_dropped: '#8b5cf6',
+  xdp_tx: '#0ea5e9',
+  tx_failed: '#dc2626',
+  xsk_tx: '#64748b',
+  xsk_failed: '#be123c',
+  xsk_meta_failed: '#991b1b',
+  xsk_redirect_failed: '#c2410c',
+  redirect_tx: '#14b8a6',
+  redirect_failed: '#ea580c',
+  fib_lookup_failed: '#9333ea',
+}
+
+const ROLE_LABELS = {
+  traffic: '流量',
+  success: '成功',
+  failure: '失败',
+}
+
+function computeMetricDeltas(points) {
   if (!points || points.length < 1) return { deltas: [], timestamps: [] }
-  if (points.length === 1) return { deltas: [points[0][key]], timestamps: [points[0].timestamp] }
+  if (points.length === 1) return { deltas: [points[0].value], timestamps: [points[0].timestamp] }
   const deltas = []
   const timestamps = []
   for (let i = 1; i < points.length; i++) {
-    deltas.push(points[i][key])
+    deltas.push(points[i].value - points[i - 1].value)
     timestamps.push(points[i].timestamp)
   }
   return { deltas, timestamps }
@@ -55,34 +50,71 @@ function formatTimestamp(iso) {
   return `${h}:${m}:${s}`
 }
 
+function formatValue(n) {
+  return typeof n === 'number' ? n.toLocaleString() : '-'
+}
+
+function metricColor(metric) {
+  return METRIC_COLORS[metric.key] || ROLE_COLORS[metric.role] || '#64748b'
+}
+
+function roleClass(role) {
+  switch (role) {
+    case 'failure':
+      return 'tag-danger'
+    case 'success':
+      return 'tag-success'
+    default:
+      return 'tag-disabled'
+  }
+}
+
+function findStageHistory(stageHistories, stageKey) {
+  return stageHistories.find(stage => stage.key === stageKey) || null
+}
+
+function findMetricHistory(stageHistory, metricKey) {
+  if (!stageHistory || !Array.isArray(stageHistory.metrics)) return null
+  return stageHistory.metrics.find(metric => metric.key === metricKey) || null
+}
+
+function stageHeadline(overview, stages) {
+  if (!overview?.primary_issue_stage) return '无明显异常'
+  const stage = stages.find(item => item.key === overview.primary_issue_stage)
+  return stage ? stage.title : overview.primary_issue_stage
+}
+
 export default function StatsPage() {
   const [stats, setStats] = useState(null)
   const [error, setError] = useState('')
   const [window, setWindow] = useState('')
   const [windows, setWindows] = useState(DEFAULT_WINDOWS)
-  const [showMoreMetrics, setShowMoreMetrics] = useState(false)
 
   useEffect(() => {
     getStatsWindows()
-      .then(data => { if (Array.isArray(data) && data.length > 0) setWindows(data) })
+      .then(data => {
+        if (Array.isArray(data) && data.length > 0) setWindows(data)
+      })
       .catch(() => {})
   }, [])
 
-  const load = useCallback((w, more) => {
+  const load = useCallback((w) => {
     setError('')
-    getStats(w, more)
+    getStats(w)
       .then(setStats)
       .catch(err => setError(err.message))
   }, [])
 
-  useEffect(() => { load(window, showMoreMetrics) }, [load, window, showMoreMetrics])
+  useEffect(() => {
+    load(window)
+  }, [load, window])
 
   if (error) {
     return (
       <>
         <div className="page-header">
           <h1>统计信息</h1>
-          <p>数据面流量统计与增量趋势</p>
+          <p>按排查阶段查看数据面诊断状态与趋势</p>
         </div>
         <div className="page-body">
           <div className="error-block">加载失败：{error}</div>
@@ -96,42 +128,53 @@ export default function StatsPage() {
       <>
         <div className="page-header">
           <h1>统计信息</h1>
-          <p>数据面流量统计与增量趋势</p>
+          <p>按排查阶段查看数据面诊断状态与趋势</p>
         </div>
         <div className="page-body"><div className="loading">加载中...</div></div>
       </>
     )
   }
 
-  const histories = stats.histories || []
-  const series = histories.length > 0 ? histories[0] : null
-  const points = series?.points || []
-  const hasHistory = points.length >= 1
-
-  const activeWindow = window || (series?.name || '')
-  const toggleLabel = showMoreMetrics ? '收起更多' : '展示更多'
-  const hasMoreStats = showMoreMetrics && stats.ringbuf_dropped !== undefined
+  const overview = stats.overview || {}
+  const stages = Array.isArray(stats.stages) ? stats.stages : []
+  const historySeries = Array.isArray(stats.stage_histories) && stats.stage_histories.length > 0 ? stats.stage_histories[0] : null
+  const historyStages = historySeries?.stages || []
+  const activeWindow = window || historySeries?.name || ''
 
   return (
     <>
       <div className="page-header">
         <h1>统计信息</h1>
-        <p>数据面流量统计与增量趋势</p>
+        <p>按排查阶段查看数据面诊断状态与趋势</p>
       </div>
       <div className="page-body">
-        {/* Current values */}
-        <div className="status-cards" style={{ marginBottom: 24 }}>
-          {PRIMARY_METRICS.map(m => (
-            <div className="status-card" key={m.key}>
-              <div className="status-card-label">{m.label}</div>
-              <div className="status-card-value" style={{ fontSize: 20 }}>
-                {formatValue(stats[m.key])}
-              </div>
+        <div className="status-cards diagnostic-overview" style={{ marginBottom: 24 }}>
+          <div className="status-card">
+            <div className="status-card-label">总收包</div>
+            <div className="status-card-value" style={{ fontSize: 20 }}>
+              {formatValue(overview.rx_packets ?? stats.rx_packets)}
             </div>
-          ))}
+          </div>
+          <div className="status-card">
+            <div className="status-card-label">规则启用</div>
+            <div className="status-card-value" style={{ fontSize: 20 }}>
+              {`${formatValue(overview.enabled_rules ?? stats.enabled_rules)}/${formatValue(overview.total_rules ?? stats.total_rules)}`}
+            </div>
+          </div>
+          <div className="status-card">
+            <div className="status-card-label">规则命中</div>
+            <div className="status-card-value" style={{ fontSize: 20 }}>
+              {formatValue(overview.matched_rules ?? stats.matched_rules)}
+            </div>
+          </div>
+          <div className="status-card">
+            <div className="status-card-label">当前重点排查</div>
+            <div className="status-card-value" style={{ fontSize: 20 }}>
+              {stageHeadline(overview, stages)}
+            </div>
+          </div>
         </div>
 
-        {/* Window selector */}
         <div className="window-selector">
           {windows.map(w => (
             <button
@@ -144,121 +187,61 @@ export default function StatsPage() {
           ))}
         </div>
 
-        {/* Charts from history */}
-        {hasHistory ? (
-          <>
-            {PRIMARY_METRICS.map(m => {
-              const { deltas, timestamps } = computeDeltas(points, m.key)
-              if (deltas.length < 1) return null
-              return (
-                <div className="section" key={m.key}>
-                  <div className="section-title">{m.label}（增量/采样间隔）</div>
-                  <div className="chart-container">
-                    <Sparkline
-                      data={deltas}
-                      color={m.color}
-                      labels={timestamps.map(formatTimestamp)}
-                    />
+        <div className="diagnostic-stage-list">
+          {stages.map(stage => {
+            const stageHistory = findStageHistory(historyStages, stage.key)
+            return (
+              <section className="diagnostic-stage" key={stage.key}>
+                <div className="diagnostic-stage-head">
+                  <div>
+                    <h2 className="diagnostic-stage-title">{stage.title}</h2>
+                    <p className="diagnostic-stage-summary">{stage.summary}</p>
                   </div>
+                  <span className="tag tag-disabled">{stage.key}</span>
                 </div>
-              )
-            })}
-            <div className="stats-toggle">
-              <button
-                className="btn btn-sm stats-toggle-btn"
-                onClick={() => setShowMoreMetrics(show => !show)}
-              >
-                {toggleLabel}
-              </button>
-            </div>
-            {showMoreMetrics && hasMoreStats && (
-              <>
-                <div className="section">
-                  <div className="section-title">更多统计</div>
-                  <div className="status-cards">
-                    {EXTENDED_METRICS.map(m => (
-                      <div className="status-card" key={m.key}>
-                        <div className="status-card-label">{m.label}</div>
-                        <div className="status-card-value" style={{ fontSize: 20 }}>
-                          {formatValue(stats[m.key])}
-                        </div>
+
+                <div className="diagnostic-metrics">
+                  {stage.metrics.map(metric => (
+                    <div className="diagnostic-metric-card" key={metric.key}>
+                      <div className="diagnostic-metric-head">
+                        <div className="diagnostic-metric-label">{metric.label}</div>
+                        <span className={`tag ${roleClass(metric.role)}`}>
+                          {ROLE_LABELS[metric.role] || metric.role}
+                        </span>
                       </div>
-                    ))}
-                  </div>
-                </div>
-                {EXTENDED_METRICS.map(m => {
-                  const { deltas, timestamps } = computeDeltas(points, m.key)
-                  if (deltas.length < 1) return null
-                  return (
-                    <div className="section" key={m.key}>
-                      <div className="section-title">{m.label}（增量/采样间隔）</div>
-                      <div className="chart-container">
-                        <Sparkline
-                          data={deltas}
-                          color={m.color}
-                          labels={timestamps.map(formatTimestamp)}
-                        />
-                      </div>
-                    </div>
-                  )
-                })}
-              </>
-            )}
-            {showMoreMetrics && !hasMoreStats && (
-              <div className="section">
-                <div className="section-title">更多统计</div>
-                <div style={{ color: 'var(--c-text-placeholder)', fontSize: 13, padding: '16px 0' }}>
-                  加载中...
-                </div>
-              </div>
-            )}
-          </>
-        ) : (
-          <>
-            <div className="stats-toggle">
-              <button
-                className="btn btn-sm stats-toggle-btn"
-                onClick={() => setShowMoreMetrics(show => !show)}
-              >
-                {toggleLabel}
-              </button>
-            </div>
-            {showMoreMetrics && hasMoreStats && (
-              <div className="section">
-                <div className="section-title">更多统计</div>
-                <div className="status-cards">
-                  {EXTENDED_METRICS.map(m => (
-                    <div className="status-card" key={m.key}>
-                      <div className="status-card-label">{m.label}</div>
-                      <div className="status-card-value" style={{ fontSize: 20 }}>
-                        {formatValue(stats[m.key])}
-                      </div>
+                      <div className="diagnostic-metric-value">{formatValue(metric.value)}</div>
+                      <div className="diagnostic-metric-desc">{metric.description}</div>
                     </div>
                   ))}
                 </div>
-              </div>
-            )}
-            {showMoreMetrics && !hasMoreStats && (
-              <div className="section">
-                <div className="section-title">更多统计</div>
-                <div style={{ color: 'var(--c-text-placeholder)', fontSize: 13, padding: '16px 0' }}>
-                  加载中...
+
+                <div className="diagnostic-history-grid">
+                  {stage.metrics.map(metric => {
+                    const history = findMetricHistory(stageHistory, metric.key)
+                    const { deltas, timestamps } = computeMetricDeltas(history?.points || [])
+                    if (deltas.length < 1) return null
+                    return (
+                      <div className="section" key={`${stage.key}-${metric.key}`}>
+                        <div className="section-title">{metric.label}（增量/采样间隔）</div>
+                        <div className="chart-container">
+                          <Sparkline
+                            data={deltas}
+                            color={metricColor(metric)}
+                            labels={timestamps.map(formatTimestamp)}
+                          />
+                        </div>
+                      </div>
+                    )
+                  })}
+                  {!stageHistory && (
+                    <div className="diagnostic-empty">暂无该阶段历史数据</div>
+                  )}
                 </div>
-              </div>
-            )}
-            <div className="section">
-              <div className="section-title">趋势图</div>
-              <div style={{ color: 'var(--c-text-placeholder)', fontSize: 13, padding: '16px 0' }}>
-                暂无历史数据
-              </div>
-            </div>
-          </>
-        )}
+              </section>
+            )
+          })}
+        </div>
       </div>
     </>
   )
-}
-
-function formatValue(n) {
-  return n.toLocaleString()
 }

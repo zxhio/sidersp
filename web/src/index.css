@@ -679,6 +679,106 @@ tr:last-child td {
   display: flex;
   gap: 8px;
   margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.diagnostic-stage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.diagnostic-stage {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  padding: 18px;
+  box-shadow: var(--c-shadow);
+}
+
+.diagnostic-stage-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+
+.diagnostic-stage-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--c-text);
+  margin-bottom: 4px;
+}
+
+.diagnostic-stage-summary {
+  font-size: 13px;
+  color: var(--c-text-secondary);
+  max-width: 720px;
+}
+
+.diagnostic-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.diagnostic-metric-card {
+  background: var(--c-bg);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  padding: 14px;
+}
+
+.diagnostic-metric-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: flex-start;
+  margin-bottom: 8px;
+}
+
+.diagnostic-metric-label {
+  font-size: 13px;
+  color: var(--c-text-secondary);
+}
+
+.diagnostic-metric-value {
+  font-size: 24px;
+  line-height: 1.2;
+  font-weight: 600;
+  color: var(--c-text);
+  margin-bottom: 6px;
+}
+
+.diagnostic-metric-desc {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--c-text-secondary);
+}
+
+.diagnostic-history-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.diagnostic-history-grid .section {
+  margin-bottom: 0;
+}
+
+.diagnostic-history-grid .section-title {
+  margin-bottom: 10px;
+}
+
+.diagnostic-empty {
+  border: 1px dashed var(--c-border);
+  border-radius: var(--radius);
+  padding: 20px 16px;
+  font-size: 13px;
+  color: var(--c-text-placeholder);
+  background: var(--c-bg);
 }
 
 /* ===== Delete Confirm Dialog ===== */
@@ -723,6 +823,9 @@ tr:last-child td {
   }
   .page-body {
     padding: 16px;
+  }
+  .diagnostic-stage-head {
+    flex-direction: column;
   }
   .form-row {
     grid-template-columns: 1fr;
