@@ -265,6 +265,13 @@ func TestGetStats(t *testing.T) {
 	service := &stubService{
 		statsByKey: map[string]controlplane.Stats{
 			"1d": {
+				Overview: controlplane.StatsOverview{
+					TotalRules:        2,
+					EnabledRules:      1,
+					RXPackets:         100,
+					MatchedRules:      8,
+					PrimaryIssueStage: "parse",
+				},
 				TotalRules:     2,
 				EnabledRules:   1,
 				RXPackets:      100,
@@ -272,6 +279,17 @@ func TestGetStats(t *testing.T) {
 				RuleCandidates: 20,
 				MatchedRules:   8,
 				RingbufDropped: 1,
+				Stages: []controlplane.DiagnosticStage{
+					{
+						Key:              "parse",
+						Title:            "解析",
+						Summary:          "解析头部和协议字段。",
+						PrimaryMetricKey: "parse_failed",
+						Metrics: []controlplane.DiagnosticMetric{
+							{Key: "parse_failed", Label: "解析失败", Description: "报文格式不支持或头部不完整。", Role: "failure", Value: 3},
+						},
+					},
+				},
 				Histories: []controlplane.StatsHistorySeries{
 					{
 						Name:   "10min",
@@ -286,6 +304,32 @@ func TestGetStats(t *testing.T) {
 								RuleCandidates: 18,
 								MatchedRules:   7,
 								RingbufDropped: 1,
+							},
+						},
+					},
+				},
+				StageHistories: []controlplane.DiagnosticHistorySeries{
+					{
+						Name:   "10min",
+						Window: "10m",
+						Step:   "10s",
+						Stages: []controlplane.DiagnosticStageHistory{
+							{
+								Key:              "parse",
+								Title:            "解析",
+								Summary:          "解析头部和协议字段。",
+								PrimaryMetricKey: "parse_failed",
+								Metrics: []controlplane.DiagnosticMetricHistory{
+									{
+										Key:         "parse_failed",
+										Label:       "解析失败",
+										Description: "报文格式不支持或头部不完整。",
+										Role:        "failure",
+										Points: []controlplane.MetricPoint{
+											{Value: 2},
+										},
+									},
+								},
 							},
 						},
 					},
@@ -312,8 +356,14 @@ func TestGetStats(t *testing.T) {
 	if body.Data.RXPackets != 100 {
 		t.Fatalf("stats = %+v, want rx_packets=100", body.Data)
 	}
-	if body.Data.EnabledRules != nil || body.Data.RingbufDropped != nil {
-		t.Fatalf("stats = %+v, want compact response without more-only fields", body.Data)
+	if body.Data.Overview.TotalRules != 2 || body.Data.Overview.PrimaryIssueStage != "parse" {
+		t.Fatalf("overview = %+v, want total_rules=2 primary_issue_stage=parse", body.Data.Overview)
+	}
+	if len(body.Data.Stages) != 1 || body.Data.Stages[0].Key != "parse" {
+		t.Fatalf("stages = %+v, want parse stage", body.Data.Stages)
+	}
+	if body.Data.EnabledRules == nil || *body.Data.EnabledRules != 1 || body.Data.RingbufDropped == nil || *body.Data.RingbufDropped != 1 {
+		t.Fatalf("stats = %+v, want legacy fields populated", body.Data)
 	}
 	if service.lastWindow != "1d" {
 		t.Fatalf("window = %q, want 1d", service.lastWindow)
@@ -321,8 +371,11 @@ func TestGetStats(t *testing.T) {
 	if len(body.Data.Histories) != 1 {
 		t.Fatalf("histories len = %d, want 1", len(body.Data.Histories))
 	}
-	if body.Data.Histories[0].Points[0].TotalRules != nil || body.Data.Histories[0].Points[0].RingbufDropped != nil {
-		t.Fatalf("point = %+v, want compact history response", body.Data.Histories[0].Points[0])
+	if len(body.Data.StageHistories) != 1 || len(body.Data.StageHistories[0].Stages) != 1 {
+		t.Fatalf("stage histories = %+v, want one parse stage history", body.Data.StageHistories)
+	}
+	if body.Data.Histories[0].Points[0].TotalRules == nil || *body.Data.Histories[0].Points[0].TotalRules != 2 {
+		t.Fatalf("point = %+v, want legacy totals in history response", body.Data.Histories[0].Points[0])
 	}
 }
 
@@ -332,20 +385,43 @@ func TestGetStatsVerbose(t *testing.T) {
 	server := NewServer("127.0.0.1:0", &stubService{
 		statsByKey: map[string]controlplane.Stats{
 			"1d": {
-				TotalRules:      2,
-				EnabledRules:    1,
-				RXPackets:       100,
-				ParseFailed:     3,
-				RuleCandidates:  20,
-				MatchedRules:    8,
-				RingbufDropped:  1,
-				XDPTX:           2,
-				XskTX:           3,
-				TXFailed:        4,
-				XskFailed:       5,
-				RedirectTX:      6,
-				RedirectFailed:  7,
-				FibLookupFailed: 8,
+				Overview: controlplane.StatsOverview{
+					TotalRules:        2,
+					EnabledRules:      1,
+					RXPackets:         100,
+					MatchedRules:      8,
+					PrimaryIssueStage: "xsk_redirect",
+				},
+				TotalRules:        2,
+				EnabledRules:      1,
+				RXPackets:         100,
+				ParseFailed:       3,
+				RuleCandidates:    20,
+				MatchedRules:      8,
+				RingbufDropped:    1,
+				XDPTX:             2,
+				XskTX:             3,
+				TXFailed:          4,
+				XskFailed:         5,
+				XskMetaFailed:     9,
+				XskRedirectFailed: 10,
+				RedirectTX:        6,
+				RedirectFailed:    7,
+				FibLookupFailed:   8,
+				Stages: []controlplane.DiagnosticStage{
+					{
+						Key:              "xsk_redirect",
+						Title:            "响应重定向",
+						Summary:          "把原始报文重定向到 XSK。",
+						PrimaryMetricKey: "xsk_tx",
+						Metrics: []controlplane.DiagnosticMetric{
+							{Key: "xsk_tx", Label: "重定向到响应模块", Description: "BPF 成功把报文提交到 XSK 的次数。", Role: "success", Value: 3},
+							{Key: "xsk_failed", Label: "响应重定向失败", Description: "XSK 重定向总失败次数。", Role: "failure", Value: 5},
+							{Key: "xsk_meta_failed", Label: "XSK 元数据失败", Description: "写入 XDP metadata 失败。", Role: "failure", Value: 9},
+							{Key: "xsk_redirect_failed", Label: "XSK 提交失败", Description: "调用 redirect_map 提交到 XSK 失败。", Role: "failure", Value: 10},
+						},
+					},
+				},
 				Histories: []controlplane.StatsHistorySeries{
 					{
 						Name:   "10min",
@@ -353,20 +429,48 @@ func TestGetStatsVerbose(t *testing.T) {
 						Step:   "10s",
 						Points: []controlplane.StatsPoint{
 							{
-								TotalRules:      2,
-								EnabledRules:    1,
-								RXPackets:       90,
-								ParseFailed:     2,
-								RuleCandidates:  18,
-								MatchedRules:    7,
-								RingbufDropped:  1,
-								XDPTX:           2,
-								XskTX:           3,
-								TXFailed:        4,
-								XskFailed:       5,
-								RedirectTX:      6,
-								RedirectFailed:  7,
-								FibLookupFailed: 8,
+								TotalRules:        2,
+								EnabledRules:      1,
+								RXPackets:         90,
+								ParseFailed:       2,
+								RuleCandidates:    18,
+								MatchedRules:      7,
+								RingbufDropped:    1,
+								XDPTX:             2,
+								XskTX:             3,
+								TXFailed:          4,
+								XskFailed:         5,
+								XskMetaFailed:     9,
+								XskRedirectFailed: 10,
+								RedirectTX:        6,
+								RedirectFailed:    7,
+								FibLookupFailed:   8,
+							},
+						},
+					},
+				},
+				StageHistories: []controlplane.DiagnosticHistorySeries{
+					{
+						Name:   "10min",
+						Window: "10m",
+						Step:   "10s",
+						Stages: []controlplane.DiagnosticStageHistory{
+							{
+								Key:              "xsk_redirect",
+								Title:            "响应重定向",
+								Summary:          "把原始报文重定向到 XSK。",
+								PrimaryMetricKey: "xsk_tx",
+								Metrics: []controlplane.DiagnosticMetricHistory{
+									{
+										Key:         "xsk_meta_failed",
+										Label:       "XSK 元数据失败",
+										Description: "写入 XDP metadata 失败。",
+										Role:        "failure",
+										Points: []controlplane.MetricPoint{
+											{Value: 9},
+										},
+									},
+								},
 							},
 						},
 					},
@@ -395,8 +499,20 @@ func TestGetStatsVerbose(t *testing.T) {
 	if body.Data.RingbufDropped == nil || *body.Data.RingbufDropped != 1 {
 		t.Fatalf("stats = %+v, want ringbuf_dropped=1", body.Data)
 	}
+	if body.Data.Overview.PrimaryIssueStage != "xsk_redirect" {
+		t.Fatalf("overview = %+v, want primary_issue_stage=xsk_redirect", body.Data.Overview)
+	}
+	if len(body.Data.Stages) != 1 || body.Data.Stages[0].Metrics[2].Key != "xsk_meta_failed" {
+		t.Fatalf("stages = %+v, want xsk_meta_failed metric in xsk stage", body.Data.Stages)
+	}
+	if body.Data.XskMetaFailed == nil || *body.Data.XskMetaFailed != 9 {
+		t.Fatalf("stats = %+v, want xsk_meta_failed=9", body.Data)
+	}
 	if body.Data.Histories[0].Points[0].TotalRules == nil || *body.Data.Histories[0].Points[0].TotalRules != 2 {
 		t.Fatalf("point = %+v, want total_rules=2", body.Data.Histories[0].Points[0])
+	}
+	if len(body.Data.StageHistories) != 1 || body.Data.StageHistories[0].Stages[0].Metrics[0].Points[0].Value != 9 {
+		t.Fatalf("stage history = %+v, want xsk_meta_failed history point 9", body.Data.StageHistories)
 	}
 }
 

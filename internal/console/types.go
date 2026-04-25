@@ -53,21 +53,50 @@ type StatusResponse struct {
 }
 
 type StatsResponse struct {
-	TotalRules      *int                   `json:"total_rules,omitempty"`
-	EnabledRules    *int                   `json:"enabled_rules,omitempty"`
-	RXPackets       uint64                 `json:"rx_packets"`
-	ParseFailed     uint64                 `json:"parse_failed"`
-	RuleCandidates  uint64                 `json:"rule_candidates"`
-	MatchedRules    uint64                 `json:"matched_rules"`
-	RingbufDropped  *uint64                `json:"ringbuf_dropped,omitempty"`
-	XDPTX           *uint64                `json:"xdp_tx,omitempty"`
-	XskTX           *uint64                `json:"xsk_tx,omitempty"`
-	TXFailed        *uint64                `json:"tx_failed,omitempty"`
-	XskFailed       *uint64                `json:"xsk_failed,omitempty"`
-	RedirectTX      *uint64                `json:"redirect_tx,omitempty"`
-	RedirectFailed  *uint64                `json:"redirect_failed,omitempty"`
-	FibLookupFailed *uint64                `json:"fib_lookup_failed,omitempty"`
-	Histories       []StatsHistoryResponse `json:"histories"`
+	Overview          StatsOverviewResponse             `json:"overview"`
+	Stages            []DiagnosticStageResponse         `json:"stages"`
+	TotalRules        *int                              `json:"total_rules,omitempty"`
+	EnabledRules      *int                              `json:"enabled_rules,omitempty"`
+	RXPackets         uint64                            `json:"rx_packets"`
+	ParseFailed       uint64                            `json:"parse_failed"`
+	RuleCandidates    uint64                            `json:"rule_candidates"`
+	MatchedRules      uint64                            `json:"matched_rules"`
+	RingbufDropped    *uint64                           `json:"ringbuf_dropped,omitempty"`
+	XDPTX             *uint64                           `json:"xdp_tx,omitempty"`
+	XskTX             *uint64                           `json:"xsk_tx,omitempty"`
+	TXFailed          *uint64                           `json:"tx_failed,omitempty"`
+	XskFailed         *uint64                           `json:"xsk_failed,omitempty"`
+	XskMetaFailed     *uint64                           `json:"xsk_meta_failed,omitempty"`
+	XskRedirectFailed *uint64                           `json:"xsk_redirect_failed,omitempty"`
+	RedirectTX        *uint64                           `json:"redirect_tx,omitempty"`
+	RedirectFailed    *uint64                           `json:"redirect_failed,omitempty"`
+	FibLookupFailed   *uint64                           `json:"fib_lookup_failed,omitempty"`
+	Histories         []StatsHistoryResponse            `json:"histories"`
+	StageHistories    []DiagnosticHistorySeriesResponse `json:"stage_histories"`
+}
+
+type StatsOverviewResponse struct {
+	TotalRules        int    `json:"total_rules"`
+	EnabledRules      int    `json:"enabled_rules"`
+	RXPackets         uint64 `json:"rx_packets"`
+	MatchedRules      uint64 `json:"matched_rules"`
+	PrimaryIssueStage string `json:"primary_issue_stage,omitempty"`
+}
+
+type DiagnosticStageResponse struct {
+	Key              string                     `json:"key"`
+	Title            string                     `json:"title"`
+	Summary          string                     `json:"summary"`
+	PrimaryMetricKey string                     `json:"primary_metric_key"`
+	Metrics          []DiagnosticMetricResponse `json:"metrics"`
+}
+
+type DiagnosticMetricResponse struct {
+	Key         string `json:"key"`
+	Label       string `json:"label"`
+	Description string `json:"description"`
+	Role        string `json:"role"`
+	Value       uint64 `json:"value"`
 }
 
 type StatsHistoryResponse struct {
@@ -77,22 +106,52 @@ type StatsHistoryResponse struct {
 	Points []StatsPointResponse `json:"points"`
 }
 
+type DiagnosticHistorySeriesResponse struct {
+	Name   string                           `json:"name"`
+	Window string                           `json:"window"`
+	Step   string                           `json:"step"`
+	Stages []DiagnosticStageHistoryResponse `json:"stages"`
+}
+
+type DiagnosticStageHistoryResponse struct {
+	Key              string                            `json:"key"`
+	Title            string                            `json:"title"`
+	Summary          string                            `json:"summary"`
+	PrimaryMetricKey string                            `json:"primary_metric_key"`
+	Metrics          []DiagnosticMetricHistoryResponse `json:"metrics"`
+}
+
+type DiagnosticMetricHistoryResponse struct {
+	Key         string                `json:"key"`
+	Label       string                `json:"label"`
+	Description string                `json:"description"`
+	Role        string                `json:"role"`
+	Points      []MetricPointResponse `json:"points"`
+}
+
+type MetricPointResponse struct {
+	Timestamp string `json:"timestamp"`
+	Value     uint64 `json:"value"`
+}
+
 type StatsPointResponse struct {
-	Timestamp       string  `json:"timestamp"`
-	TotalRules      *int    `json:"total_rules,omitempty"`
-	EnabledRules    *int    `json:"enabled_rules,omitempty"`
-	RXPackets       uint64  `json:"rx_packets"`
-	ParseFailed     uint64  `json:"parse_failed"`
-	RuleCandidates  uint64  `json:"rule_candidates"`
-	MatchedRules    uint64  `json:"matched_rules"`
-	RingbufDropped  *uint64 `json:"ringbuf_dropped,omitempty"`
-	XDPTX           *uint64 `json:"xdp_tx,omitempty"`
-	XskTX           *uint64 `json:"xsk_tx,omitempty"`
-	TXFailed        *uint64 `json:"tx_failed,omitempty"`
-	XskFailed       *uint64 `json:"xsk_failed,omitempty"`
-	RedirectTX      *uint64 `json:"redirect_tx,omitempty"`
-	RedirectFailed  *uint64 `json:"redirect_failed,omitempty"`
-	FibLookupFailed *uint64 `json:"fib_lookup_failed,omitempty"`
+	Timestamp         string  `json:"timestamp"`
+	TotalRules        *int    `json:"total_rules,omitempty"`
+	EnabledRules      *int    `json:"enabled_rules,omitempty"`
+	RXPackets         uint64  `json:"rx_packets"`
+	ParseFailed       uint64  `json:"parse_failed"`
+	RuleCandidates    uint64  `json:"rule_candidates"`
+	MatchedRules      uint64  `json:"matched_rules"`
+	RingbufDropped    *uint64 `json:"ringbuf_dropped,omitempty"`
+	XDPTX             *uint64 `json:"xdp_tx,omitempty"`
+	XskTX             *uint64 `json:"xsk_tx,omitempty"`
+	TXFailed          *uint64 `json:"tx_failed,omitempty"`
+	XskFailed         *uint64 `json:"xsk_failed,omitempty"`
+	XskMetaFailed     *uint64 `json:"xsk_meta_failed,omitempty"`
+	XskRedirectFailed *uint64 `json:"xsk_redirect_failed,omitempty"`
+	RedirectTX        *uint64 `json:"redirect_tx,omitempty"`
+	RedirectFailed    *uint64 `json:"redirect_failed,omitempty"`
+	FibLookupFailed   *uint64 `json:"fib_lookup_failed,omitempty"`
 }
 
 type LogLevelRequest struct {

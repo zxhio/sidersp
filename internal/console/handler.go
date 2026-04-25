@@ -56,14 +56,13 @@ func (h Handler) setLogLevel(c *gin.Context) {
 
 func (h Handler) getStats(c *gin.Context) {
 	window := strings.TrimSpace(c.Query("window"))
-	more := parseBoolQuery(c.Query("more"))
 	item, err := h.service.Stats(window)
 	if err != nil {
 		writeServiceError(c, err)
 		return
 	}
 
-	c.JSON(http.StatusOK, dataEnvelope{Data: newStatsResponse(item, more)})
+	c.JSON(http.StatusOK, dataEnvelope{Data: newStatsResponse(item)})
 }
 
 func (h Handler) listStatsWindows(c *gin.Context) {
@@ -283,30 +282,30 @@ func newStatusResponse(item controlplane.Status) StatusResponse {
 	}
 }
 
-func newStatsResponse(item controlplane.Stats, more bool) StatsResponse {
+func newStatsResponse(item controlplane.Stats) StatsResponse {
 	histories := make([]StatsHistoryResponse, 0, len(item.Histories))
 	for _, series := range item.Histories {
 		points := make([]StatsPointResponse, 0, len(series.Points))
 		for _, point := range series.Points {
 			out := StatsPointResponse{
-				Timestamp:       point.Timestamp.Format(time.RFC3339),
-				RXPackets:       point.RXPackets,
-				ParseFailed:     point.ParseFailed,
-				RuleCandidates:  point.RuleCandidates,
-				MatchedRules:    point.MatchedRules,
+				Timestamp:      point.Timestamp.Format(time.RFC3339),
+				RXPackets:      point.RXPackets,
+				ParseFailed:    point.ParseFailed,
+				RuleCandidates: point.RuleCandidates,
+				MatchedRules:   point.MatchedRules,
 			}
-			if more {
-				out.TotalRules = intPtr(point.TotalRules)
-				out.EnabledRules = intPtr(point.EnabledRules)
-				out.RingbufDropped = uint64Ptr(point.RingbufDropped)
-				out.XDPTX = uint64Ptr(point.XDPTX)
-				out.XskTX = uint64Ptr(point.XskTX)
-				out.TXFailed = uint64Ptr(point.TXFailed)
-				out.XskFailed = uint64Ptr(point.XskFailed)
-				out.RedirectTX = uint64Ptr(point.RedirectTX)
-				out.RedirectFailed = uint64Ptr(point.RedirectFailed)
-				out.FibLookupFailed = uint64Ptr(point.FibLookupFailed)
-			}
+			out.TotalRules = intPtr(point.TotalRules)
+			out.EnabledRules = intPtr(point.EnabledRules)
+			out.RingbufDropped = uint64Ptr(point.RingbufDropped)
+			out.XDPTX = uint64Ptr(point.XDPTX)
+			out.XskTX = uint64Ptr(point.XskTX)
+			out.TXFailed = uint64Ptr(point.TXFailed)
+			out.XskFailed = uint64Ptr(point.XskFailed)
+			out.XskMetaFailed = uint64Ptr(point.XskMetaFailed)
+			out.XskRedirectFailed = uint64Ptr(point.XskRedirectFailed)
+			out.RedirectTX = uint64Ptr(point.RedirectTX)
+			out.RedirectFailed = uint64Ptr(point.RedirectFailed)
+			out.FibLookupFailed = uint64Ptr(point.FibLookupFailed)
 			points = append(points, out)
 		}
 		histories = append(histories, StatsHistoryResponse{
@@ -317,35 +316,93 @@ func newStatsResponse(item controlplane.Stats, more bool) StatsResponse {
 		})
 	}
 
-	out := StatsResponse{
-		RXPackets:       item.RXPackets,
-		ParseFailed:     item.ParseFailed,
-		RuleCandidates:  item.RuleCandidates,
-		MatchedRules:    item.MatchedRules,
-		Histories:       histories,
+	stageHistories := make([]DiagnosticHistorySeriesResponse, 0, len(item.StageHistories))
+	for _, series := range item.StageHistories {
+		stages := make([]DiagnosticStageHistoryResponse, 0, len(series.Stages))
+		for _, stage := range series.Stages {
+			metrics := make([]DiagnosticMetricHistoryResponse, 0, len(stage.Metrics))
+			for _, metric := range stage.Metrics {
+				points := make([]MetricPointResponse, 0, len(metric.Points))
+				for _, point := range metric.Points {
+					points = append(points, MetricPointResponse{
+						Timestamp: point.Timestamp.Format(time.RFC3339),
+						Value:     point.Value,
+					})
+				}
+				metrics = append(metrics, DiagnosticMetricHistoryResponse{
+					Key:         metric.Key,
+					Label:       metric.Label,
+					Description: metric.Description,
+					Role:        metric.Role,
+					Points:      points,
+				})
+			}
+			stages = append(stages, DiagnosticStageHistoryResponse{
+				Key:              stage.Key,
+				Title:            stage.Title,
+				Summary:          stage.Summary,
+				PrimaryMetricKey: stage.PrimaryMetricKey,
+				Metrics:          metrics,
+			})
+		}
+		stageHistories = append(stageHistories, DiagnosticHistorySeriesResponse{
+			Name:   series.Name,
+			Window: series.Window,
+			Step:   series.Step,
+			Stages: stages,
+		})
 	}
-	if more {
-		out.TotalRules = intPtr(item.TotalRules)
-		out.EnabledRules = intPtr(item.EnabledRules)
-		out.RingbufDropped = uint64Ptr(item.RingbufDropped)
-		out.XDPTX = uint64Ptr(item.XDPTX)
-		out.XskTX = uint64Ptr(item.XskTX)
-		out.TXFailed = uint64Ptr(item.TXFailed)
-		out.XskFailed = uint64Ptr(item.XskFailed)
-		out.RedirectTX = uint64Ptr(item.RedirectTX)
-		out.RedirectFailed = uint64Ptr(item.RedirectFailed)
-		out.FibLookupFailed = uint64Ptr(item.FibLookupFailed)
-	}
-	return out
-}
 
-func parseBoolQuery(raw string) bool {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "1", "true", "yes", "on":
-		return true
-	default:
-		return false
+	stages := make([]DiagnosticStageResponse, 0, len(item.Stages))
+	for _, stage := range item.Stages {
+		metrics := make([]DiagnosticMetricResponse, 0, len(stage.Metrics))
+		for _, metric := range stage.Metrics {
+			metrics = append(metrics, DiagnosticMetricResponse{
+				Key:         metric.Key,
+				Label:       metric.Label,
+				Description: metric.Description,
+				Role:        metric.Role,
+				Value:       metric.Value,
+			})
+		}
+		stages = append(stages, DiagnosticStageResponse{
+			Key:              stage.Key,
+			Title:            stage.Title,
+			Summary:          stage.Summary,
+			PrimaryMetricKey: stage.PrimaryMetricKey,
+			Metrics:          metrics,
+		})
 	}
+
+	out := StatsResponse{
+		Overview: StatsOverviewResponse{
+			TotalRules:        item.Overview.TotalRules,
+			EnabledRules:      item.Overview.EnabledRules,
+			RXPackets:         item.Overview.RXPackets,
+			MatchedRules:      item.Overview.MatchedRules,
+			PrimaryIssueStage: item.Overview.PrimaryIssueStage,
+		},
+		Stages:         stages,
+		RXPackets:      item.RXPackets,
+		ParseFailed:    item.ParseFailed,
+		RuleCandidates: item.RuleCandidates,
+		MatchedRules:   item.MatchedRules,
+		Histories:      histories,
+		StageHistories: stageHistories,
+	}
+	out.TotalRules = intPtr(item.TotalRules)
+	out.EnabledRules = intPtr(item.EnabledRules)
+	out.RingbufDropped = uint64Ptr(item.RingbufDropped)
+	out.XDPTX = uint64Ptr(item.XDPTX)
+	out.XskTX = uint64Ptr(item.XskTX)
+	out.TXFailed = uint64Ptr(item.TXFailed)
+	out.XskFailed = uint64Ptr(item.XskFailed)
+	out.XskMetaFailed = uint64Ptr(item.XskMetaFailed)
+	out.XskRedirectFailed = uint64Ptr(item.XskRedirectFailed)
+	out.RedirectTX = uint64Ptr(item.RedirectTX)
+	out.RedirectFailed = uint64Ptr(item.RedirectFailed)
+	out.FibLookupFailed = uint64Ptr(item.FibLookupFailed)
+	return out
 }
 
 func intPtr(v int) *int {
