@@ -15,27 +15,23 @@ import (
 type stubService struct {
 	status     controlplane.Status
 	stats      controlplane.Stats
-	windows    []string
-	statsByKey map[string]controlplane.Stats
+	statsByKey map[int]controlplane.Stats
 	ruleCounts map[int]uint64
-	lastWindow string
+	lastRange  int
 	rules      []rule.Rule
 }
 
 func (s *stubService) Status() controlplane.Status { return s.status }
-func (s *stubService) Stats(window string) (controlplane.Stats, error) {
-	s.lastWindow = window
+func (s *stubService) Stats(rangeSeconds int) (controlplane.Stats, error) {
+	s.lastRange = rangeSeconds
 	if s.statsByKey != nil {
-		item, ok := s.statsByKey[window]
+		item, ok := s.statsByKey[rangeSeconds]
 		if !ok {
-			return controlplane.Stats{}, controlplane.ErrStatsWindowNotFound
+			return controlplane.Stats{}, controlplane.ErrStatsRangeInvalid
 		}
 		return item, nil
 	}
 	return s.stats, nil
-}
-func (s *stubService) StatsWindows() []string {
-	return append([]string(nil), s.windows...)
 }
 func (s *stubService) RuleMatchCounts() (map[int]uint64, error) {
 	return mapsClone(s.ruleCounts), nil
@@ -263,8 +259,8 @@ func TestGetStats(t *testing.T) {
 	t.Parallel()
 
 	service := &stubService{
-		statsByKey: map[string]controlplane.Stats{
-			"1d": {
+		statsByKey: map[int]controlplane.Stats{
+			86400: {
 				Overview: controlplane.StatsOverview{
 					TotalRules:        2,
 					EnabledRules:      1,
@@ -272,13 +268,17 @@ func TestGetStats(t *testing.T) {
 					MatchedRules:      8,
 					PrimaryIssueStage: "parse",
 				},
-				TotalRules:     2,
-				EnabledRules:   1,
-				RXPackets:      100,
-				ParseFailed:    3,
-				RuleCandidates: 20,
-				MatchedRules:   8,
-				RingbufDropped: 1,
+				RangeSeconds:           86400,
+				CollectIntervalSeconds: 10,
+				RetentionSeconds:       30 * 24 * 60 * 60,
+				DisplayStepSeconds:     900,
+				TotalRules:             2,
+				EnabledRules:           1,
+				RXPackets:              100,
+				ParseFailed:            3,
+				RuleCandidates:         20,
+				MatchedRules:           8,
+				RingbufDropped:         1,
 				Stages: []controlplane.DiagnosticStage{
 					{
 						Key:              "parse",
@@ -339,7 +339,7 @@ func TestGetStats(t *testing.T) {
 	}
 	server := NewServer("127.0.0.1:0", service)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/stats?window=1d", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/stats?range_seconds=86400", nil)
 	rec := httptest.NewRecorder()
 	server.newRouter().ServeHTTP(rec, req)
 
@@ -359,14 +359,17 @@ func TestGetStats(t *testing.T) {
 	if body.Data.Overview.TotalRules != 2 || body.Data.Overview.PrimaryIssueStage != "parse" {
 		t.Fatalf("overview = %+v, want total_rules=2 primary_issue_stage=parse", body.Data.Overview)
 	}
+	if body.Data.RangeSeconds != 86400 || body.Data.DisplayStepSeconds != 900 {
+		t.Fatalf("stats metadata = %+v, want range_seconds=86400 display_step_seconds=900", body.Data)
+	}
 	if len(body.Data.Stages) != 1 || body.Data.Stages[0].Key != "parse" {
 		t.Fatalf("stages = %+v, want parse stage", body.Data.Stages)
 	}
 	if body.Data.EnabledRules == nil || *body.Data.EnabledRules != 1 || body.Data.RingbufDropped == nil || *body.Data.RingbufDropped != 1 {
 		t.Fatalf("stats = %+v, want legacy fields populated", body.Data)
 	}
-	if service.lastWindow != "1d" {
-		t.Fatalf("window = %q, want 1d", service.lastWindow)
+	if service.lastRange != 86400 {
+		t.Fatalf("range_seconds = %d, want 86400", service.lastRange)
 	}
 	if len(body.Data.Histories) != 1 {
 		t.Fatalf("histories len = %d, want 1", len(body.Data.Histories))
@@ -383,8 +386,8 @@ func TestGetStatsVerbose(t *testing.T) {
 	t.Parallel()
 
 	server := NewServer("127.0.0.1:0", &stubService{
-		statsByKey: map[string]controlplane.Stats{
-			"1d": {
+		statsByKey: map[int]controlplane.Stats{
+			86400: {
 				Overview: controlplane.StatsOverview{
 					TotalRules:        2,
 					EnabledRules:      1,
@@ -392,22 +395,26 @@ func TestGetStatsVerbose(t *testing.T) {
 					MatchedRules:      8,
 					PrimaryIssueStage: "xsk_redirect",
 				},
-				TotalRules:        2,
-				EnabledRules:      1,
-				RXPackets:         100,
-				ParseFailed:       3,
-				RuleCandidates:    20,
-				MatchedRules:      8,
-				RingbufDropped:    1,
-				XDPTX:             2,
-				XskTX:             3,
-				TXFailed:          4,
-				XskFailed:         5,
-				XskMetaFailed:     9,
-				XskRedirectFailed: 10,
-				RedirectTX:        6,
-				RedirectFailed:    7,
-				FibLookupFailed:   8,
+				RangeSeconds:           86400,
+				CollectIntervalSeconds: 10,
+				RetentionSeconds:       30 * 24 * 60 * 60,
+				DisplayStepSeconds:     900,
+				TotalRules:             2,
+				EnabledRules:           1,
+				RXPackets:              100,
+				ParseFailed:            3,
+				RuleCandidates:         20,
+				MatchedRules:           8,
+				RingbufDropped:         1,
+				XDPTX:                  2,
+				XskTX:                  3,
+				TXFailed:               4,
+				XskFailed:              5,
+				XskMetaFailed:          9,
+				XskRedirectFailed:      10,
+				RedirectTX:             6,
+				RedirectFailed:         7,
+				FibLookupFailed:        8,
 				Stages: []controlplane.DiagnosticStage{
 					{
 						Key:              "xsk_redirect",
@@ -479,7 +486,7 @@ func TestGetStatsVerbose(t *testing.T) {
 		},
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/stats?window=1d&more=1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/stats?range_seconds=86400", nil)
 	rec := httptest.NewRecorder()
 	server.newRouter().ServeHTTP(rec, req)
 
@@ -502,6 +509,9 @@ func TestGetStatsVerbose(t *testing.T) {
 	if body.Data.Overview.PrimaryIssueStage != "xsk_redirect" {
 		t.Fatalf("overview = %+v, want primary_issue_stage=xsk_redirect", body.Data.Overview)
 	}
+	if body.Data.RangeSeconds != 86400 || body.Data.DisplayStepSeconds != 900 {
+		t.Fatalf("stats metadata = %+v, want range_seconds=86400 display_step_seconds=900", body.Data)
+	}
 	if len(body.Data.Stages) != 1 || body.Data.Stages[0].Metrics[2].Key != "xsk_meta_failed" {
 		t.Fatalf("stages = %+v, want xsk_meta_failed metric in xsk stage", body.Data.Stages)
 	}
@@ -516,50 +526,21 @@ func TestGetStatsVerbose(t *testing.T) {
 	}
 }
 
-func TestGetStatsInvalidWindow(t *testing.T) {
+func TestGetStatsInvalidRange(t *testing.T) {
 	t.Parallel()
 
 	server := NewServer("127.0.0.1:0", &stubService{
-		statsByKey: map[string]controlplane.Stats{
-			"10min": {},
+		statsByKey: map[int]controlplane.Stats{
+			600: {},
 		},
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/stats?window=bad", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/stats?range_seconds=601", nil)
 	rec := httptest.NewRecorder()
 	server.newRouter().ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
-	}
-}
-
-func TestListStatsWindows(t *testing.T) {
-	t.Parallel()
-
-	server := NewServer("127.0.0.1:0", &stubService{
-		windows: []string{"10min", "1d"},
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/stats/windows", nil)
-	rec := httptest.NewRecorder()
-	server.newRouter().ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
-	}
-
-	var body struct {
-		Data []string `json:"data"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
-	if len(body.Data) != 2 {
-		t.Fatalf("windows len = %d, want 2", len(body.Data))
-	}
-	if body.Data[0] != "10min" || body.Data[1] != "1d" {
-		t.Fatalf("windows = %+v, want [10min 1d]", body.Data)
 	}
 }
 

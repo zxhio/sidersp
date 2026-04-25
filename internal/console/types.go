@@ -53,26 +53,30 @@ type StatusResponse struct {
 }
 
 type StatsResponse struct {
-	Overview          StatsOverviewResponse             `json:"overview"`
-	Stages            []DiagnosticStageResponse         `json:"stages"`
-	TotalRules        *int                              `json:"total_rules,omitempty"`
-	EnabledRules      *int                              `json:"enabled_rules,omitempty"`
-	RXPackets         uint64                            `json:"rx_packets"`
-	ParseFailed       uint64                            `json:"parse_failed"`
-	RuleCandidates    uint64                            `json:"rule_candidates"`
-	MatchedRules      uint64                            `json:"matched_rules"`
-	RingbufDropped    *uint64                           `json:"ringbuf_dropped,omitempty"`
-	XDPTX             *uint64                           `json:"xdp_tx,omitempty"`
-	XskTX             *uint64                           `json:"xsk_tx,omitempty"`
-	TXFailed          *uint64                           `json:"tx_failed,omitempty"`
-	XskFailed         *uint64                           `json:"xsk_failed,omitempty"`
-	XskMetaFailed     *uint64                           `json:"xsk_meta_failed,omitempty"`
-	XskRedirectFailed *uint64                           `json:"xsk_redirect_failed,omitempty"`
-	RedirectTX        *uint64                           `json:"redirect_tx,omitempty"`
-	RedirectFailed    *uint64                           `json:"redirect_failed,omitempty"`
-	FibLookupFailed   *uint64                           `json:"fib_lookup_failed,omitempty"`
-	Histories         []StatsHistoryResponse            `json:"histories"`
-	StageHistories    []DiagnosticHistorySeriesResponse `json:"stage_histories"`
+	Overview               StatsOverviewResponse             `json:"overview"`
+	Stages                 []DiagnosticStageResponse         `json:"stages"`
+	RangeSeconds           int                               `json:"range_seconds"`
+	CollectIntervalSeconds int                               `json:"collect_interval_seconds"`
+	RetentionSeconds       int                               `json:"retention_seconds"`
+	DisplayStepSeconds     int                               `json:"display_step_seconds"`
+	TotalRules             *int                              `json:"total_rules,omitempty"`
+	EnabledRules           *int                              `json:"enabled_rules,omitempty"`
+	RXPackets              uint64                            `json:"rx_packets"`
+	ParseFailed            uint64                            `json:"parse_failed"`
+	RuleCandidates         uint64                            `json:"rule_candidates"`
+	MatchedRules           uint64                            `json:"matched_rules"`
+	RingbufDropped         *uint64                           `json:"ringbuf_dropped,omitempty"`
+	XDPTX                  *uint64                           `json:"xdp_tx,omitempty"`
+	XskTX                  *uint64                           `json:"xsk_tx,omitempty"`
+	TXFailed               *uint64                           `json:"tx_failed,omitempty"`
+	XskFailed              *uint64                           `json:"xsk_failed,omitempty"`
+	XskMetaFailed          *uint64                           `json:"xsk_meta_failed,omitempty"`
+	XskRedirectFailed      *uint64                           `json:"xsk_redirect_failed,omitempty"`
+	RedirectTX             *uint64                           `json:"redirect_tx,omitempty"`
+	RedirectFailed         *uint64                           `json:"redirect_failed,omitempty"`
+	FibLookupFailed        *uint64                           `json:"fib_lookup_failed,omitempty"`
+	Histories              []StatsHistoryResponse            `json:"histories"`
+	StageHistories         []DiagnosticHistorySeriesResponse `json:"stage_histories"`
 }
 
 type StatsOverviewResponse struct {

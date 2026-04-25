@@ -1,8 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
-import { getStats, getStatsWindows } from '../api'
+import { getStats } from '../api'
 import Sparkline from '../components/Sparkline'
 
-const DEFAULT_WINDOWS = ['10min']
+const DEFAULT_RANGES = [
+  { label: '10m', seconds: 600 },
+  { label: '1d', seconds: 86400 },
+  { label: '30d', seconds: 2592000 },
+]
 
 const ROLE_COLORS = {
   traffic: '#2563eb',
@@ -54,6 +58,14 @@ function formatValue(n) {
   return typeof n === 'number' ? n.toLocaleString() : '-'
 }
 
+function formatDurationFromSeconds(seconds) {
+  if (!seconds || seconds <= 0) return '采样间隔'
+  if (seconds % 86400 === 0) return `${seconds / 86400}d`
+  if (seconds % 3600 === 0) return `${seconds / 3600}h`
+  if (seconds % 60 === 0) return `${seconds / 60}m`
+  return `${seconds}s`
+}
+
 function metricColor(metric) {
   return METRIC_COLORS[metric.key] || ROLE_COLORS[metric.role] || '#64748b'
 }
@@ -81,27 +93,18 @@ function findMetricHistory(stageHistory, metricKey) {
 export default function StatsPage() {
   const [stats, setStats] = useState(null)
   const [error, setError] = useState('')
-  const [window, setWindow] = useState('')
-  const [windows, setWindows] = useState(DEFAULT_WINDOWS)
+  const [rangeSeconds, setRangeSeconds] = useState(DEFAULT_RANGES[0].seconds)
 
-  useEffect(() => {
-    getStatsWindows()
-      .then(data => {
-        if (Array.isArray(data) && data.length > 0) setWindows(data)
-      })
-      .catch(() => {})
-  }, [])
-
-  const load = useCallback((w) => {
+  const load = useCallback((nextRangeSeconds) => {
     setError('')
-    getStats(w)
+    getStats(nextRangeSeconds)
       .then(setStats)
       .catch(err => setError(err.message))
   }, [])
 
   useEffect(() => {
-    load(window)
-  }, [load, window])
+    load(rangeSeconds)
+  }, [load, rangeSeconds])
 
   if (error) {
     return (
@@ -133,7 +136,8 @@ export default function StatsPage() {
   const stages = Array.isArray(stats.stages) ? stats.stages : []
   const historySeries = Array.isArray(stats.stage_histories) && stats.stage_histories.length > 0 ? stats.stage_histories[0] : null
   const historyStages = historySeries?.stages || []
-  const activeWindow = window || historySeries?.name || ''
+  const activeRangeSeconds = rangeSeconds || stats.range_seconds
+  const displayStepLabel = formatDurationFromSeconds(stats.display_step_seconds)
 
   return (
     <>
@@ -164,13 +168,13 @@ export default function StatsPage() {
         </div>
 
         <div className="window-selector">
-          {windows.map(w => (
+          {DEFAULT_RANGES.map(item => (
             <button
-              key={w}
-              className={`btn btn-sm ${activeWindow === w ? 'btn-primary' : ''}`}
-              onClick={() => setWindow(w)}
+              key={item.seconds}
+              className={`btn btn-sm ${activeRangeSeconds === item.seconds ? 'btn-primary' : ''}`}
+              onClick={() => setRangeSeconds(item.seconds)}
             >
-              {w}
+              {item.label}
             </button>
           ))}
         </div>
@@ -210,7 +214,7 @@ export default function StatsPage() {
                     if (deltas.length < 1) return null
                     return (
                       <div className="section" key={`${stage.key}-${metric.key}`}>
-                        <div className="section-title">{metric.label}（增量/采样间隔）</div>
+                        <div className="section-title">{metric.label}（增量/{displayStepLabel}）</div>
                         <div className="chart-container">
                           <Sparkline
                             data={deltas}

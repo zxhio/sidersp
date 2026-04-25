@@ -18,8 +18,7 @@ import (
 
 type RuleService interface {
 	Status() controlplane.Status
-	Stats(window string) (controlplane.Stats, error)
-	StatsWindows() []string
+	Stats(rangeSeconds int) (controlplane.Stats, error)
 	ListRules() []rule.Rule
 	RuleMatchCounts() (map[int]uint64, error)
 	GetRule(id int) (rule.Rule, error)
@@ -92,7 +91,6 @@ func (s *Server) newRouter() *gin.Engine {
 	v1.GET("/logging/level", handler.getLogLevel)
 	v1.PUT("/logging/level", handler.setLogLevel)
 	v1.GET("/stats", handler.getStats)
-	v1.GET("/stats/windows", handler.listStatsWindows)
 	v1.GET("/rules", handler.listRules)
 	v1.POST("/rules", handler.createRule)
 	v1.GET("/rules/:id", handler.getRule)

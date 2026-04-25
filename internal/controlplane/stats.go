@@ -13,26 +13,30 @@ import (
 )
 
 type Stats struct {
-	Overview          StatsOverview             `json:"overview"`
-	TotalRules        int                       `json:"total_rules"`
-	EnabledRules      int                       `json:"enabled_rules"`
-	RXPackets         uint64                    `json:"rx_packets"`
-	ParseFailed       uint64                    `json:"parse_failed"`
-	RuleCandidates    uint64                    `json:"rule_candidates"`
-	MatchedRules      uint64                    `json:"matched_rules"`
-	RingbufDropped    uint64                    `json:"ringbuf_dropped"`
-	XDPTX             uint64                    `json:"xdp_tx"`
-	XskTX             uint64                    `json:"xsk_tx"`
-	TXFailed          uint64                    `json:"tx_failed"`
-	XskFailed         uint64                    `json:"xsk_failed"`
-	XskMetaFailed     uint64                    `json:"xsk_meta_failed"`
-	XskRedirectFailed uint64                    `json:"xsk_redirect_failed"`
-	RedirectTX        uint64                    `json:"redirect_tx"`
-	RedirectFailed    uint64                    `json:"redirect_failed"`
-	FibLookupFailed   uint64                    `json:"fib_lookup_failed"`
-	Stages            []DiagnosticStage         `json:"stages"`
-	Histories         []StatsHistorySeries      `json:"histories"`
-	StageHistories    []DiagnosticHistorySeries `json:"stage_histories"`
+	Overview               StatsOverview             `json:"overview"`
+	RangeSeconds           int                       `json:"range_seconds"`
+	CollectIntervalSeconds int                       `json:"collect_interval_seconds"`
+	RetentionSeconds       int                       `json:"retention_seconds"`
+	DisplayStepSeconds     int                       `json:"display_step_seconds"`
+	TotalRules             int                       `json:"total_rules"`
+	EnabledRules           int                       `json:"enabled_rules"`
+	RXPackets              uint64                    `json:"rx_packets"`
+	ParseFailed            uint64                    `json:"parse_failed"`
+	RuleCandidates         uint64                    `json:"rule_candidates"`
+	MatchedRules           uint64                    `json:"matched_rules"`
+	RingbufDropped         uint64                    `json:"ringbuf_dropped"`
+	XDPTX                  uint64                    `json:"xdp_tx"`
+	XskTX                  uint64                    `json:"xsk_tx"`
+	TXFailed               uint64                    `json:"tx_failed"`
+	XskFailed              uint64                    `json:"xsk_failed"`
+	XskMetaFailed          uint64                    `json:"xsk_meta_failed"`
+	XskRedirectFailed      uint64                    `json:"xsk_redirect_failed"`
+	RedirectTX             uint64                    `json:"redirect_tx"`
+	RedirectFailed         uint64                    `json:"redirect_failed"`
+	FibLookupFailed        uint64                    `json:"fib_lookup_failed"`
+	Stages                 []DiagnosticStage         `json:"stages"`
+	Histories              []StatsHistorySeries      `json:"histories"`
+	StageHistories         []DiagnosticHistorySeries `json:"stage_histories"`
 }
 
 type StatsOverview struct {
@@ -113,6 +117,17 @@ type StatsPoint struct {
 	RedirectFailed    uint64    `json:"redirect_failed"`
 	FibLookupFailed   uint64    `json:"fib_lookup_failed"`
 }
+
+type StatsQuery struct {
+	Range time.Duration
+	Step  time.Duration
+	Limit int
+}
+
+const (
+	minStatsRangeSeconds  = 600
+	maxStatsDisplayPoints = 96
+)
 
 type stageDescriptor struct {
 	Key              string
@@ -202,23 +217,15 @@ var diagnosticStageDescriptors = []stageDescriptor{
 	},
 }
 
-func buildStatsRetention(plan []config.ParsedStatsHistoryWindow) (time.Duration, time.Duration, int) {
-	collectStep := plan[0].Step
-	keepWindow := plan[0].Window
-	for _, item := range plan[1:] {
-		if item.Step < collectStep {
-			collectStep = item.Step
-		}
-		if item.Window > keepWindow {
-			keepWindow = item.Window
-		}
+func buildStatsRetention(cfg config.ParsedConsoleStatsConfig) (time.Duration, time.Duration, int) {
+	keepLimit := int(cfg.Retention / cfg.CollectInterval)
+	if cfg.Retention%cfg.CollectInterval != 0 {
+		keepLimit++
 	}
-
-	keepLimit := int(keepWindow / collectStep)
 	if keepLimit <= 0 {
 		keepLimit = 1
 	}
-	return collectStep, keepWindow, keepLimit
+	return cfg.CollectInterval, cfg.Retention, keepLimit
 }
 
 func newStats(rules rule.RuleSet, dpStats model.DataplaneStats) Stats {
@@ -424,69 +431,80 @@ func (r *Runtime) trimRawStatsHistory(now time.Time) {
 	r.history = trimmed
 }
 
-func (r *Runtime) buildStatsHistory(now time.Time, current Stats, window string) ([]StatsHistorySeries, error) {
-	plan, err := r.selectStatsHistoryWindow(window)
-	if err != nil {
-		return nil, err
+func normalizeStatsRange(rangeSeconds int, collectInterval time.Duration, retention time.Duration) (time.Duration, error) {
+	if rangeSeconds == 0 {
+		rangeSeconds = minStatsRangeSeconds
+	}
+	if rangeSeconds < minStatsRangeSeconds {
+		return 0, fmt.Errorf("%w: range_seconds must be >= %d", ErrStatsRangeInvalid, minStatsRangeSeconds)
+	}
+	if rangeSeconds%minStatsRangeSeconds != 0 {
+		return 0, fmt.Errorf("%w: range_seconds must be a multiple of %d", ErrStatsRangeInvalid, minStatsRangeSeconds)
 	}
 
-	points := aggregateStatsPoints(r.history, now, plan, current)
+	rangeDuration := time.Duration(rangeSeconds) * time.Second
+	if rangeDuration < collectInterval {
+		return 0, fmt.Errorf("%w: range_seconds must be >= collect_interval", ErrStatsRangeInvalid)
+	}
+	if rangeDuration > retention {
+		return 0, fmt.Errorf("%w: range_seconds must be <= retention", ErrStatsRangeInvalid)
+	}
+
+	return rangeDuration, nil
+}
+
+func buildStatsQuery(rangeDuration time.Duration, collectInterval time.Duration) StatsQuery {
+	step := rangeDuration / maxStatsDisplayPoints
+	if rangeDuration%maxStatsDisplayPoints != 0 {
+		step++
+	}
+	if step < collectInterval {
+		step = collectInterval
+	}
+	if rem := step % collectInterval; rem != 0 {
+		step += collectInterval - rem
+	}
+	return StatsQuery{
+		Range: rangeDuration,
+		Step:  step,
+		Limit: maxStatsDisplayPoints,
+	}
+}
+
+func (r *Runtime) buildStatsHistory(now time.Time, current Stats, query StatsQuery) ([]StatsHistorySeries, error) {
+	points := aggregateStatsPoints(r.history, now, query, current)
 
 	return []StatsHistorySeries{
 		{
-			Name:   plan.Name,
-			Window: plan.Window.String(),
-			Step:   plan.Step.String(),
+			Name:   query.Range.String(),
+			Window: query.Range.String(),
+			Step:   query.Step.String(),
 			Points: points,
 		},
 	}, nil
 }
 
-func (r *Runtime) buildDiagnosticHistory(now time.Time, current Stats, window string) ([]DiagnosticHistorySeries, error) {
-	plan, err := r.selectStatsHistoryWindow(window)
-	if err != nil {
-		return nil, err
-	}
-
-	points := aggregateStatsPoints(r.history, now, plan, current)
+func (r *Runtime) buildDiagnosticHistory(now time.Time, current Stats, query StatsQuery) ([]DiagnosticHistorySeries, error) {
+	points := aggregateStatsPoints(r.history, now, query, current)
 	return []DiagnosticHistorySeries{
 		{
-			Name:   plan.Name,
-			Window: plan.Window.String(),
-			Step:   plan.Step.String(),
+			Name:   query.Range.String(),
+			Window: query.Range.String(),
+			Step:   query.Step.String(),
 			Stages: aggregateDiagnosticStages(points),
 		},
 	}, nil
 }
 
-func (r *Runtime) selectStatsHistoryWindow(name string) (config.ParsedStatsHistoryWindow, error) {
-	if len(r.statsPlan) == 0 {
-		return config.ParsedStatsHistoryWindow{}, ErrStatsWindowNotFound
-	}
-	if name == "" {
-		return r.statsPlan[0], nil
-	}
-	for _, item := range r.statsPlan {
-		if item.Name == name {
-			return item, nil
-		}
-	}
-	return config.ParsedStatsHistoryWindow{}, fmt.Errorf("%w: %s", ErrStatsWindowNotFound, name)
-}
-
-func aggregateStatsPoints(history []StatsPoint, now time.Time, plan config.ParsedStatsHistoryWindow, current Stats) []StatsPoint {
-	if len(history) == 0 {
-		return nil
-	}
-
-	cutoff := now.Add(-plan.Window)
-	points := make([]StatsPoint, 0, plan.Limit)
+func aggregateStatsPoints(history []StatsPoint, now time.Time, query StatsQuery, current Stats) []StatsPoint {
+	cutoff := now.Add(-query.Range)
+	points := make([]StatsPoint, 0, query.Limit)
 	for _, item := range history {
 		if item.Timestamp.Before(cutoff) {
 			continue
 		}
 		bucket := item
-		bucket.Timestamp = item.Timestamp.Truncate(plan.Step)
+		bucket.Timestamp = item.Timestamp.Truncate(query.Step)
 		if len(points) > 0 && points[len(points)-1].Timestamp.Equal(bucket.Timestamp) {
 			points[len(points)-1] = bucket
 		} else {
@@ -494,15 +512,15 @@ func aggregateStatsPoints(history []StatsPoint, now time.Time, plan config.Parse
 		}
 	}
 
-	currentBucket := newStatsPoint(now.Truncate(plan.Step), current)
+	currentBucket := newStatsPoint(now.Truncate(query.Step), current)
 	if len(points) == 0 || !points[len(points)-1].Timestamp.Equal(currentBucket.Timestamp) {
 		points = append(points, currentBucket)
 	} else {
 		points[len(points)-1] = currentBucket
 	}
 
-	if len(points) > plan.Limit {
-		points = append([]StatsPoint(nil), points[len(points)-plan.Limit:]...)
+	if len(points) > query.Limit {
+		points = append([]StatsPoint(nil), points[len(points)-query.Limit:]...)
 	}
 	return points
 }
@@ -555,12 +573,4 @@ func statsPointCounters(point StatsPoint) model.DataplaneCounters {
 		RedirectFailed:    point.RedirectFailed,
 		FibLookupFailed:   point.FibLookupFailed,
 	}
-}
-
-func (r *Runtime) StatsWindows() []string {
-	out := make([]string, 0, len(r.statsPlan))
-	for _, item := range r.statsPlan {
-		out = append(out, item.Name)
-	}
-	return out
 }

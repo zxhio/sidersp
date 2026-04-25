@@ -16,7 +16,7 @@ import (
 
 var ErrRuleNotFound = fmt.Errorf("rule not found")
 var ErrRuleConflict = fmt.Errorf("rule conflict")
-var ErrStatsWindowNotFound = fmt.Errorf("stats window not found")
+var ErrStatsRangeInvalid = fmt.Errorf("stats range invalid")
 
 type RuleSyncer interface {
 	ReplaceRules(rule.RuleSet) error
@@ -35,7 +35,6 @@ type Runtime struct {
 	syncer           RuleSyncer
 	streamer         EventStreamer
 	stats            StatsReader
-	statsPlan        []config.ParsedStatsHistoryWindow
 	statsCollectStep time.Duration
 	statsKeepWindow  time.Duration
 	statsKeepLimit   int
@@ -54,18 +53,17 @@ func NewRuntime(cfg config.Config, syncer RuleSyncer, streamer EventStreamer, st
 	if statsReader == nil {
 		panic("controlplane: stats reader is required")
 	}
-	statsPlan, err := cfg.Console.ParsedStatsHistoryWindows()
+	statsCfg, err := cfg.Console.ParsedStats()
 	if err != nil {
-		panic(fmt.Sprintf("controlplane: invalid stats history config: %v", err))
+		panic(fmt.Sprintf("controlplane: invalid console stats config: %v", err))
 	}
-	collectStep, keepWindow, keepLimit := buildStatsRetention(statsPlan)
+	collectStep, keepWindow, keepLimit := buildStatsRetention(statsCfg)
 
 	return &Runtime{
 		cfg:              cfg,
 		syncer:           syncer,
 		streamer:         streamer,
 		stats:            statsReader,
-		statsPlan:        statsPlan,
 		statsCollectStep: collectStep,
 		statsKeepWindow:  keepWindow,
 		statsKeepLimit:   keepLimit,
@@ -121,21 +119,32 @@ func (r *Runtime) Status() Status {
 	return newStatus(r.cfg, r.rules)
 }
 
-func (r *Runtime) Stats(window string) (Stats, error) {
+func (r *Runtime) Stats(rangeSeconds int) (Stats, error) {
 	dpStats, err := r.stats.ReadStats()
 	if err != nil {
 		return Stats{}, fmt.Errorf("read dataplane stats: %w", err)
 	}
 
+	rangeDuration, err := normalizeStatsRange(rangeSeconds, r.statsCollectStep, r.statsKeepWindow)
+	if err != nil {
+		return Stats{}, err
+	}
+	query := buildStatsQuery(rangeDuration, r.statsCollectStep)
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	current := newStats(r.rules, dpStats)
-	history, err := r.buildStatsHistory(time.Now().UTC(), current, window)
+	current.RangeSeconds = int(rangeDuration / time.Second)
+	current.CollectIntervalSeconds = int(r.statsCollectStep / time.Second)
+	current.RetentionSeconds = int(r.statsKeepWindow / time.Second)
+	current.DisplayStepSeconds = int(query.Step / time.Second)
+
+	history, err := r.buildStatsHistory(time.Now().UTC(), current, query)
 	if err != nil {
 		return Stats{}, err
 	}
-	stageHistory, err := r.buildDiagnosticHistory(time.Now().UTC(), current, window)
+	stageHistory, err := r.buildDiagnosticHistory(time.Now().UTC(), current, query)
 	if err != nil {
 		return Stats{}, err
 	}
@@ -182,7 +191,6 @@ func newStatus(cfg config.Config, rules rule.RuleSet) Status {
 		Enabled:     len(enabledRuleSet(rules).Rules),
 	}
 }
-
 func (r *Runtime) ListRules() []rule.Rule {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

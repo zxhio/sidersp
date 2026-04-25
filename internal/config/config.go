@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -32,8 +33,8 @@ type DataplaneConfig struct {
 }
 
 type ConsoleConfig struct {
-	ListenAddr   string             `yaml:"listen_addr"`
-	StatsHistory StatsHistoryConfig `yaml:"stats_history"`
+	ListenAddr string             `yaml:"listen_addr"`
+	Stats      ConsoleStatsConfig `yaml:"stats"`
 }
 
 type EgressConfig struct {
@@ -86,22 +87,14 @@ type LoggingConfig struct {
 	Compress   bool   `yaml:"compress"`
 }
 
-type StatsHistoryConfig struct {
-	Windows []StatsHistoryWindowConfig `yaml:"windows"`
+type ConsoleStatsConfig struct {
+	CollectInterval string `yaml:"collect_interval"`
+	Retention       string `yaml:"retention"`
 }
 
-type StatsHistoryWindowConfig struct {
-	Name   string `yaml:"name"`
-	Window string `yaml:"window"`
-	Step   string `yaml:"step"`
-	Limit  int    `yaml:"limit"`
-}
-
-type ParsedStatsHistoryWindow struct {
-	Name   string
-	Window time.Duration
-	Step   time.Duration
-	Limit  int
+type ParsedConsoleStatsConfig struct {
+	CollectInterval time.Duration
+	Retention       time.Duration
 }
 
 func Load(path string) (Config, error) {
@@ -127,6 +120,7 @@ func Load(path string) (Config, error) {
 
 func (c *Config) applyDefaults() {
 	c.Dataplane.applyDefaults()
+	c.Console.applyDefaults()
 	c.Logging.applyDefaults()
 }
 
@@ -149,8 +143,8 @@ func (c Config) validate() error {
 	if strings.TrimSpace(c.Console.ListenAddr) == "" {
 		return fmt.Errorf("console.listen_addr is required")
 	}
-	if _, err := c.Console.ParsedStatsHistoryWindows(); err != nil {
-		return fmt.Errorf("console.stats_history: %w", err)
+	if _, err := c.Console.ParsedStats(); err != nil {
+		return fmt.Errorf("console.stats: %w", err)
 	}
 	if err := c.Response.validate(); err != nil {
 		return fmt.Errorf("response: %w", err)
@@ -174,6 +168,15 @@ func validateAttachMode(raw string) error {
 func (c *DataplaneConfig) applyDefaults() {
 	if strings.TrimSpace(c.IngressVerdict) == "" {
 		c.IngressVerdict = "pass"
+	}
+}
+
+func (c *ConsoleConfig) applyDefaults() {
+	if strings.TrimSpace(c.Stats.CollectInterval) == "" {
+		c.Stats.CollectInterval = "10s"
+	}
+	if strings.TrimSpace(c.Stats.Retention) == "" {
+		c.Stats.Retention = "30d"
 	}
 }
 
@@ -322,66 +325,63 @@ func (c LoggingConfig) validate() error {
 	return nil
 }
 
-func DefaultStatsHistoryWindows() []StatsHistoryWindowConfig {
-	return []StatsHistoryWindowConfig{
-		{Name: "10min", Window: "10m", Step: "10s", Limit: 60},
-		{Name: "1d", Window: "24h", Step: "15m", Limit: 96},
-		{Name: "30d", Window: "720h", Step: "8h", Limit: 90},
+func (c ConsoleConfig) ParsedStats() (ParsedConsoleStatsConfig, error) {
+	collectIntervalRaw := strings.TrimSpace(c.Stats.CollectInterval)
+	if collectIntervalRaw == "" {
+		collectIntervalRaw = "10s"
 	}
+	collectInterval, err := parseConsoleDuration(collectIntervalRaw)
+	if err != nil {
+		return ParsedConsoleStatsConfig{}, fmt.Errorf("collect_interval: %w", err)
+	}
+	if collectInterval <= 0 {
+		return ParsedConsoleStatsConfig{}, fmt.Errorf("collect_interval must be > 0")
+	}
+	if collectInterval > 10*time.Minute {
+		return ParsedConsoleStatsConfig{}, fmt.Errorf("collect_interval must be <= 10m")
+	}
+
+	retentionRaw := strings.TrimSpace(c.Stats.Retention)
+	if retentionRaw == "" {
+		retentionRaw = "30d"
+	}
+	retention, err := parseConsoleDuration(retentionRaw)
+	if err != nil {
+		return ParsedConsoleStatsConfig{}, fmt.Errorf("retention: %w", err)
+	}
+	if retention <= 0 {
+		return ParsedConsoleStatsConfig{}, fmt.Errorf("retention must be > 0")
+	}
+	if retention < 10*time.Minute {
+		return ParsedConsoleStatsConfig{}, fmt.Errorf("retention must be >= 10m")
+	}
+	if retention < collectInterval {
+		return ParsedConsoleStatsConfig{}, fmt.Errorf("retention must be >= collect_interval")
+	}
+
+	return ParsedConsoleStatsConfig{
+		CollectInterval: collectInterval,
+		Retention:       retention,
+	}, nil
 }
 
-func (c ConsoleConfig) ParsedStatsHistoryWindows() ([]ParsedStatsHistoryWindow, error) {
-	items := c.StatsHistory.Windows
-	if len(items) == 0 {
-		items = DefaultStatsHistoryWindows()
+func parseConsoleDuration(raw string) (time.Duration, error) {
+	value := strings.TrimSpace(strings.ToLower(raw))
+	if value == "" {
+		return 0, fmt.Errorf("duration is required")
+	}
+	if strings.HasSuffix(value, "d") {
+		daysRaw := strings.TrimSpace(strings.TrimSuffix(value, "d"))
+		days, err := strconv.ParseInt(daysRaw, 10, 64)
+		if err != nil || days <= 0 {
+			return 0, fmt.Errorf("invalid day duration %q", raw)
+		}
+		return time.Duration(days) * 24 * time.Hour, nil
 	}
 
-	parsed := make([]ParsedStatsHistoryWindow, 0, len(items))
-	seen := make(map[string]struct{}, len(items))
-	for _, item := range items {
-		name := strings.TrimSpace(item.Name)
-		if name == "" {
-			return nil, fmt.Errorf("window name is required")
-		}
-		if _, ok := seen[name]; ok {
-			return nil, fmt.Errorf("duplicate window name %q", name)
-		}
-		seen[name] = struct{}{}
-
-		window, err := time.ParseDuration(strings.TrimSpace(item.Window))
-		if err != nil {
-			return nil, fmt.Errorf("window %q duration: %w", name, err)
-		}
-		if window <= 0 {
-			return nil, fmt.Errorf("window %q duration must be > 0", name)
-		}
-
-		step, err := time.ParseDuration(strings.TrimSpace(item.Step))
-		if err != nil {
-			return nil, fmt.Errorf("window %q step: %w", name, err)
-		}
-		if step <= 0 {
-			return nil, fmt.Errorf("window %q step must be > 0", name)
-		}
-		if step > window {
-			return nil, fmt.Errorf("window %q step must be <= window", name)
-		}
-
-		limit := item.Limit
-		if limit <= 0 {
-			limit = int(window / step)
-			if limit <= 0 {
-				limit = 1
-			}
-		}
-
-		parsed = append(parsed, ParsedStatsHistoryWindow{
-			Name:   name,
-			Window: window,
-			Step:   step,
-			Limit:  limit,
-		})
+	dur, err := time.ParseDuration(value)
+	if err != nil {
+		return 0, err
 	}
-
-	return parsed, nil
+	return dur, nil
 }

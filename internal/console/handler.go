@@ -55,18 +55,19 @@ func (h Handler) setLogLevel(c *gin.Context) {
 }
 
 func (h Handler) getStats(c *gin.Context) {
-	window := strings.TrimSpace(c.Query("window"))
-	item, err := h.service.Stats(window)
+	rangeSeconds, err := parseRangeSecondsQuery(c.Query("range_seconds"))
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
+		return
+	}
+
+	item, err := h.service.Stats(rangeSeconds)
 	if err != nil {
 		writeServiceError(c, err)
 		return
 	}
 
 	c.JSON(http.StatusOK, dataEnvelope{Data: newStatsResponse(item)})
-}
-
-func (h Handler) listStatsWindows(c *gin.Context) {
-	c.JSON(http.StatusOK, dataEnvelope{Data: h.service.StatsWindows()})
 }
 
 func (h Handler) listRules(c *gin.Context) {
@@ -224,8 +225,8 @@ func writeServiceError(c *gin.Context, err error) {
 		writeError(c, http.StatusConflict, "CONFLICT", "rule already exists")
 	case errors.Is(err, controlplane.ErrRuleValidation):
 		writeError(c, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
-	case errors.Is(err, controlplane.ErrStatsWindowNotFound):
-		writeError(c, http.StatusBadRequest, "VALIDATION_FAILED", "invalid stats window")
+	case errors.Is(err, controlplane.ErrStatsRangeInvalid):
+		writeError(c, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
 	default:
 		logrus.WithError(err).Error("Console request failed")
 		writeError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "internal error")
@@ -269,6 +270,18 @@ func parsePage(c *gin.Context) (int, int, error) {
 	}
 
 	return page, pageSize, nil
+}
+
+func parseRangeSecondsQuery(raw string) (int, error) {
+	if strings.TrimSpace(raw) == "" {
+		return 600, nil
+	}
+
+	rangeSeconds, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || rangeSeconds <= 0 {
+		return 0, fmt.Errorf("range_seconds must be a positive integer")
+	}
+	return rangeSeconds, nil
 }
 
 func newStatusResponse(item controlplane.Status) StatusResponse {
@@ -382,13 +395,17 @@ func newStatsResponse(item controlplane.Stats) StatsResponse {
 			MatchedRules:      item.Overview.MatchedRules,
 			PrimaryIssueStage: item.Overview.PrimaryIssueStage,
 		},
-		Stages:         stages,
-		RXPackets:      item.RXPackets,
-		ParseFailed:    item.ParseFailed,
-		RuleCandidates: item.RuleCandidates,
-		MatchedRules:   item.MatchedRules,
-		Histories:      histories,
-		StageHistories: stageHistories,
+		Stages:                 stages,
+		RangeSeconds:           item.RangeSeconds,
+		CollectIntervalSeconds: item.CollectIntervalSeconds,
+		RetentionSeconds:       item.RetentionSeconds,
+		DisplayStepSeconds:     item.DisplayStepSeconds,
+		RXPackets:              item.RXPackets,
+		ParseFailed:            item.ParseFailed,
+		RuleCandidates:         item.RuleCandidates,
+		MatchedRules:           item.MatchedRules,
+		Histories:              histories,
+		StageHistories:         stageHistories,
 	}
 	out.TotalRules = intPtr(item.TotalRules)
 	out.EnabledRules = intPtr(item.EnabledRules)

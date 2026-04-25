@@ -244,7 +244,7 @@ func TestStatsReturnsRuntimeAndDataplaneCounters(t *testing.T) {
 		},
 	}
 
-	got, err := r.Stats("1d")
+	got, err := r.Stats(600)
 	if err != nil {
 		t.Fatalf("Stats() error = %v", err)
 	}
@@ -253,6 +253,9 @@ func TestStatsReturnsRuntimeAndDataplaneCounters(t *testing.T) {
 	}
 	if got.Overview.TotalRules != 2 || got.Overview.EnabledRules != 1 {
 		t.Fatalf("overview = %+v, want total=2 enabled=1", got.Overview)
+	}
+	if got.RangeSeconds != 600 || got.CollectIntervalSeconds != 10 || got.DisplayStepSeconds != 10 {
+		t.Fatalf("stats timing = %+v, want range=600 collect=10 display=10", got)
 	}
 	if got.RXPackets != 100 || got.MatchedRules != 7 {
 		t.Fatalf("dataplane stats = %+v, want rx=100 matched=7", got)
@@ -278,8 +281,8 @@ func TestStatsReturnsRuntimeAndDataplaneCounters(t *testing.T) {
 	if len(got.Histories) != 1 {
 		t.Fatalf("histories len = %d, want 1", len(got.Histories))
 	}
-	if got.Histories[0].Name != "1d" {
-		t.Fatalf("first history = %+v, want name=1d", got.Histories[0])
+	if got.Histories[0].Window != "10m0s" {
+		t.Fatalf("first history = %+v, want window=10m0s", got.Histories[0])
 	}
 	if len(got.StageHistories) != 1 {
 		t.Fatalf("stage histories len = %d, want 1", len(got.StageHistories))
@@ -310,28 +313,14 @@ func TestRuleMatchCountsReturnsPerRuleCounters(t *testing.T) {
 	}
 }
 
-func TestStatsRejectsUnknownWindow(t *testing.T) {
+func TestStatsRejectsInvalidRange(t *testing.T) {
 	t.Parallel()
 
 	r := NewRuntime(config.Config{}, &testSyncer{}, testStreamer{}, testStatsReader{})
 
-	_, err := r.Stats("bad")
-	if !errors.Is(err, ErrStatsWindowNotFound) {
-		t.Fatalf("Stats() error = %v, want %v", err, ErrStatsWindowNotFound)
-	}
-}
-
-func TestStatsWindowsReturnsConfiguredWindows(t *testing.T) {
-	t.Parallel()
-
-	r := NewRuntime(config.Config{}, &testSyncer{}, testStreamer{}, testStatsReader{})
-
-	got := r.StatsWindows()
-	if len(got) != 3 {
-		t.Fatalf("StatsWindows len = %d, want 3", len(got))
-	}
-	if got[0] != "10min" || got[1] != "1d" || got[2] != "30d" {
-		t.Fatalf("StatsWindows = %+v, want default windows", got)
+	_, err := r.Stats(601)
+	if !errors.Is(err, ErrStatsRangeInvalid) {
+		t.Fatalf("Stats() error = %v, want %v", err, ErrStatsRangeInvalid)
 	}
 }
 
@@ -399,7 +388,7 @@ func TestAppendRawStatsPointMergesSameBucket(t *testing.T) {
 	}
 }
 
-func TestAggregateStatsPointsUsesWindowStepAndLimit(t *testing.T) {
+func TestAggregateStatsPointsUsesRangeStepAndLimit(t *testing.T) {
 	t.Parallel()
 
 	now := time.Date(2026, 4, 16, 12, 0, 0, 0, time.UTC)
@@ -409,15 +398,27 @@ func TestAggregateStatsPointsUsesWindowStepAndLimit(t *testing.T) {
 		{Timestamp: now.Add(-8 * time.Minute), RXPackets: 3},
 		{Timestamp: now.Add(-2 * time.Minute), RXPackets: 4},
 	}
-	plan := config.ParsedStatsHistoryWindow{Name: "recent", Window: 10 * time.Minute, Step: 5 * time.Minute, Limit: 2}
+	query := StatsQuery{Range: 10 * time.Minute, Step: 5 * time.Minute, Limit: 2}
 	current := Stats{RXPackets: 5}
 
-	points := aggregateStatsPoints(history, now, plan, current)
+	points := aggregateStatsPoints(history, now, query, current)
 
 	if len(points) != 2 {
 		t.Fatalf("points len = %d, want 2", len(points))
 	}
 	if points[0].RXPackets != 4 || points[1].RXPackets != 5 {
 		t.Fatalf("points = %+v, want rx_packets [4,5]", points)
+	}
+}
+
+func TestBuildStatsQueryAlignsDisplayStep(t *testing.T) {
+	t.Parallel()
+
+	query := buildStatsQuery(24*time.Hour, 10*time.Second)
+	if query.Step != 15*time.Minute {
+		t.Fatalf("query.Step = %v, want %v", query.Step, 15*time.Minute)
+	}
+	if query.Limit != maxStatsDisplayPoints {
+		t.Fatalf("query.Limit = %d, want %d", query.Limit, maxStatsDisplayPoints)
 	}
 }

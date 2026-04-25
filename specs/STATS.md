@@ -59,16 +59,51 @@ Current metric mapping:
 - Rule counts such as `total_rules` and `enabled_rules` are management-plane
   context. They are not dataplane diagnostic stages.
 
+## Console Config
+
+Console stats config uses one collection interval and one raw-history retention
+period:
+
+```yaml
+console:
+  listen_addr: 127.0.0.1:8080
+  stats:
+    collect_interval: 10s
+    retention: 30d
+```
+
+- `collect_interval` is the raw dataplane stats collection cadence.
+- `retention` is the raw sampled-history retention window.
+- The current console requires `collect_interval <= 10m`.
+- The current console requires `retention >= 10m`.
+
 ## Console / API Shape
 
-The stats API exposes three views of the same state:
+The stats API exposes:
 
 - `overview`: top-level rule counts, packet baseline, and the current primary issue stage
 - `stages`: current values grouped by diagnostic stage
 - `stage_histories`: history grouped by stage and metric
+- `range_seconds`: requested history range in seconds
+- `collect_interval_seconds`: configured raw collection cadence
+- `retention_seconds`: configured raw history retention
+- `display_step_seconds`: actual bucket size used to build history points
 
 Legacy flat fields may be retained temporarily for frontend migration, but the
 grouped stage model is the canonical contract.
+
+The stats query is request-driven:
+
+```text
+GET /api/v1/stats?range_seconds=86400
+```
+
+Rules:
+
+- `range_seconds` defaults to `600`
+- `range_seconds` must be a positive multiple of `600`
+- `range_seconds` must not exceed `retention`
+- history points are aggregated on demand from retained raw samples
 
 ## Recommended Troubleshooting Order
 

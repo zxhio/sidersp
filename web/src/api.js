@@ -68,15 +68,10 @@ export async function disableRule(id) {
   return res.data
 }
 
-export async function getStats(window = '') {
+export async function getStats(rangeSeconds = 600) {
   const params = new URLSearchParams()
-  if (window) params.set('window', window)
+  if (rangeSeconds) params.set('range_seconds', String(rangeSeconds))
   const query = params.toString() ? `?${params.toString()}` : ''
   const res = await request(`/stats${query}`)
-  return res.data
-}
-
-export async function getStatsWindows() {
-  const res = await request('/stats/windows')
   return res.data
 }

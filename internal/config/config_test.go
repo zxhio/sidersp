@@ -37,15 +37,12 @@ console:
 	if cfg.Dataplane.NormalizedIngressVerdict() != "pass" {
 		t.Fatalf("Dataplane ingress verdict = %q, want pass", cfg.Dataplane.NormalizedIngressVerdict())
 	}
-	windows, err := cfg.Console.ParsedStatsHistoryWindows()
+	stats, err := cfg.Console.ParsedStats()
 	if err != nil {
-		t.Fatalf("ParsedStatsHistoryWindows() error = %v", err)
+		t.Fatalf("ParsedStats() error = %v", err)
 	}
-	if len(windows) != 3 {
-		t.Fatalf("len(windows) = %d, want 3", len(windows))
-	}
-	if windows[1].Step != 15*time.Minute || windows[2].Step != 8*time.Hour {
-		t.Fatalf("default windows = %+v, want 1d=15m 30d=8h", windows)
+	if stats.CollectInterval != 10*time.Second || stats.Retention != 30*24*time.Hour {
+		t.Fatalf("default console stats = %+v, want collect_interval=10s retention=30d", stats)
 	}
 }
 
@@ -182,7 +179,7 @@ console:
 	}
 }
 
-func TestLoadStatsHistoryConfig(t *testing.T) {
+func TestLoadConsoleStatsConfig(t *testing.T) {
 	t.Parallel()
 
 	path := writeConfigFile(t, `controlplane:
@@ -193,12 +190,9 @@ dataplane:
 
 console:
   listen_addr: 127.0.0.1:8080
-  stats_history:
-    windows:
-      - name: recent
-        window: 30m
-        step: 1m
-        limit: 30
+  stats:
+    collect_interval: 15s
+    retention: 7d
 `)
 
 	cfg, err := Load(path)
@@ -206,15 +200,12 @@ console:
 		t.Fatalf("Load() error = %v", err)
 	}
 
-	windows, err := cfg.Console.ParsedStatsHistoryWindows()
+	stats, err := cfg.Console.ParsedStats()
 	if err != nil {
-		t.Fatalf("ParsedStatsHistoryWindows() error = %v", err)
+		t.Fatalf("ParsedStats() error = %v", err)
 	}
-	if len(windows) != 1 {
-		t.Fatalf("len(windows) = %d, want 1", len(windows))
-	}
-	if windows[0].Name != "recent" || windows[0].Window != 30*time.Minute || windows[0].Step != time.Minute || windows[0].Limit != 30 {
-		t.Fatalf("window = %+v, want name=recent window=30m step=1m limit=30", windows[0])
+	if stats.CollectInterval != 15*time.Second || stats.Retention != 7*24*time.Hour {
+		t.Fatalf("console stats = %+v, want collect_interval=15s retention=7d", stats)
 	}
 }
 
@@ -461,10 +452,47 @@ console:
 	}
 }
 
-func TestLoadRejectsInvalidStatsHistoryWindow(t *testing.T) {
+func TestLoadRejectsInvalidConsoleStatsConfig(t *testing.T) {
 	t.Parallel()
 
-	path := writeConfigFile(t, `controlplane:
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "bad collect interval",
+			body: "collect_interval: bad\n    retention: 30d",
+			want: "console.stats: collect_interval",
+		},
+		{
+			name: "collect interval too large",
+			body: "collect_interval: 11m\n    retention: 30d",
+			want: "console.stats: collect_interval must be <= 10m",
+		},
+		{
+			name: "bad retention",
+			body: "collect_interval: 10s\n    retention: bad",
+			want: "console.stats: retention",
+		},
+		{
+			name: "retention too small",
+			body: "collect_interval: 10s\n    retention: 5m",
+			want: "console.stats: retention must be >= 10m",
+		},
+		{
+			name: "retention smaller than collect interval",
+			body: "collect_interval: 30m\n    retention: 20m",
+			want: "console.stats: collect_interval must be <= 10m",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			path := writeConfigFile(t, `controlplane:
   rules_path: configs/rules.example.yaml
 
 dataplane:
@@ -472,20 +500,19 @@ dataplane:
 
 console:
   listen_addr: 127.0.0.1:8080
-  stats_history:
-    windows:
-      - name: bad
-        window: bad
-        step: 10s
+  stats:
+    `+tc.body+`
 `)
 
-	_, err := Load(path)
-	if err == nil {
-		t.Fatal("Load() error = nil, want stats history window validation error")
-	}
+			_, err := Load(path)
+			if err == nil {
+				t.Fatal("Load() error = nil, want console stats validation error")
+			}
 
-	if !strings.Contains(err.Error(), "console.stats_history") {
-		t.Fatalf("Load() error = %q, want stats history window error", err)
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Load() error = %q, want %q", err, tc.want)
+			}
+		})
 	}
 }
 
