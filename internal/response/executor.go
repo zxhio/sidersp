@@ -4,10 +4,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"net"
-
-	"github.com/google/gopacket"
-	"github.com/google/gopacket/layers"
 )
 
 type frameTransmitter interface {
@@ -104,40 +100,43 @@ func (e *ResponseExecutor) recordFailure(result ResponseResult, err error) {
 }
 
 func fillTupleFields(result *ResponseResult, frame []byte) {
-	packet := gopacket.NewPacket(frame, layers.LayerTypeEthernet, gopacket.Default)
-	if ipLayer := packet.Layer(layers.LayerTypeIPv4); ipLayer != nil {
-		if ip4, ok := ipLayer.(*layers.IPv4); ok {
-			result.SIP = ipv4ToUint32(ip4.SrcIP)
-			result.DIP = ipv4ToUint32(ip4.DstIP)
-			result.IPProto = uint8(ip4.Protocol)
-		}
-	}
-	if tcpLayer := packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {
-		if tcp, ok := tcpLayer.(*layers.TCP); ok {
-			result.SPort = uint16(tcp.SrcPort)
-			result.DPort = uint16(tcp.DstPort)
-		}
+	eth, err := parseTupleEthernetFrame(frame)
+	if err != nil {
 		return
 	}
-	if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
-		if udp, ok := udpLayer.(*layers.UDP); ok {
-			result.SPort = uint16(udp.SrcPort)
-			result.DPort = uint16(udp.DstPort)
-		}
-		return
-	}
-	if arpLayer := packet.Layer(layers.LayerTypeARP); arpLayer != nil {
-		if arp, ok := arpLayer.(*layers.ARP); ok {
-			result.SIP = ipv4ToUint32(net.IP(arp.SourceProtAddress))
-			result.DIP = ipv4ToUint32(net.IP(arp.DstProtAddress))
-		}
-	}
-}
 
-func ipv4ToUint32(ip net.IP) uint32 {
-	ip4 := ip.To4()
-	if ip4 == nil {
-		return 0
+	switch eth.etherType {
+	case fastpktEtherTypeIPv4:
+		ip4, err := parseIPv4Packet(eth.payload, "fill tuple fields")
+		if err != nil {
+			return
+		}
+		result.SIP = binary.BigEndian.Uint32(ip4.src[:])
+		result.DIP = binary.BigEndian.Uint32(ip4.dst[:])
+		result.IPProto = ip4.protocol
+
+		switch ip4.protocol {
+		case fastpktIPProtoTCP:
+			tcp, err := parseTCPPacket(ip4.payload, "fill tuple fields")
+			if err != nil {
+				return
+			}
+			result.SPort = tcp.srcPort
+			result.DPort = tcp.dstPort
+		case fastpktIPProtoUDP:
+			udp, err := parseUDPPacket(ip4.payload)
+			if err != nil {
+				return
+			}
+			result.SPort = udp.srcPort
+			result.DPort = udp.dstPort
+		}
+	case fastpktEtherTypeARP:
+		arp, err := parseARPPacket(eth.payload)
+		if err != nil {
+			return
+		}
+		result.SIP = binary.BigEndian.Uint32(arp.srcProt[:])
+		result.DIP = binary.BigEndian.Uint32(arp.dstProt[:])
 	}
-	return binary.BigEndian.Uint32(ip4)
 }

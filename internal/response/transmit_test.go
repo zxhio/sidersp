@@ -23,6 +23,11 @@ func (s *stubIPv4Transmitter) TransmitIPv4(_ context.Context, packet []byte) err
 	return s.err
 }
 
+func (s *stubIPv4Transmitter) TransmitIPv4Borrowed(_ context.Context, packet []byte) error {
+	s.packets = append(s.packets, append([]byte(nil), packet...))
+	return s.err
+}
+
 func (s *stubIPv4Transmitter) Close() error {
 	s.closed = true
 	return nil
@@ -31,6 +36,20 @@ func (s *stubIPv4Transmitter) Close() error {
 func (s *stubFrameTransmitter) Transmit(_ context.Context, frame []byte) error {
 	s.frames = append(s.frames, append([]byte(nil), frame...))
 	return s.err
+}
+
+func (s *stubFrameTransmitter) TransmitBorrowed(_ context.Context, frame []byte) error {
+	s.frames = append(s.frames, append([]byte(nil), frame...))
+	return s.err
+}
+
+type retainingFrameTransmitter struct {
+	frames [][]byte
+}
+
+func (t *retainingFrameTransmitter) Transmit(_ context.Context, frame []byte) error {
+	t.frames = append(t.frames, frame)
+	return nil
 }
 
 func (s *stubFrameTransmitter) Close() error {
@@ -111,5 +130,26 @@ func TestActionTXMuxUsesARPEgressForARPReply(t *testing.T) {
 	}
 	if len(defaultTX.frames) != 0 {
 		t.Fatalf("same-interface frames = %d, want 0", len(defaultTX.frames))
+	}
+}
+
+func TestSameInterfaceTXDoesNotReuseBufferForNonBorrowedTransmitter(t *testing.T) {
+	t.Parallel()
+
+	tx := &retainingFrameTransmitter{}
+	same := &sameInterfaceTX{tx: tx}
+	request := buildTestICMPEchoRequest(t)
+
+	if err := same.Transmit(context.Background(), XSKMetadata{Action: ActionICMPEchoReply}, request, BuildOptions{}); err != nil {
+		t.Fatalf("first Transmit() error = %v", err)
+	}
+	if err := same.Transmit(context.Background(), XSKMetadata{Action: ActionICMPEchoReply}, request, BuildOptions{}); err != nil {
+		t.Fatalf("second Transmit() error = %v", err)
+	}
+	if len(tx.frames) != 2 {
+		t.Fatalf("frames = %d, want 2", len(tx.frames))
+	}
+	if &tx.frames[0][0] == &tx.frames[1][0] {
+		t.Fatal("Transmit() reused the same backing buffer for a non-borrowed transmitter")
 	}
 }

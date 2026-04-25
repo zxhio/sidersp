@@ -110,6 +110,30 @@ func TestResponseExecutorRecordsTransmitFailure(t *testing.T) {
 	}
 }
 
+func TestResponseExecutorRecordsBuildFailureForVLANRequestKeepsTuple(t *testing.T) {
+	t.Parallel()
+
+	results := newTestResultBuffer(t, 4)
+	tx := &stubTransmitter{}
+	executor := newTestExecutor(t, tx, results, BuildOptions{})
+
+	err := executor.Execute(context.Background(), XSKMetadata{
+		RuleID: 1006,
+		Action: ActionICMPEchoReply,
+	}, buildTestVLANICMPEchoRequest(t))
+	if err == nil {
+		t.Fatal("Execute() error = nil, want build error")
+	}
+
+	recorded := results.List()
+	if len(recorded) != 1 {
+		t.Fatalf("results = %d, want 1", len(recorded))
+	}
+	if recorded[0].SIP != 0x0a000001 || recorded[0].DIP != 0x0a000002 || recorded[0].IPProto != 1 {
+		t.Fatalf("result tuple = sip %x dip %x proto %d, want vlan request tuple", recorded[0].SIP, recorded[0].DIP, recorded[0].IPProto)
+	}
+}
+
 func TestResponseExecutorRejectsUnsupportedActionWithoutResult(t *testing.T) {
 	t.Parallel()
 
@@ -178,7 +202,7 @@ func TestResponseExecutorRejectsShortXSKFrame(t *testing.T) {
 	}
 }
 
-func newTestExecutor(t *testing.T, tx frameTransmitter, results *ResultBuffer, opts BuildOptions) *ResponseExecutor {
+func newTestExecutor(t testing.TB, tx frameTransmitter, results *ResultBuffer, opts BuildOptions) *ResponseExecutor {
 	t.Helper()
 
 	executor, err := NewResponseExecutor(ResponseExecutorConfig{
@@ -194,7 +218,7 @@ func newTestExecutor(t *testing.T, tx frameTransmitter, results *ResultBuffer, o
 	return executor
 }
 
-func buildTestXSKFrame(t *testing.T, meta XSKMetadata, payload []byte) []byte {
+func buildTestXSKFrame(t testing.TB, meta XSKMetadata, payload []byte) []byte {
 	t.Helper()
 
 	frame := make([]byte, XSKMetadataSize+len(payload))

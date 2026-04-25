@@ -180,7 +180,7 @@ func TestBuildResponseFrameRejectsIncompatiblePackets(t *testing.T) {
 	}
 }
 
-func buildTestICMPEchoRequest(t *testing.T) []byte {
+func buildTestICMPEchoRequest(t testing.TB) []byte {
 	t.Helper()
 
 	eth := &layers.Ethernet{SrcMAC: testSrcMAC, DstMAC: testDstMAC, EthernetType: layers.EthernetTypeIPv4}
@@ -196,7 +196,7 @@ func buildTestICMPEchoRequest(t *testing.T) []byte {
 	return serializeTestLayers(t, eth, ip4, icmp, gopacket.Payload([]byte("payload")))
 }
 
-func buildTestVLANICMPEchoRequest(t *testing.T) []byte {
+func buildTestVLANICMPEchoRequest(t testing.TB) []byte {
 	t.Helper()
 
 	eth := &layers.Ethernet{SrcMAC: testSrcMAC, DstMAC: testDstMAC, EthernetType: layers.EthernetTypeDot1Q}
@@ -213,7 +213,7 @@ func buildTestVLANICMPEchoRequest(t *testing.T) []byte {
 	return serializeTestLayers(t, eth, vlan, ip4, icmp, gopacket.Payload([]byte("payload")))
 }
 
-func buildTestARPRequest(t *testing.T) []byte {
+func buildTestARPRequest(t testing.TB) []byte {
 	t.Helper()
 
 	broadcast := net.HardwareAddr{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
@@ -227,12 +227,12 @@ func buildTestARPRequest(t *testing.T) []byte {
 	return serializeTestLayers(t, eth, arp)
 }
 
-func buildTestTCPSyn(t *testing.T) []byte {
+func buildTestTCPSyn(t testing.TB) []byte {
 	t.Helper()
 	return buildTestTCPPacket(t, true, false)
 }
 
-func buildTestTCPSynWithPayload(t *testing.T) []byte {
+func buildTestTCPSynWithPayload(t testing.TB) []byte {
 	t.Helper()
 
 	eth := &layers.Ethernet{SrcMAC: testSrcMAC, DstMAC: testDstMAC, EthernetType: layers.EthernetTypeIPv4}
@@ -251,7 +251,7 @@ func buildTestTCPSynWithPayload(t *testing.T) []byte {
 	return serializeTestLayers(t, eth, ip4, tcp, gopacket.Payload([]byte("syn-data")))
 }
 
-func buildTestTCPPacket(t *testing.T, syn, ack bool) []byte {
+func buildTestTCPPacket(t testing.TB, syn, ack bool) []byte {
 	t.Helper()
 
 	eth := &layers.Ethernet{SrcMAC: testSrcMAC, DstMAC: testDstMAC, EthernetType: layers.EthernetTypeIPv4}
@@ -270,7 +270,7 @@ func buildTestTCPPacket(t *testing.T, syn, ack bool) []byte {
 	return serializeTestLayers(t, eth, ip4, tcp)
 }
 
-func serializeTestLayers(t *testing.T, items ...gopacket.SerializableLayer) []byte {
+func serializeTestLayers(t testing.TB, items ...gopacket.SerializableLayer) []byte {
 	t.Helper()
 
 	buffer := gopacket.NewSerializeBuffer()
@@ -282,7 +282,7 @@ func serializeTestLayers(t *testing.T, items ...gopacket.SerializableLayer) []by
 	return buffer.Bytes()
 }
 
-func parseTestPacket(t *testing.T, frame []byte) gopacket.Packet {
+func parseTestPacket(t testing.TB, frame []byte) gopacket.Packet {
 	t.Helper()
 
 	packet := gopacket.NewPacket(frame, layers.LayerTypeEthernet, gopacket.Default)

@@ -43,6 +43,14 @@ func newICMPEgressSender(ifaceName string) (*icmpEgressSender, error) {
 }
 
 func (t *icmpEgressSender) TransmitIPv4(ctx context.Context, packet []byte) error {
+	return t.transmitIPv4(ctx, packet)
+}
+
+func (t *icmpEgressSender) TransmitIPv4Borrowed(ctx context.Context, packet []byte) error {
+	return t.transmitIPv4(ctx, packet)
+}
+
+func (t *icmpEgressSender) transmitIPv4(ctx context.Context, packet []byte) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -95,6 +103,14 @@ func newFrameEgressSender(ifaceName string) (*frameEgressSender, error) {
 }
 
 func (t *frameEgressSender) Transmit(ctx context.Context, frame []byte) error {
+	return t.transmit(ctx, frame)
+}
+
+func (t *frameEgressSender) TransmitBorrowed(ctx context.Context, frame []byte) error {
+	return t.transmit(ctx, frame)
+}
+
+func (t *frameEgressSender) transmit(ctx context.Context, frame []byte) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}

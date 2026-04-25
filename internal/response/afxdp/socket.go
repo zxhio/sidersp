@@ -198,6 +198,12 @@ func (s *Socket) Transmit(_ context.Context, frame []byte) error {
 	return nil
 }
 
+// TransmitBorrowed consumes the frame synchronously and does not retain the
+// caller-owned slice after return.
+func (s *Socket) TransmitBorrowed(ctx context.Context, frame []byte) error {
+	return s.Transmit(ctx, frame)
+}
+
 // Close completes pending TX, unmaps all rings and UMEM, and closes the socket.
 func (s *Socket) Close() error {
 	s.completeAll()

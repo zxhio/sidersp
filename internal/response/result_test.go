@@ -205,7 +205,7 @@ func TestResponseActionName(t *testing.T) {
 	}
 }
 
-func newTestResultBuffer(t *testing.T, capacity int) *ResultBuffer {
+func newTestResultBuffer(t testing.TB, capacity int) *ResultBuffer {
 	t.Helper()
 
 	buffer, err := NewResultBuffer(capacity)
@@ -215,7 +215,7 @@ func newTestResultBuffer(t *testing.T, capacity int) *ResultBuffer {
 	return buffer
 }
 
-func recordTestResult(t *testing.T, buffer *ResultBuffer, result ResponseResult) {
+func recordTestResult(t testing.TB, buffer *ResultBuffer, result ResponseResult) {
 	t.Helper()
 
 	if err := buffer.Record(result); err != nil {

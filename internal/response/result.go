@@ -129,6 +129,10 @@ func isResponseAction(action string) bool {
 }
 
 func logResult(result ResponseResult) {
+	if result.Result != ResultFailed && !logrus.IsLevelEnabled(logrus.DebugLevel) {
+		return
+	}
+
 	fields := logrus.Fields{
 		"rule_id":    result.RuleID,
 		"action":     result.Action,
