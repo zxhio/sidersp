@@ -78,12 +78,6 @@ function findMetricHistory(stageHistory, metricKey) {
   return stageHistory.metrics.find(metric => metric.key === metricKey) || null
 }
 
-function stageHeadline(overview, stages) {
-  if (!overview?.primary_issue_stage) return '无明显异常'
-  const stage = stages.find(item => item.key === overview.primary_issue_stage)
-  return stage ? stage.title : overview.primary_issue_stage
-}
-
 export default function StatsPage() {
   const [stats, setStats] = useState(null)
   const [error, setError] = useState('')
@@ -165,12 +159,6 @@ export default function StatsPage() {
             <div className="status-card-label">规则命中</div>
             <div className="status-card-value" style={{ fontSize: 20 }}>
               {formatValue(overview.matched_rules ?? stats.matched_rules)}
-            </div>
-          </div>
-          <div className="status-card">
-            <div className="status-card-label">当前重点排查</div>
-            <div className="status-card-value" style={{ fontSize: 20 }}>
-              {stageHeadline(overview, stages)}
             </div>
           </div>
         </div>

@@ -69,12 +69,9 @@ export default function Sparkline({ data, color, labels, width, height }) {
     if (!singlePoint) {
       ctx.textAlign = 'center'
       ctx.textBaseline = 'top'
-      const labelInterval = Math.max(1, Math.floor(data.length / 6))
-      for (let i = 0; i < data.length; i += labelInterval) {
-        ctx.fillText(labels ? labels[i] : '', xPos(i), padTop + plotH + 8)
-      }
-      if ((data.length - 1) % labelInterval !== 0) {
-        ctx.fillText(labels ? labels[data.length - 1] : '', xPos(data.length - 1), padTop + plotH + 8)
+      const labelIndices = buildLabelIndices(data.length, plotW)
+      for (const idx of labelIndices) {
+        ctx.fillText(labels ? labels[idx] : '', xPos(idx), padTop + plotH + 8)
       }
     } else if (labels && labels[0]) {
       ctx.textAlign = 'center'
@@ -182,4 +179,22 @@ function formatNum(n) {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M'
   if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K'
   return Math.round(n).toString()
+}
+
+function buildLabelIndices(dataLen, plotW) {
+  if (dataLen <= 1) return [0]
+
+  const minLabelGap = plotW < 260 ? 88 : 72
+  const maxLabels = Math.max(2, Math.floor(plotW / minLabelGap) + 1)
+  const step = Math.max(1, Math.ceil((dataLen - 1) / Math.max(maxLabels - 1, 1)))
+  const indices = []
+
+  for (let i = 0; i < dataLen; i += step) {
+    indices.push(i)
+  }
+  if (indices[indices.length - 1] !== dataLen - 1) {
+    indices.push(dataLen - 1)
+  }
+
+  return indices
 }
