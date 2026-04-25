@@ -11,9 +11,9 @@ Rules reference responses through `response.action`. The control plane validates
 | `none` | `0` | dataplane pass | active | Match silently; final original-packet disposition is `XDP_PASS` or `XDP_DROP` by `dataplane.ingress_verdict` |
 | `alert` | `1` | dataplane observe | active | Emit an observation event; final original-packet disposition is `XDP_PASS` or `XDP_DROP` by `dataplane.ingress_verdict` |
 | `tcp_reset` | `2` | BPF kernel TX | active | Build TCP RST in BPF and send by same-interface `XDP_TX` or configured egress-interface `XDP_REDIRECT` |
-| `icmp_echo_reply` | `3` | XSK RX + user-space TX | active | Redirect the original packet to XSK; user space builds ICMP echo reply and transmits through same-interface XSK TX or configured shared TX egress |
-| `arp_reply` | `4` | XSK RX + user-space TX | active | Redirect the original packet to XSK; user space builds ARP reply and transmits through same-interface XSK TX or configured shared TX egress |
-| `tcp_syn_ack` | `5` | XSK TX | Linux AF_XDP socket implemented, integration pending | Redirect the original packet to XSK; user space builds TCP SYN-ACK |
+| `icmp_echo_reply` | `3` | XSK RX + user-space TX | active | Redirect the original packet to XSK; user space builds ICMP echo reply and transmits through AF_XDP by default or AF_PACKET when egress is configured |
+| `arp_reply` | `4` | XSK RX + user-space TX | active | Redirect the original packet to XSK; user space builds ARP reply and transmits through AF_XDP by default or AF_PACKET when egress is configured |
+| `tcp_syn_ack` | `5` | XSK TX | Linux AF_XDP socket implemented, integration pending | Redirect the original packet to XSK; user space builds TCP SYN-ACK and transmits through AF_XDP by default or AF_PACKET when egress is configured |
 
 Action names are stable snake-case API values. Numeric codes are the dataplane ABI and must stay synchronized with BPF definitions.
 
@@ -69,7 +69,7 @@ Used by `icmp_echo_reply`, `arp_reply`, and `tcp_syn_ack`.
 ```text
 packet -> BPF parse/match -> write xsk_meta into XDP metadata -> XDP_REDIRECT to XSK
 AF_XDP backend -> expose xsk_meta as an 8-byte prefix to the worker
-XSK worker -> read xsk_meta -> parse full original packet -> build response -> same-interface XSK_TX or configured user-space egress TX
+XSK worker -> read xsk_meta -> parse full original packet -> build response -> AF_XDP XSK_TX or AF_PACKET TX
 ```
 
 XSK TX is for actions that need full original packet context. Ringbuf must not be used to carry packet fields required for response construction.
@@ -82,13 +82,14 @@ response packet was transmitted.
 packets that also carry ACK, RST, or FIN fall back to
 `dataplane.ingress_verdict` without XSK redirect.
 
-`icmp_echo_reply` and `arp_reply` use the shared `egress.*` policy surface.
-With `egress.interface: ""`, replies are transmitted through the same AF_XDP
-socket bound to the ingress interface. With a non-empty `egress.interface`,
-the worker still receives and parses the packet
-from ingress XSK, but transmits supported replies through the configured egress
-interface in user space instead of assuming the ingress interface is also the
-transmit interface.
+User-space response actions share one sending abstraction with two transport
+modes:
+
+- `AF_XDP`: default mode when `egress.interface: ""`; the worker transmits
+  built Ethernet frames through the queue-local AF_XDP socket.
+- `AF_PACKET`: enabled when `egress.interface` is non-empty; the worker still
+  receives and parses packets from ingress XSK, but transmits built Ethernet
+  frames through an AF_PACKET socket bound to the configured interface.
 
 The current same-interface response builders reject VLAN-tagged frames until
 VLAN tag preservation is implemented for XSK TX. The `tcp_syn_ack` builder also

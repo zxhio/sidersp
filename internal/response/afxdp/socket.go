@@ -156,7 +156,7 @@ func (s *Socket) Receive(ctx context.Context) ([]byte, error) {
 
 // Transmit sends a response frame by allocating a UMEM slot, copying data,
 // submitting a TX descriptor, and kicking the TX ring if needed.
-func (s *Socket) Transmit(_ context.Context, frame []byte) error {
+func (s *Socket) SendFrame(_ context.Context, frame []byte) error {
 	maxPayloadSize := int(s.cfg.FrameSize) - xskMetadataHeadroom
 	if len(frame) > maxPayloadSize {
 		return fmt.Errorf("transmit: frame length %d exceeds af_xdp payload size %d", len(frame), maxPayloadSize)
@@ -198,10 +198,10 @@ func (s *Socket) Transmit(_ context.Context, frame []byte) error {
 	return nil
 }
 
-// TransmitBorrowed consumes the frame synchronously and does not retain the
+// SendBorrowedFrame consumes the frame synchronously and does not retain the
 // caller-owned slice after return.
-func (s *Socket) TransmitBorrowed(ctx context.Context, frame []byte) error {
-	return s.Transmit(ctx, frame)
+func (s *Socket) SendBorrowedFrame(ctx context.Context, frame []byte) error {
+	return s.SendFrame(ctx, frame)
 }
 
 // Close completes pending TX, unmaps all rings and UMEM, and closes the socket.

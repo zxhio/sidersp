@@ -5,13 +5,14 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"strings"
+
+	"github.com/sirupsen/logrus"
 )
 
 type XSKBackend interface {
 	FD() uint32
 	Receive(context.Context) ([]byte, error)
-	frameTransmitter
+	frameSender
 	io.Closer
 }
 
@@ -30,10 +31,14 @@ type RuntimeConfig struct {
 }
 
 type Runtime struct {
-	group    *WorkerGroup
-	results  *ResultBuffer
-	backends []XSKBackend
-	closers  []io.Closer
+	group           *WorkerGroup
+	results         *ResultBuffer
+	backends        []XSKBackend
+	closers         []io.Closer
+	ifindex         int
+	queues          []int
+	senderMode      string
+	egressInterface string
 }
 
 func NewRuntime(config RuntimeConfig) (*Runtime, error) {
@@ -59,23 +64,17 @@ func NewRuntime(config RuntimeConfig) (*Runtime, error) {
 	}
 	workerSpecs := make([]WorkerSpec, 0, len(queues))
 	backends := make([]XSKBackend, 0, len(queues))
-	closers := make([]io.Closer, 0, 2)
-	actionOverrides := make(map[uint16]actionTransmitter)
-	if strings.TrimSpace(config.EgressInterface) != "" {
-		icmpTX, err := newICMPEgressSender(config.EgressInterface)
-		if err != nil {
-			return nil, fmt.Errorf("create icmp egress transmitter: %w", err)
-		}
-		closers = append(closers, icmpTX)
-		actionOverrides[ActionICMPEchoReply] = &icmpEgressTX{tx: icmpTX}
-
-		arpTX, err := newFrameEgressSender(config.EgressInterface)
-		if err != nil {
-			closeClosers(closers)
-			return nil, fmt.Errorf("create arp egress transmitter: %w", err)
-		}
-		closers = append(closers, arpTX)
-		actionOverrides[ActionARPReply] = &arpEgressTX{tx: arpTX}
+	closers := make([]io.Closer, 0, 1)
+	buildOpts := BuildOptions{
+		HardwareAddr: append(net.HardwareAddr(nil), config.HardwareAddr...),
+		TCPSeq:       config.TCPSeq,
+	}
+	afpacketOut, err := openAFPacketFrameSender(config.EgressInterface)
+	if err != nil {
+		return nil, err
+	}
+	if afpacketOut != nil {
+		closers = append(closers, afpacketOut.(io.Closer))
 	}
 	for _, queueID := range queues {
 		backend, err := config.NewXSKBackend(queueID)
@@ -85,18 +84,11 @@ func NewRuntime(config RuntimeConfig) (*Runtime, error) {
 			return nil, fmt.Errorf("create xsk backend queue %d: %w", queueID, err)
 		}
 		backends = append(backends, backend)
-		var actionTX actionTransmitter = &sameInterfaceTX{tx: backend}
-		if len(actionOverrides) != 0 {
-			actionTX = &actionTXMux{defaultTX: actionTX, overrides: actionOverrides}
-		}
+		sender := buildResponseSender(backend, afpacketOut, buildOpts)
 		executor, err := NewResponseExecutor(ResponseExecutorConfig{
 			IfIndex: config.IfIndex,
 			QueueID: queueID,
-			Options: BuildOptions{
-				HardwareAddr: append(net.HardwareAddr(nil), config.HardwareAddr...),
-				TCPSeq:       config.TCPSeq,
-			},
-			TX:      actionTX,
+			Sender:  sender,
 			Results: results,
 		})
 		if err != nil {
@@ -119,7 +111,40 @@ func NewRuntime(config RuntimeConfig) (*Runtime, error) {
 		closeClosers(closers)
 		return nil, err
 	}
-	return &Runtime{group: group, results: results, backends: backends, closers: closers}, nil
+	return &Runtime{
+		group:           group,
+		results:         results,
+		backends:        backends,
+		closers:         closers,
+		ifindex:         config.IfIndex,
+		queues:          append([]int(nil), queues...),
+		senderMode:      responseSenderMode(config.EgressInterface),
+		egressInterface: config.EgressInterface,
+	}, nil
+}
+
+func buildResponseSender(backend XSKBackend, afpacketOut frameSender, buildOpts BuildOptions) responseSender {
+	if afpacketOut == nil {
+		return &afxdpSender{
+			out:       backend,
+			buildOpts: buildOpts,
+		}
+	}
+	return &afpacketSender{
+		out:       afpacketOut,
+		buildOpts: buildOpts,
+	}
+}
+
+func openAFPacketFrameSender(ifaceName string) (frameSender, error) {
+	if ifaceName == "" {
+		return nil, nil
+	}
+	frameSender, err := newAFPacketFrameSender(ifaceName)
+	if err != nil {
+		return nil, fmt.Errorf("create af_packet sender: %w", err)
+	}
+	return frameSender, nil
 }
 
 func (r *Runtime) Run(ctx context.Context) error {
@@ -127,6 +152,14 @@ func (r *Runtime) Run(ctx context.Context) error {
 		return fmt.Errorf("run response runtime: nil runtime")
 	}
 	defer r.Close()
+
+	logrus.WithFields(logrus.Fields{
+		"ifindex":          r.ifindex,
+		"queues":           r.queues,
+		"sender_mode":      r.senderMode,
+		"egress_interface": r.egressInterface,
+	}).Info("Started response runtime")
+
 	return r.group.Run(ctx)
 }
 
@@ -167,4 +200,11 @@ func closeClosers(closers []io.Closer) {
 	for _, closer := range closers {
 		_ = closer.Close()
 	}
+}
+
+func responseSenderMode(egressInterface string) string {
+	if egressInterface == "" {
+		return "afxdp"
+	}
+	return "afpacket"
 }

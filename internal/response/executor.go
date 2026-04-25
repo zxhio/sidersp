@@ -6,27 +6,21 @@ import (
 	"fmt"
 )
 
-type frameTransmitter interface {
-	Transmit(context.Context, []byte) error
-}
-
-type actionTransmitter interface {
-	Transmit(context.Context, XSKMetadata, []byte, BuildOptions) error
+type frameSender interface {
+	SendFrame(context.Context, []byte) error
 }
 
 type ResponseExecutor struct {
 	ifindex int
 	queueID int
-	opts    BuildOptions
-	tx      actionTransmitter
+	sender  responseSender
 	results *ResultBuffer
 }
 
 type ResponseExecutorConfig struct {
 	IfIndex int
 	QueueID int
-	Options BuildOptions
-	TX      actionTransmitter
+	Sender  responseSender
 	Results *ResultBuffer
 }
 
@@ -34,8 +28,8 @@ func NewResponseExecutor(config ResponseExecutorConfig) (*ResponseExecutor, erro
 	if config.QueueID < 0 {
 		return nil, fmt.Errorf("create response executor: queue %d out of range", config.QueueID)
 	}
-	if config.TX == nil {
-		return nil, fmt.Errorf("create response executor: transmitter is required")
+	if config.Sender == nil {
+		return nil, fmt.Errorf("create response executor: sender is required")
 	}
 	if config.Results == nil {
 		return nil, fmt.Errorf("create response executor: result buffer is required")
@@ -43,8 +37,7 @@ func NewResponseExecutor(config ResponseExecutorConfig) (*ResponseExecutor, erro
 	return &ResponseExecutor{
 		ifindex: config.IfIndex,
 		queueID: config.QueueID,
-		opts:    config.Options,
-		tx:      config.TX,
+		sender:  config.Sender,
 		results: config.Results,
 	}, nil
 }
@@ -60,7 +53,7 @@ func (e *ResponseExecutor) Execute(ctx context.Context, meta XSKMetadata, frame 
 	}
 
 	result := e.newResult(meta, action, frame)
-	if err := e.tx.Transmit(ctx, meta, frame, e.opts); err != nil {
+	if err := e.sender.Send(ctx, meta, frame); err != nil {
 		err = fmt.Errorf("transmit response frame: %w", err)
 		e.recordFailure(result, err)
 		return err

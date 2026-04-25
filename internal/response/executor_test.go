@@ -8,12 +8,12 @@ import (
 	"testing"
 )
 
-type stubTransmitter struct {
+type stubFrameTransmitter struct {
 	err    error
 	frames [][]byte
 }
 
-func (s *stubTransmitter) Transmit(_ context.Context, frame []byte) error {
+func (s *stubFrameTransmitter) SendFrame(_ context.Context, frame []byte) error {
 	s.frames = append(s.frames, append([]byte(nil), frame...))
 	return s.err
 }
@@ -22,7 +22,7 @@ func TestResponseExecutorSendsAndRecordsResult(t *testing.T) {
 	t.Parallel()
 
 	results := newTestResultBuffer(t, 4)
-	tx := &stubTransmitter{}
+	tx := &stubFrameTransmitter{}
 	executor := newTestExecutor(t, tx, results, BuildOptions{})
 
 	err := executor.Execute(context.Background(), XSKMetadata{
@@ -56,7 +56,7 @@ func TestResponseExecutorRecordsBuildFailure(t *testing.T) {
 	t.Parallel()
 
 	results := newTestResultBuffer(t, 4)
-	tx := &stubTransmitter{}
+	tx := &stubFrameTransmitter{}
 	executor := newTestExecutor(t, tx, results, BuildOptions{})
 
 	err := executor.Execute(context.Background(), XSKMetadata{
@@ -87,7 +87,7 @@ func TestResponseExecutorRecordsTransmitFailure(t *testing.T) {
 
 	wantErr := errors.New("tx failed")
 	results := newTestResultBuffer(t, 4)
-	tx := &stubTransmitter{err: wantErr}
+	tx := &stubFrameTransmitter{err: wantErr}
 	executor := newTestExecutor(t, tx, results, BuildOptions{})
 
 	err := executor.Execute(context.Background(), XSKMetadata{
@@ -114,7 +114,7 @@ func TestResponseExecutorRecordsBuildFailureForVLANRequestKeepsTuple(t *testing.
 	t.Parallel()
 
 	results := newTestResultBuffer(t, 4)
-	tx := &stubTransmitter{}
+	tx := &stubFrameTransmitter{}
 	executor := newTestExecutor(t, tx, results, BuildOptions{})
 
 	err := executor.Execute(context.Background(), XSKMetadata{
@@ -138,7 +138,7 @@ func TestResponseExecutorRejectsUnsupportedActionWithoutResult(t *testing.T) {
 	t.Parallel()
 
 	results := newTestResultBuffer(t, 4)
-	tx := &stubTransmitter{}
+	tx := &stubFrameTransmitter{}
 	executor := newTestExecutor(t, tx, results, BuildOptions{})
 
 	err := executor.Execute(context.Background(), XSKMetadata{
@@ -160,7 +160,7 @@ func TestResponseExecutorExecutesMetadataPrefixedFrame(t *testing.T) {
 	t.Parallel()
 
 	results := newTestResultBuffer(t, 4)
-	tx := &stubTransmitter{}
+	tx := &stubFrameTransmitter{}
 	executor := newTestExecutor(t, tx, results, BuildOptions{})
 
 	err := executor.ExecuteXSKFrame(context.Background(), buildTestXSKFrame(t, XSKMetadata{
@@ -187,7 +187,7 @@ func TestResponseExecutorRejectsShortXSKFrame(t *testing.T) {
 	t.Parallel()
 
 	results := newTestResultBuffer(t, 4)
-	tx := &stubTransmitter{}
+	tx := &stubFrameTransmitter{}
 	executor := newTestExecutor(t, tx, results, BuildOptions{})
 
 	err := executor.ExecuteXSKFrame(context.Background(), []byte{0x01, 0x02})
@@ -202,14 +202,16 @@ func TestResponseExecutorRejectsShortXSKFrame(t *testing.T) {
 	}
 }
 
-func newTestExecutor(t testing.TB, tx frameTransmitter, results *ResultBuffer, opts BuildOptions) *ResponseExecutor {
+func newTestExecutor(t testing.TB, tx frameSender, results *ResultBuffer, opts BuildOptions) *ResponseExecutor {
 	t.Helper()
 
 	executor, err := NewResponseExecutor(ResponseExecutorConfig{
 		IfIndex: 7,
 		QueueID: 3,
-		Options: opts,
-		TX:      &sameInterfaceTX{tx: tx},
+		Sender: &afxdpSender{
+			out:       tx,
+			buildOpts: opts,
+		},
 		Results: results,
 	})
 	if err != nil {

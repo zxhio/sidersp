@@ -41,7 +41,7 @@ func (s *stubBackend) Receive(context.Context) ([]byte, error) {
 	return nil, context.Canceled
 }
 
-func (s *stubBackend) Transmit(_ context.Context, frame []byte) error {
+func (s *stubBackend) SendFrame(_ context.Context, frame []byte) error {
 	s.txFrames = append(s.txFrames, append([]byte(nil), frame...))
 	return nil
 }

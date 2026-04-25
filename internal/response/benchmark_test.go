@@ -15,13 +15,13 @@ type benchmarkTransmitter struct {
 	count     int
 }
 
-func (t *benchmarkTransmitter) Transmit(_ context.Context, frame []byte) error {
+func (t *benchmarkTransmitter) SendFrame(_ context.Context, frame []byte) error {
 	t.lastFrame = frame
 	t.count++
 	return nil
 }
 
-func (t *benchmarkTransmitter) TransmitBorrowed(_ context.Context, frame []byte) error {
+func (t *benchmarkTransmitter) SendBorrowedFrame(_ context.Context, frame []byte) error {
 	t.lastFrame = frame
 	t.count++
 	return nil
