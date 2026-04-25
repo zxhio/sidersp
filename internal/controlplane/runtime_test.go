@@ -220,19 +220,21 @@ func TestStatsReturnsRuntimeAndDataplaneCounters(t *testing.T) {
 
 	r := NewRuntime(config.Config{}, &testSyncer{}, testStreamer{}, testStatsReader{
 		stats: model.DataplaneStats{
-			RXPackets:       100,
-			ParseFailed:     2,
-			RuleCandidates:  40,
-			MatchedRules:    7,
-			RuleMatches:     map[uint32]uint64{1: 11},
-			RingbufDropped:  1,
-			XDPTX:           3,
-			XskTX:           4,
-			TXFailed:        5,
-			XskFailed:       6,
-			RedirectTX:      7,
-			RedirectFailed:  8,
-			FibLookupFailed: 9,
+			RXPackets:         100,
+			ParseFailed:       2,
+			RuleCandidates:    40,
+			MatchedRules:      7,
+			RuleMatches:       map[uint32]uint64{1: 11},
+			RingbufDropped:    1,
+			XDPTX:             3,
+			XskTX:             4,
+			TXFailed:          5,
+			XskFailed:         6,
+			XskMetaFailed:     10,
+			XskRedirectFailed: 11,
+			RedirectTX:        7,
+			RedirectFailed:    8,
+			FibLookupFailed:   9,
 		},
 	})
 	r.rules = rule.RuleSet{
@@ -249,20 +251,41 @@ func TestStatsReturnsRuntimeAndDataplaneCounters(t *testing.T) {
 	if got.TotalRules != 2 || got.EnabledRules != 1 {
 		t.Fatalf("rule stats = %+v, want total=2 enabled=1", got)
 	}
+	if got.Overview.TotalRules != 2 || got.Overview.EnabledRules != 1 {
+		t.Fatalf("overview = %+v, want total=2 enabled=1", got.Overview)
+	}
 	if got.RXPackets != 100 || got.MatchedRules != 7 {
 		t.Fatalf("dataplane stats = %+v, want rx=100 matched=7", got)
 	}
 	if got.XskFailed != 6 {
 		t.Fatalf("xsk_failed = %d, want 6", got.XskFailed)
 	}
+	if got.XskMetaFailed != 10 || got.XskRedirectFailed != 11 {
+		t.Fatalf("xsk breakdown = %+v, want meta=10 redirect=11", got)
+	}
 	if got.RedirectTX != 7 || got.RedirectFailed != 8 || got.FibLookupFailed != 9 {
 		t.Fatalf("redirect stats = %+v, want redirect_tx=7 redirect_failed=8 fib_lookup_failed=9", got)
+	}
+	if got.Overview.PrimaryIssueStage != model.StatsStageXSKRedirect {
+		t.Fatalf("primary issue stage = %q, want %q", got.Overview.PrimaryIssueStage, model.StatsStageXSKRedirect)
+	}
+	if len(got.Stages) != 7 {
+		t.Fatalf("stages len = %d, want 7", len(got.Stages))
+	}
+	if got.Stages[5].Key != model.StatsStageXSKRedirect {
+		t.Fatalf("xsk stage = %+v, want xsk_redirect stage", got.Stages[5])
 	}
 	if len(got.Histories) != 1 {
 		t.Fatalf("histories len = %d, want 1", len(got.Histories))
 	}
 	if got.Histories[0].Name != "1d" {
 		t.Fatalf("first history = %+v, want name=1d", got.Histories[0])
+	}
+	if len(got.StageHistories) != 1 {
+		t.Fatalf("stage histories len = %d, want 1", len(got.StageHistories))
+	}
+	if got.StageHistories[0].Stages[5].Metrics[2].Key != model.StatsMetricXskMetaFailed {
+		t.Fatalf("stage history xsk metric = %+v, want xsk_meta_failed metric", got.StageHistories[0].Stages[5].Metrics[2])
 	}
 }
 

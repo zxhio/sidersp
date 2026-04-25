@@ -135,7 +135,12 @@ func (r *Runtime) Stats(window string) (Stats, error) {
 	if err != nil {
 		return Stats{}, err
 	}
+	stageHistory, err := r.buildDiagnosticHistory(time.Now().UTC(), current, window)
+	if err != nil {
+		return Stats{}, err
+	}
 	current.Histories = history
+	current.StageHistories = stageHistory
 
 	return current, nil
 }
