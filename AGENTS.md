@@ -30,3 +30,4 @@ Detailed module responsibilities are defined in `specs/MODULES.md`.
 | `specs/RULES.md` | Rule model, matching semantics, and action list |
 | `specs/EVENTS.md` | Data plane observation event structure |
 | `specs/RESPONSES.md` | Response action model and execution path |
+| `specs/STATS.md` | Diagnostic stats stages, metric semantics, and console/API shape |
