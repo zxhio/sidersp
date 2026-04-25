@@ -157,7 +157,7 @@ struct ipv4_lpm_key {
     __be32 addr;
 };
 
-/* Headroom metadata for XSK-redirected packets (8 bytes). */
+/* XDP metadata for XSK-redirected packets (8 bytes). */
 struct xsk_meta {
     __u32 rule_id;
     __u16 action;
@@ -188,6 +188,8 @@ enum stat_idx {
     STAT_XSK_TX,
     STAT_TX_FAILED,
     STAT_XSK_FAILED,
+    STAT_XSK_META_FAILED,
+    STAT_XSK_REDIRECT_FAILED,
     STAT_REDIRECT_TX,
     STAT_REDIRECT_FAILED,
     STAT_FIB_LOOKUP_FAILED,

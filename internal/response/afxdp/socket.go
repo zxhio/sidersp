@@ -144,7 +144,10 @@ func (s *Socket) Receive(ctx context.Context) ([]byte, error) {
 		}
 
 		s.drainCompletions()
-		frame := s.receiveFrame()
+		frame, err := s.receiveFrame()
+		if err != nil {
+			return nil, err
+		}
 		if len(frame) != 0 {
 			return frame, nil
 		}
@@ -154,25 +157,27 @@ func (s *Socket) Receive(ctx context.Context) ([]byte, error) {
 // Transmit sends a response frame by allocating a UMEM slot, copying data,
 // submitting a TX descriptor, and kicking the TX ring if needed.
 func (s *Socket) Transmit(_ context.Context, frame []byte) error {
-	if len(frame) > int(s.cfg.FrameSize) {
-		return fmt.Errorf("transmit: frame length %d exceeds af_xdp frame size %d", len(frame), s.cfg.FrameSize)
+	maxPayloadSize := int(s.cfg.FrameSize) - xskMetadataHeadroom
+	if len(frame) > maxPayloadSize {
+		return fmt.Errorf("transmit: frame length %d exceeds af_xdp payload size %d", len(frame), maxPayloadSize)
 	}
 
-	addr := s.umem.allocFrame()
-	if addr == invalidUMEMFrame {
+	frameBase := s.umem.allocFrame()
+	if frameBase == invalidUMEMFrame {
 		s.drainCompletions()
-		addr = s.umem.allocFrame()
-		if addr == invalidUMEMFrame {
+		frameBase = s.umem.allocFrame()
+		if frameBase == invalidUMEMFrame {
 			return fmt.Errorf("transmit: no free umem frames")
 		}
 	}
+	addr := txFrameAddr(frameBase)
 
 	data := s.umem.frameData(addr, uint32(len(frame)))
 	copy(data, frame)
 
 	var idx uint32
 	if s.tx.Reserve(1, &idx) == 0 {
-		s.umem.freeFrame(addr)
+		s.umem.freeFrame(frameBase)
 		return fmt.Errorf("transmit: tx ring full")
 	}
 
@@ -202,20 +207,51 @@ func (s *Socket) Close() error {
 	return unix.Close(s.sockfd)
 }
 
-func (s *Socket) receiveFrame() []byte {
+func (s *Socket) receiveFrame() ([]byte, error) {
 	var rxIdx uint32
 	rcvd := s.rx.Peek(1, &rxIdx)
 	if rcvd == 0 {
-		return nil
+		return nil, nil
 	}
 
 	desc := s.rx.GetDesc(rxIdx)
-	frame := append([]byte(nil), s.umem.frameData(desc.Addr, desc.Len)...)
-	s.umem.freeFrame(desc.Addr)
+	addr, length, err := s.rxFrameData(desc.Addr, desc.Len)
+	frameBase := frameBaseAddr(desc.Addr, s.cfg.FrameSize)
+	var frame []byte
+	if err == nil {
+		frame = append([]byte(nil), s.umem.frameData(addr, length)...)
+	}
+	s.umem.freeFrame(frameBase)
 
 	s.rx.Release(rcvd)
 	s.refillFill()
-	return frame
+	if err != nil {
+		return nil, err
+	}
+	return frame, nil
+}
+
+func (s *Socket) rxFrameData(addr uint64, length uint32) (uint64, uint32, error) {
+	frameBase := frameBaseAddr(addr, s.cfg.FrameSize)
+	frameOffset := addr - frameBase
+	if frameOffset < xskMetadataHeadroom {
+		return 0, 0, fmt.Errorf("receive: rx descriptor addr %d smaller than headroom %d", addr, xskMetadataHeadroom)
+	}
+
+	maxPayloadSize := s.cfg.FrameSize - uint32(xskMetadataHeadroom)
+	if length > maxPayloadSize {
+		return 0, 0, fmt.Errorf("receive: rx descriptor len %d exceeds af_xdp payload size %d", length, maxPayloadSize)
+	}
+
+	return addr - xskMetadataHeadroom, length + uint32(xskMetadataHeadroom), nil
+}
+
+func txFrameAddr(frameBase uint64) uint64 {
+	return frameBase + xskMetadataHeadroom
+}
+
+func frameBaseAddr(addr uint64, frameSize uint32) uint64 {
+	return addr & ^(uint64(frameSize) - 1)
 }
 
 func (s *Socket) refillFill() {
@@ -251,7 +287,7 @@ func (s *Socket) drainCompletions() {
 	}
 
 	for i := uint32(0); i < completed; i++ {
-		s.umem.freeFrame(*s.umem.comp.GetAddr(idx + i))
+		s.umem.freeFrame(frameBaseAddr(*s.umem.comp.GetAddr(idx + i), s.cfg.FrameSize))
 	}
 	s.umem.comp.Release(completed)
 	s.txStanding -= completed

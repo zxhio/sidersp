@@ -67,7 +67,8 @@ configured failure verdict: `XDP_PASS` or `XDP_DROP`.
 Used by `icmp_echo_reply`, `arp_reply`, and `tcp_syn_ack`.
 
 ```text
-packet -> BPF parse/match -> prepend xsk_meta -> XDP_REDIRECT to XSK
+packet -> BPF parse/match -> write xsk_meta into XDP metadata -> XDP_REDIRECT to XSK
+AF_XDP backend -> expose xsk_meta as an 8-byte prefix to the worker
 XSK worker -> read xsk_meta -> parse full original packet -> build response -> same-interface XSK_TX or configured user-space egress TX
 ```
 
@@ -96,7 +97,7 @@ implemented.
 
 ## XSK Metadata
 
-BPF prepends an 8-byte metadata header before redirecting a frame to XSK:
+BPF writes an 8-byte metadata header into the XDP metadata area before redirecting a frame to XSK:
 
 ```text
 u32 rule_id
@@ -104,11 +105,15 @@ u16 action
 u16 reserved
 ```
 
-`xsk_meta` carries only dispatch metadata. The XSK worker must parse the redirected original packet for MAC, ARP, ICMP, TCP sequence, ACK, option, and payload context.
+`xsk_meta` carries only dispatch metadata. The AF_XDP backend reads it from
+reserved XDP metadata headroom and exposes it as an 8-byte prefix to the XSK
+worker. The worker must parse the redirected original packet for MAC, ARP,
+ICMP, TCP sequence, ACK, option, and payload context.
 
 The XSK worker must strip these 8 bytes before parsing the original Ethernet
-frame. If BPF cannot prepend metadata or cannot submit the redirect, the packet
-falls back to `dataplane.ingress_verdict` and the XSK failure counter is incremented.
+frame. If BPF cannot allocate metadata or cannot submit the redirect, the
+packet falls back to `dataplane.ingress_verdict` and the XSK failure counter is
+incremented.
 
 ## Response Result
 

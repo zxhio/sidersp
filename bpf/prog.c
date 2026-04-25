@@ -445,22 +445,24 @@ static __always_inline int redirect_xsk_with_meta(struct xdp_md *xdp,
                                                   const struct global_cfg *cfg)
 {
     void *data;
-    void *data_end;
+    void *data_meta;
     struct xsk_meta *meta;
     int redir;
     int fallback = ingress_failure_verdict(cfg);
 
-    if (bpf_xdp_adjust_head(xdp, -(int)sizeof(*meta))) {
+    if (bpf_xdp_adjust_meta(xdp, -(int)sizeof(*meta))) {
+        stat_inc(STAT_XSK_META_FAILED);
         stat_inc(STAT_XSK_FAILED);
         return fallback;
     }
 
     data = (void *)(long)xdp->data;
-    data_end = (void *)(long)xdp->data_end;
-    meta = data;
-    if ((void *)(meta + 1) > data_end) {
+    data_meta = (void *)(long)xdp->data_meta;
+    meta = data_meta;
+    if ((void *)(meta + 1) > data) {
+        stat_inc(STAT_XSK_META_FAILED);
         stat_inc(STAT_XSK_FAILED);
-        goto rollback;
+        return fallback;
     }
 
     meta->rule_id = rule->rule_id;
@@ -471,11 +473,8 @@ static __always_inline int redirect_xsk_with_meta(struct xdp_md *xdp,
     if (redir == XDP_REDIRECT)
         return XDP_REDIRECT;
 
+    stat_inc(STAT_XSK_REDIRECT_FAILED);
     stat_inc(STAT_XSK_FAILED);
-
-rollback:
-    if (bpf_xdp_adjust_head(xdp, sizeof(*meta)))
-        return XDP_DROP;
     return fallback;
 }
 

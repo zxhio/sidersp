@@ -16,6 +16,7 @@ const (
 	defaultTXRingSize         = 2048
 	defaultTXFrameReserve     = 256
 	defaultBindFlags          = uint16(unix.XDP_COPY)
+	xskMetadataHeadroom       = 8
 )
 
 // SocketConfig holds the configuration for creating AF_XDP sockets.

@@ -48,6 +48,8 @@ const (
 	statXskTX
 	statTXFailed
 	statXskFailed
+	statXskMetaFailed
+	statXskRedirectFailed
 	statRedirectTX
 	statRedirectFailed
 	statFibLookupFailed

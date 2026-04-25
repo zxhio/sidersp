@@ -7,8 +7,8 @@ import (
 	"net"
 	"net/netip"
 	"slices"
-	"sync"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cilium/ebpf"
@@ -22,12 +22,12 @@ import (
 )
 
 type Runtime struct {
-	objs       siderspObjects
-	xdpLink    link.Link
-	iface      string
-	opts       Options
-	promiscSet bool
-	matchMu    sync.RWMutex
+	objs        siderspObjects
+	xdpLink     link.Link
+	iface       string
+	opts        Options
+	promiscSet  bool
+	matchMu     sync.RWMutex
 	matchCounts map[uint32]uint64
 }
 
@@ -290,6 +290,14 @@ func (r *Runtime) readKernelStats() (kernelStats, error) {
 	if err != nil {
 		return kernelStats{}, fmt.Errorf("lookup xsk_failed: %w", err)
 	}
+	xskMetaFailed, err := readPerCPUCounter(r.objs.StatsMap, statXskMetaFailed)
+	if err != nil {
+		return kernelStats{}, fmt.Errorf("lookup xsk_meta_failed: %w", err)
+	}
+	xskRedirectFailed, err := readPerCPUCounter(r.objs.StatsMap, statXskRedirectFailed)
+	if err != nil {
+		return kernelStats{}, fmt.Errorf("lookup xsk_redirect_failed: %w", err)
+	}
 	redirectTX, err := readPerCPUCounter(r.objs.StatsMap, statRedirectTX)
 	if err != nil {
 		return kernelStats{}, fmt.Errorf("lookup redirect_tx: %w", err)
@@ -304,18 +312,20 @@ func (r *Runtime) readKernelStats() (kernelStats, error) {
 	}
 
 	return kernelStats{
-		RXPackets:       rxPackets,
-		ParseFailed:     parseFailed,
-		RuleCandidates:  ruleCandidates,
-		MatchedRules:    matchedRules,
-		RingbufDropped:  ringbufDropped,
-		XDPTX:           xdpTX,
-		XskTX:           xskTX,
-		TXFailed:        txFailed,
-		XskFailed:       xskFailed,
-		RedirectTX:      redirectTX,
-		RedirectFailed:  redirectFailed,
-		FibLookupFailed: fibLookupFailed,
+		RXPackets:         rxPackets,
+		ParseFailed:       parseFailed,
+		RuleCandidates:    ruleCandidates,
+		MatchedRules:      matchedRules,
+		RingbufDropped:    ringbufDropped,
+		XDPTX:             xdpTX,
+		XskTX:             xskTX,
+		TXFailed:          txFailed,
+		XskFailed:         xskFailed,
+		XskMetaFailed:     xskMetaFailed,
+		XskRedirectFailed: xskRedirectFailed,
+		RedirectTX:        redirectTX,
+		RedirectFailed:    redirectFailed,
+		FibLookupFailed:   fibLookupFailed,
 	}, nil
 }
 

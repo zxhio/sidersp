@@ -14,7 +14,7 @@ func registerUmem(sockfd int, area []byte, cfg SocketConfig) error {
 		Addr:     uint64(uintptr(unsafe.Pointer(unsafe.SliceData(area)))),
 		Len:      uint64(len(area)),
 		Size:     cfg.FrameSize,
-		Headroom: 0,
+		Headroom: xskMetadataHeadroom,
 		Flags:    0,
 	}
 	return setsockopt(sockfd, unix.SOL_XDP, unix.XDP_UMEM_REG, unsafe.Pointer(&reg), unsafe.Sizeof(reg))

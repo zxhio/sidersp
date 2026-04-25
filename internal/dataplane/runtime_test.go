@@ -296,6 +296,12 @@ func TestKernelStatsFields(t *testing.T) {
 	if got := fields["xsk_fail"]; got != uint64(0) {
 		t.Fatalf("xsk_fail = %v, want %d", got, 0)
 	}
+	if got := fields["xsk_meta_fail"]; got != uint64(0) {
+		t.Fatalf("xsk_meta_fail = %v, want %d", got, 0)
+	}
+	if got := fields["xsk_redirect_fail"]; got != uint64(0) {
+		t.Fatalf("xsk_redirect_fail = %v, want %d", got, 0)
+	}
 	if got := fields["redir_tx"]; got != uint64(0) {
 		t.Fatalf("redir_tx = %v, want %d", got, 0)
 	}
@@ -305,7 +311,7 @@ func TestKernelStatsFields(t *testing.T) {
 	if got := fields["fib_fail"]; got != uint64(0) {
 		t.Fatalf("fib_fail = %v, want %d", got, 0)
 	}
-	if len(fields) != 12 {
-		t.Fatalf("len(fields) = %d, want %d", len(fields), 12)
+	if len(fields) != 14 {
+		t.Fatalf("len(fields) = %d, want %d", len(fields), 14)
 	}
 }
