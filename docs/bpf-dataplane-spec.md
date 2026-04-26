@@ -77,7 +77,7 @@ require full original-packet context and are handled through XSK.
 8. For `ACTION_TCP_RESET`: rewrite packet as TCP RST and return `XDP_TX` or
    `XDP_REDIRECT` according to `tx_config_map`
 9. For spoof actions: write `xsk_meta` into XDP metadata and submit the original packet to `xsks_map[ctx->rx_queue_index]`
-10. If XSK metadata allocation or redirect fails, increment `xsk_failed`, the detailed XSK failure counter, and return `XDP_PASS`
+10. If XSK metadata allocation or redirect fails, increment `xsk_redirect_failed` plus the detailed XSK failure counter, and return `XDP_PASS`
 11. Emit optional ringbuf observation event
 
 ### 3.2 Condition Bits
@@ -292,11 +292,11 @@ If no XSK socket is installed for the queue, the fallback action is `XDP_PASS`.
 | 3 | matched_rules | Packets that matched a rule |
 | 4 | ringbuf_dropped | Events dropped due to full ringbuf |
 | 5 | xdp_tx | Same-interface TCP reset responses transmitted with `XDP_TX` |
-| 6 | xsk_tx | Packets submitted to XSK for user-space TX |
+| 6 | xsk_redirected | Packets submitted to XSK for user-space response handling |
 | 7 | tx_failed | Failed TCP reset TX attempts |
-| 8 | xsk_failed | Total failed XSK metadata or redirect attempts |
+| 8 | xsk_redirect_failed | Total failed XSK metadata or redirect attempts |
 | 9 | xsk_meta_failed | Failed XDP metadata allocation or write attempts before XSK redirect |
-| 10 | xsk_redirect_failed | Failed `bpf_redirect_map()` attempts for XSK redirect |
+| 10 | xsk_map_redirect_failed | Failed `bpf_redirect_map()` attempts for XSK redirect |
 | 11 | redirect_tx | TCP reset packets submitted to the configured egress interface |
 | 12 | redirect_failed | Failed TCP reset redirect preparation attempts |
 | 13 | fib_lookup_failed | Failed `bpf_fib_lookup` attempts for TCP reset redirect |
@@ -380,8 +380,8 @@ AF_XDP backend as an 8-byte frame prefix, strips that metadata prefix, and
 parses the remaining original Ethernet frame. Response construction uses the
 original packet bytes from XSK and does not depend on ringbuf delivery.
 
-`xsk_tx` and `verdict=xsk` only mean BPF returned `XDP_REDIRECT`. The response
-worker reports whether a user-space response was actually sent.
+`xsk_redirected` and `verdict=xsk` only mean BPF returned `XDP_REDIRECT`. The
+response worker reports whether a user-space response was actually sent.
 
 For `ACTION_TCP_SYN_ACK`, BPF redirects only initial SYN packets. Packets with
 SYN plus ACK, RST, or FIN are passed without XSK redirect.

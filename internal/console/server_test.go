@@ -547,7 +547,7 @@ func TestGetStatsVerbose(t *testing.T) {
 					EnabledRules:      1,
 					RXPackets:         100,
 					MatchedRules:      8,
-					PrimaryIssueStage: "xsk_redirect",
+					PrimaryIssueStage: "response_tx",
 				},
 				RangeSeconds:           86400,
 				CollectIntervalSeconds: 10,
@@ -561,25 +561,45 @@ func TestGetStatsVerbose(t *testing.T) {
 				MatchedRules:           8,
 				RingbufDropped:         1,
 				XDPTX:                  2,
-				XskTX:                  3,
 				TXFailed:               4,
-				XskFailed:              5,
+				XskRedirected:          3,
+				XskRedirectFailed:      5,
 				XskMetaFailed:          9,
-				XskRedirectFailed:      10,
+				XskMapRedirectFailed:   10,
 				RedirectTX:             6,
 				RedirectFailed:         7,
 				FibLookupFailed:        8,
+				ResponseSent:           11,
+				ResponseFailed:         12,
+				AFXDPTX:                11,
+				AFXDPTXFailed:          12,
+				AFPacketTX:             0,
+				AFPacketTXFailed:       0,
 				Stages: []controlplane.DiagnosticStage{
 					{
-						Key:              "xsk_redirect",
+						Key:              "response_redirect",
 						Title:            "响应重定向",
-						Summary:          "把原始报文重定向到 XSK。",
-						PrimaryMetricKey: "xsk_tx",
+						Summary:          "BPF 把原始报文重定向到 XSK。",
+						PrimaryMetricKey: "xsk_redirected",
 						Metrics: []controlplane.DiagnosticMetric{
-							{Key: "xsk_tx", Label: "重定向到响应模块", Description: "BPF 成功把报文提交到 XSK 的次数。", Role: "success", Value: 3},
-							{Key: "xsk_failed", Label: "响应重定向失败", Description: "XSK 重定向总失败次数。", Role: "failure", Value: 5},
-							{Key: "xsk_meta_failed", Label: "XSK 元数据失败", Description: "写入 XDP metadata 失败。", Role: "failure", Value: 9},
-							{Key: "xsk_redirect_failed", Label: "XSK 提交失败", Description: "调用 redirect_map 提交到 XSK 失败。", Role: "failure", Value: 10},
+							{Key: "xsk_redirected", Label: "重定向到响应模块", Description: "BPF 成功把原始报文提交到 XSK 的次数。", Role: "success", Value: 3},
+							{Key: "xsk_redirect_failed", Label: "响应重定向失败", Description: "XSK 重定向阶段总失败次数。", Role: "failure", Value: 5},
+							{Key: "xsk_meta_failed", Label: "XSK 元数据失败", Description: "申请或写入 XDP metadata 失败的次数。", Role: "failure", Value: 9},
+							{Key: "xsk_map_redirect_failed", Label: "XSK 映射重定向失败", Description: "调用 bpf_redirect_map() 提交到 XSK 失败的次数。", Role: "failure", Value: 10},
+						},
+					},
+					{
+						Key:              "response_tx",
+						Title:            "响应发送",
+						Summary:          "用户态响应模块构造并发送响应帧，区分 AF_XDP 和 AF_PACKET backend。",
+						PrimaryMetricKey: "response_sent",
+						Metrics: []controlplane.DiagnosticMetric{
+							{Key: "response_sent", Label: "响应发送成功", Description: "用户态响应模块成功发送响应帧的总次数。", Role: "success", Value: 11},
+							{Key: "response_failed", Label: "响应发送失败", Description: "用户态响应模块发送失败的总次数。", Role: "failure", Value: 12},
+							{Key: "afxdp_tx", Label: "AF_XDP 发送成功", Description: "通过 AF_XDP backend 成功发送响应帧的次数。", Role: "success", Value: 11},
+							{Key: "afxdp_tx_failed", Label: "AF_XDP 发送失败", Description: "AF_XDP backend 路径失败的次数。", Role: "failure", Value: 12},
+							{Key: "afpacket_tx", Label: "AF_PACKET 发送成功", Description: "通过 AF_PACKET backend 成功发送响应帧的次数。", Role: "success", Value: 0},
+							{Key: "afpacket_tx_failed", Label: "AF_PACKET 发送失败", Description: "AF_PACKET backend 路径失败的次数。", Role: "failure", Value: 0},
 						},
 					},
 				},
@@ -590,22 +610,26 @@ func TestGetStatsVerbose(t *testing.T) {
 						Step:   "10s",
 						Points: []controlplane.StatsPoint{
 							{
-								TotalRules:        2,
-								EnabledRules:      1,
-								RXPackets:         90,
-								ParseFailed:       2,
-								RuleCandidates:    18,
-								MatchedRules:      7,
-								RingbufDropped:    1,
-								XDPTX:             2,
-								XskTX:             3,
-								TXFailed:          4,
-								XskFailed:         5,
-								XskMetaFailed:     9,
-								XskRedirectFailed: 10,
-								RedirectTX:        6,
-								RedirectFailed:    7,
-								FibLookupFailed:   8,
+								TotalRules:           2,
+								EnabledRules:         1,
+								RXPackets:            90,
+								ParseFailed:          2,
+								RuleCandidates:       18,
+								MatchedRules:         7,
+								RingbufDropped:       1,
+								XDPTX:                2,
+								TXFailed:             4,
+								XskRedirected:        3,
+								XskRedirectFailed:    5,
+								XskMetaFailed:        9,
+								XskMapRedirectFailed: 10,
+								RedirectTX:           6,
+								RedirectFailed:       7,
+								FibLookupFailed:      8,
+								ResponseSent:         11,
+								ResponseFailed:       12,
+								AFXDPTX:              11,
+								AFXDPTXFailed:        12,
 							},
 						},
 					},
@@ -617,15 +641,15 @@ func TestGetStatsVerbose(t *testing.T) {
 						Step:   "10s",
 						Stages: []controlplane.DiagnosticStageHistory{
 							{
-								Key:              "xsk_redirect",
+								Key:              "response_redirect",
 								Title:            "响应重定向",
-								Summary:          "把原始报文重定向到 XSK。",
-								PrimaryMetricKey: "xsk_tx",
+								Summary:          "BPF 把原始报文重定向到 XSK。",
+								PrimaryMetricKey: "xsk_redirected",
 								Metrics: []controlplane.DiagnosticMetricHistory{
 									{
 										Key:         "xsk_meta_failed",
 										Label:       "XSK 元数据失败",
-										Description: "写入 XDP metadata 失败。",
+										Description: "申请或写入 XDP metadata 失败的次数。",
 										Role:        "failure",
 										Points: []controlplane.MetricPoint{
 											{Value: 9},
@@ -660,17 +684,20 @@ func TestGetStatsVerbose(t *testing.T) {
 	if body.Data.RingbufDropped == nil || *body.Data.RingbufDropped != 1 {
 		t.Fatalf("stats = %+v, want ringbuf_dropped=1", body.Data)
 	}
-	if body.Data.Overview.PrimaryIssueStage != "xsk_redirect" {
-		t.Fatalf("overview = %+v, want primary_issue_stage=xsk_redirect", body.Data.Overview)
+	if body.Data.Overview.PrimaryIssueStage != "response_tx" {
+		t.Fatalf("overview = %+v, want primary_issue_stage=response_tx", body.Data.Overview)
 	}
 	if body.Data.RangeSeconds != 86400 || body.Data.DisplayStepSeconds != 900 {
 		t.Fatalf("stats metadata = %+v, want range_seconds=86400 display_step_seconds=900", body.Data)
 	}
-	if len(body.Data.Stages) != 1 || body.Data.Stages[0].Metrics[2].Key != "xsk_meta_failed" {
-		t.Fatalf("stages = %+v, want xsk_meta_failed metric in xsk stage", body.Data.Stages)
+	if len(body.Data.Stages) != 2 || body.Data.Stages[0].Metrics[2].Key != "xsk_meta_failed" {
+		t.Fatalf("stages = %+v, want xsk_meta_failed metric in response_redirect stage", body.Data.Stages)
 	}
 	if body.Data.XskMetaFailed == nil || *body.Data.XskMetaFailed != 9 {
 		t.Fatalf("stats = %+v, want xsk_meta_failed=9", body.Data)
+	}
+	if body.Data.ResponseSent == nil || *body.Data.ResponseSent != 11 || body.Data.AFXDPTXFailed == nil || *body.Data.AFXDPTXFailed != 12 {
+		t.Fatalf("stats = %+v, want response and afxdp fields populated", body.Data)
 	}
 	if body.Data.Histories[0].Points[0].TotalRules == nil || *body.Data.Histories[0].Points[0].TotalRules != 2 {
 		t.Fatalf("point = %+v, want total_rules=2", body.Data.Histories[0].Points[0])

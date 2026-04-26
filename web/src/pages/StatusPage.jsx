@@ -19,13 +19,19 @@ const METRIC_COLORS = {
   ringbuf_dropped: '#8b5cf6',
   xdp_tx: '#0ea5e9',
   tx_failed: '#dc2626',
-  xsk_tx: '#64748b',
-  xsk_failed: '#be123c',
+  xsk_redirected: '#64748b',
+  xsk_redirect_failed: '#be123c',
   xsk_meta_failed: '#991b1b',
-  xsk_redirect_failed: '#c2410c',
+  xsk_map_redirect_failed: '#c2410c',
   redirect_tx: '#14b8a6',
   redirect_failed: '#ea580c',
   fib_lookup_failed: '#9333ea',
+  response_sent: '#16a34a',
+  response_failed: '#b91c1c',
+  afxdp_tx: '#0284c7',
+  afxdp_tx_failed: '#c2410c',
+  afpacket_tx: '#0f766e',
+  afpacket_tx_failed: '#7f1d1d',
 }
 
 const ROLE_LABELS = {
@@ -58,10 +64,15 @@ function formatValue(n) {
   return typeof n === 'number' ? n.toLocaleString() : '-'
 }
 
+function formatCompactUnit(value) {
+  const rounded = Math.round(value * 100) / 100
+  return Number.isInteger(rounded) ? `${rounded}` : `${rounded}`
+}
+
 function formatDurationFromSeconds(seconds) {
   if (!seconds || seconds <= 0) return '采样间隔'
   if (seconds % 86400 === 0) return `${seconds / 86400}d`
-  if (seconds % 3600 === 0) return `${seconds / 3600}h`
+  if (seconds >= 3600) return `${formatCompactUnit(seconds / 3600)}h`
   if (seconds % 60 === 0) return `${seconds / 60}m`
   return `${seconds}s`
 }

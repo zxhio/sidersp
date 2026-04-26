@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"sidersp/internal/model"
 )
 
 type runtimeStubRegistrar struct {
@@ -113,6 +115,9 @@ func TestNewRuntimeUsesDefaults(t *testing.T) {
 	if runtime.results.capacity != 1024 {
 		t.Fatalf("result capacity = %d, want 1024", runtime.results.capacity)
 	}
+	if got := runtime.ReadStats(); got != (model.ResponseStats{}) {
+		t.Fatalf("ReadStats() = %+v, want zero response stats", got)
+	}
 }
 
 func TestNewRuntimeReturnsBackendError(t *testing.T) {
@@ -140,10 +145,11 @@ func TestRuntimeResultsReturnsCopy(t *testing.T) {
 		t.Fatalf("NewRuntime() error = %v", err)
 	}
 	if err := runtime.results.Record(ResponseResult{
-		RuleID:  1001,
-		Action:  "icmp_echo_reply",
-		Result:  ResultSent,
-		RXQueue: 0,
+		RuleID:    1001,
+		Action:    "icmp_echo_reply",
+		Result:    ResultSent,
+		TXBackend: TXBackendAFXDP,
+		RXQueue:   0,
 	}); err != nil {
 		t.Fatalf("Record() error = %v", err)
 	}
@@ -152,5 +158,33 @@ func TestRuntimeResultsReturnsCopy(t *testing.T) {
 	results[0].RuleID = 9999
 	if runtime.Results()[0].RuleID != 1001 {
 		t.Fatal("Results() returned mutable backing storage")
+	}
+}
+
+func TestRuntimeReadStatsReturnsResponseCounters(t *testing.T) {
+	t.Parallel()
+
+	runtime, err := NewRuntime(RuntimeConfig{
+		Registrar: &runtimeStubRegistrar{},
+		NewXSK:    (&stubBackendFactory{}).newFunc(),
+	})
+	if err != nil {
+		t.Fatalf("NewRuntime() error = %v", err)
+	}
+
+	runtime.stats.recordSent(TXBackendAFXDP)
+	runtime.stats.recordSent(TXBackendAFPacket)
+	runtime.stats.recordFailed(TXBackendAFXDP)
+	runtime.stats.recordFailed(TXBackendAFPacket)
+
+	got := runtime.ReadStats()
+	if got.ResponseSent != 2 || got.ResponseFailed != 2 {
+		t.Fatalf("ReadStats() = %+v, want response_sent=2 response_failed=2", got)
+	}
+	if got.AFXDPTX != 1 || got.AFXDPTXFailed != 1 {
+		t.Fatalf("ReadStats() = %+v, want afxdp counters = 1/1", got)
+	}
+	if got.AFPacketTX != 1 || got.AFPacketTXFailed != 1 {
+		t.Fatalf("ReadStats() = %+v, want afpacket counters = 1/1", got)
 	}
 }

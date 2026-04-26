@@ -14,6 +14,7 @@ func TestResultBufferRecordsInOrder(t *testing.T) {
 		RuleID:      1001,
 		Action:      "icmp_echo_reply",
 		Result:      ResultSent,
+		TXBackend:   TXBackendAFXDP,
 		RXQueue:     0,
 		SIP:         0x0a000001,
 		DIP:         0x0a000002,
@@ -23,6 +24,7 @@ func TestResultBufferRecordsInOrder(t *testing.T) {
 		RuleID:      1002,
 		Action:      "arp_reply",
 		Result:      ResultSkipped,
+		TXBackend:   TXBackendAFPacket,
 		RXQueue:     1,
 	})
 
@@ -48,6 +50,7 @@ func TestResultBufferEvictsOldest(t *testing.T) {
 			RuleID:      i,
 			Action:      "tcp_syn_ack",
 			Result:      ResultSent,
+			TXBackend:   TXBackendAFXDP,
 			RXQueue:     0,
 		})
 	}
@@ -70,6 +73,7 @@ func TestResultBufferListReturnsCopy(t *testing.T) {
 		RuleID:      1001,
 		Action:      "icmp_echo_reply",
 		Result:      ResultSent,
+		TXBackend:   TXBackendAFXDP,
 		RXQueue:     0,
 	})
 
@@ -87,10 +91,11 @@ func TestResultBufferFillsTimestamp(t *testing.T) {
 
 	buffer := newTestResultBuffer(t, 1)
 	recordTestResult(t, buffer, ResponseResult{
-		RuleID:  1001,
-		Action:  "icmp_echo_reply",
-		Result:  ResultSent,
-		RXQueue: 0,
+		RuleID:    1001,
+		Action:    "icmp_echo_reply",
+		Result:    ResultSent,
+		TXBackend: TXBackendAFXDP,
+		RXQueue:   0,
 	})
 
 	results := buffer.List()
@@ -116,26 +121,32 @@ func TestResultBufferValidation(t *testing.T) {
 		{
 			name:   "rejects missing action",
 			create: func() (*ResultBuffer, error) { return NewResultBuffer(1) },
-			record: ResponseResult{Result: ResultSent},
+			record: ResponseResult{Result: ResultSent, TXBackend: TXBackendAFXDP},
 			want:   "action is required",
 		},
 		{
 			name:   "rejects unknown result",
 			create: func() (*ResultBuffer, error) { return NewResultBuffer(1) },
-			record: ResponseResult{Action: "icmp_echo_reply", Result: "unknown"},
+			record: ResponseResult{Action: "icmp_echo_reply", Result: "unknown", TXBackend: TXBackendAFXDP},
 			want:   "unsupported result",
 		},
 		{
 			name:   "rejects unsupported action",
 			create: func() (*ResultBuffer, error) { return NewResultBuffer(1) },
-			record: ResponseResult{Action: "tcp_reset", Result: ResultSent},
+			record: ResponseResult{Action: "tcp_reset", Result: ResultSent, TXBackend: TXBackendAFXDP},
 			want:   "unsupported action",
 		},
 		{
 			name:   "rejects negative queue",
 			create: func() (*ResultBuffer, error) { return NewResultBuffer(1) },
-			record: ResponseResult{Action: "icmp_echo_reply", Result: ResultSent, RXQueue: -1},
+			record: ResponseResult{Action: "icmp_echo_reply", Result: ResultSent, TXBackend: TXBackendAFXDP, RXQueue: -1},
 			want:   "rx_queue -1 out of range",
+		},
+		{
+			name:   "rejects unsupported tx backend",
+			create: func() (*ResultBuffer, error) { return NewResultBuffer(1) },
+			record: ResponseResult{Action: "icmp_echo_reply", Result: ResultSent, TXBackend: TXBackend("bad"), RXQueue: 0},
+			want:   "unsupported tx_backend",
 		},
 	}
 
@@ -217,6 +228,10 @@ func newTestResultBuffer(t testing.TB, capacity int) *ResultBuffer {
 
 func recordTestResult(t testing.TB, buffer *ResultBuffer, result ResponseResult) {
 	t.Helper()
+
+	if result.TXBackend == "" {
+		result.TXBackend = TXBackendAFXDP
+	}
 
 	if err := buffer.Record(result); err != nil {
 		t.Fatalf("Record() error = %v", err)

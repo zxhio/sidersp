@@ -9,6 +9,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"sidersp/internal/logs"
+	"sidersp/internal/model"
 )
 
 type XSKBackend interface {
@@ -35,6 +36,7 @@ type RuntimeConfig struct {
 type Runtime struct {
 	group           *WorkerGroup
 	results         *ResultBuffer
+	stats           *responseStatsCounters
 	backends        []XSKBackend
 	closers         []io.Closer
 	ifindex         int
@@ -59,6 +61,7 @@ func NewRuntime(config RuntimeConfig) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
+	stats := newResponseStatsCounters()
 
 	queues := config.Queues
 	if len(queues) == 0 {
@@ -92,6 +95,7 @@ func NewRuntime(config RuntimeConfig) (*Runtime, error) {
 			QueueID: queueID,
 			Sender:  sender,
 			Results: results,
+			Stats:   stats,
 		})
 		if err != nil {
 			closeBackends(backends)
@@ -116,6 +120,7 @@ func NewRuntime(config RuntimeConfig) (*Runtime, error) {
 	return &Runtime{
 		group:           group,
 		results:         results,
+		stats:           stats,
 		backends:        backends,
 		closers:         closers,
 		ifindex:         config.IfIndex,
@@ -192,6 +197,13 @@ func (r *Runtime) Results() []ResponseResult {
 	return r.results.List()
 }
 
+func (r *Runtime) ReadStats() model.ResponseStats {
+	if r == nil {
+		return model.ResponseStats{}
+	}
+	return r.stats.snapshot()
+}
+
 func closeBackends(backends []XSKBackend) {
 	for _, backend := range backends {
 		_ = backend.Close()
@@ -206,7 +218,7 @@ func closeClosers(closers []io.Closer) {
 
 func responseSenderMode(egressInterface string) string {
 	if egressInterface == "" {
-		return "afxdp"
+		return string(TXBackendAFXDP)
 	}
-	return "afpacket"
+	return string(TXBackendAFPacket)
 }

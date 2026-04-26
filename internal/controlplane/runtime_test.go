@@ -27,10 +27,10 @@ type testStreamer struct{}
 func (testStreamer) RunEventStream(context.Context) error { return nil }
 
 type testStatsReader struct {
-	stats model.DataplaneStats
+	stats model.RuntimeStats
 }
 
-func (s testStatsReader) ReadStats() (model.DataplaneStats, error) { return s.stats, nil }
+func (s testStatsReader) ReadStats() (model.RuntimeStats, error) { return s.stats, nil }
 
 func TestSetRuleEnabledSyncsEnabledRulesOnly(t *testing.T) {
 	t.Parallel()
@@ -219,22 +219,32 @@ func TestStatsReturnsRuntimeAndDataplaneCounters(t *testing.T) {
 	t.Parallel()
 
 	r := NewRuntime(config.Config{}, &testSyncer{}, testStreamer{}, testStatsReader{
-		stats: model.DataplaneStats{
-			RXPackets:         100,
-			ParseFailed:       2,
-			RuleCandidates:    40,
-			MatchedRules:      7,
-			RuleMatches:       map[uint32]uint64{1: 11},
-			RingbufDropped:    1,
-			XDPTX:             3,
-			XskTX:             4,
-			TXFailed:          5,
-			XskFailed:         6,
-			XskMetaFailed:     10,
-			XskRedirectFailed: 11,
-			RedirectTX:        7,
-			RedirectFailed:    8,
-			FibLookupFailed:   9,
+		stats: model.RuntimeStats{
+			Dataplane: model.DataplaneStats{
+				RXPackets:            100,
+				ParseFailed:          2,
+				RuleCandidates:       40,
+				MatchedRules:         7,
+				RuleMatches:          map[uint32]uint64{1: 11},
+				RingbufDropped:       1,
+				XDPTX:                3,
+				TXFailed:             5,
+				XskRedirected:        4,
+				XskRedirectFailed:    6,
+				XskMetaFailed:        10,
+				XskMapRedirectFailed: 11,
+				RedirectTX:           7,
+				RedirectFailed:       8,
+				FibLookupFailed:      9,
+			},
+			Response: model.ResponseStats{
+				ResponseSent:     12,
+				ResponseFailed:   20,
+				AFXDPTX:          12,
+				AFXDPTXFailed:    20,
+				AFPacketTX:       0,
+				AFPacketTXFailed: 0,
+			},
 		},
 	})
 	r.rules = rule.RuleSet{
@@ -260,23 +270,32 @@ func TestStatsReturnsRuntimeAndDataplaneCounters(t *testing.T) {
 	if got.RXPackets != 100 || got.MatchedRules != 7 {
 		t.Fatalf("dataplane stats = %+v, want rx=100 matched=7", got)
 	}
-	if got.XskFailed != 6 {
-		t.Fatalf("xsk_failed = %d, want 6", got.XskFailed)
+	if got.XskRedirected != 4 {
+		t.Fatalf("xsk_redirected = %d, want 4", got.XskRedirected)
 	}
-	if got.XskMetaFailed != 10 || got.XskRedirectFailed != 11 {
-		t.Fatalf("xsk breakdown = %+v, want meta=10 redirect=11", got)
+	if got.XskRedirectFailed != 6 || got.XskMetaFailed != 10 || got.XskMapRedirectFailed != 11 {
+		t.Fatalf("response redirect breakdown = %+v, want failed=6 meta=10 map=11", got)
 	}
 	if got.RedirectTX != 7 || got.RedirectFailed != 8 || got.FibLookupFailed != 9 {
 		t.Fatalf("redirect stats = %+v, want redirect_tx=7 redirect_failed=8 fib_lookup_failed=9", got)
 	}
-	if got.Overview.PrimaryIssueStage != model.StatsStageXSKRedirect {
-		t.Fatalf("primary issue stage = %q, want %q", got.Overview.PrimaryIssueStage, model.StatsStageXSKRedirect)
+	if got.ResponseSent != 12 || got.ResponseFailed != 20 || got.AFXDPTX != 12 || got.AFXDPTXFailed != 20 {
+		t.Fatalf("response stats = %+v, want response/afxdp counters copied", got)
 	}
-	if len(got.Stages) != 7 {
-		t.Fatalf("stages len = %d, want 7", len(got.Stages))
+	if got.Overview.PrimaryIssueStage != model.StatsStageResponseTX {
+		t.Fatalf("primary issue stage = %q, want %q", got.Overview.PrimaryIssueStage, model.StatsStageResponseTX)
 	}
-	if got.Stages[5].Key != model.StatsStageXSKRedirect {
-		t.Fatalf("xsk stage = %+v, want xsk_redirect stage", got.Stages[5])
+	if len(got.Stages) != 8 {
+		t.Fatalf("stages len = %d, want 8", len(got.Stages))
+	}
+	if got.Stages[5].Key != model.StatsStageResponseRedirect {
+		t.Fatalf("response redirect stage = %+v, want response_redirect stage", got.Stages[5])
+	}
+	if got.Stages[5].PrimaryMetricKey != model.StatsMetricXskRedirected {
+		t.Fatalf("response redirect stage = %+v, want primary metric xsk_redirected", got.Stages[5])
+	}
+	if got.Stages[7].Key != model.StatsStageResponseTX || got.Stages[7].PrimaryMetricKey != model.StatsMetricResponseSent {
+		t.Fatalf("response tx stage = %+v, want response_tx response_sent", got.Stages[7])
 	}
 	if len(got.Histories) != 1 {
 		t.Fatalf("histories len = %d, want 1", len(got.Histories))
@@ -288,7 +307,10 @@ func TestStatsReturnsRuntimeAndDataplaneCounters(t *testing.T) {
 		t.Fatalf("stage histories len = %d, want 1", len(got.StageHistories))
 	}
 	if got.StageHistories[0].Stages[5].Metrics[2].Key != model.StatsMetricXskMetaFailed {
-		t.Fatalf("stage history xsk metric = %+v, want xsk_meta_failed metric", got.StageHistories[0].Stages[5].Metrics[2])
+		t.Fatalf("stage history response redirect metric = %+v, want xsk_meta_failed metric", got.StageHistories[0].Stages[5].Metrics[2])
+	}
+	if got.StageHistories[0].Stages[7].Metrics[0].Key != model.StatsMetricResponseSent {
+		t.Fatalf("stage history response tx metric = %+v, want response_sent metric", got.StageHistories[0].Stages[7].Metrics[0])
 	}
 }
 
@@ -296,10 +318,12 @@ func TestRuleMatchCountsReturnsPerRuleCounters(t *testing.T) {
 	t.Parallel()
 
 	r := NewRuntime(config.Config{}, &testSyncer{}, testStreamer{}, testStatsReader{
-		stats: model.DataplaneStats{
-			RuleMatches: map[uint32]uint64{
-				1: 8,
-				2: 3,
+		stats: model.RuntimeStats{
+			Dataplane: model.DataplaneStats{
+				RuleMatches: map[uint32]uint64{
+					1: 8,
+					2: 3,
+				},
 			},
 		},
 	})

@@ -28,7 +28,7 @@ type EventStreamer interface {
 }
 
 type StatsReader interface {
-	ReadStats() (model.DataplaneStats, error)
+	ReadStats() (model.RuntimeStats, error)
 }
 
 type Runtime struct {
@@ -121,9 +121,9 @@ func (r *Runtime) Status() Status {
 }
 
 func (r *Runtime) Stats(rangeSeconds int) (Stats, error) {
-	dpStats, err := r.stats.ReadStats()
+	runtimeStats, err := r.stats.ReadStats()
 	if err != nil {
-		return Stats{}, fmt.Errorf("read dataplane stats: %w", err)
+		return Stats{}, fmt.Errorf("read runtime stats: %w", err)
 	}
 
 	rangeDuration, err := normalizeStatsRange(rangeSeconds, r.statsCollectStep, r.statsKeepWindow)
@@ -135,7 +135,7 @@ func (r *Runtime) Stats(rangeSeconds int) (Stats, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	current := newStats(r.rules, dpStats)
+	current := newStats(r.rules, runtimeStats)
 	current.RangeSeconds = int(rangeDuration / time.Second)
 	current.CollectIntervalSeconds = int(r.statsCollectStep / time.Second)
 	current.RetentionSeconds = int(r.statsKeepWindow / time.Second)
@@ -156,13 +156,13 @@ func (r *Runtime) Stats(rangeSeconds int) (Stats, error) {
 }
 
 func (r *Runtime) RuleMatchCounts() (map[int]uint64, error) {
-	dpStats, err := r.stats.ReadStats()
+	runtimeStats, err := r.stats.ReadStats()
 	if err != nil {
-		return nil, fmt.Errorf("read dataplane stats: %w", err)
+		return nil, fmt.Errorf("read runtime stats: %w", err)
 	}
 
-	counts := make(map[int]uint64, len(dpStats.RuleMatches))
-	for ruleID, matchedCount := range dpStats.RuleMatches {
+	counts := make(map[int]uint64, len(runtimeStats.Dataplane.RuleMatches))
+	for ruleID, matchedCount := range runtimeStats.Dataplane.RuleMatches {
 		counts[int(ruleID)] = matchedCount
 	}
 	return counts, nil

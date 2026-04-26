@@ -269,47 +269,47 @@ func TestKernelStatsFields(t *testing.T) {
 		RingbufDropped: 1,
 	}.fields()
 
-	if got := fields["rx"]; got != uint64(10) {
-		t.Fatalf("rx = %v, want %d", got, 10)
+	if got := fields["rx_packets"]; got != uint64(10) {
+		t.Fatalf("rx_packets = %v, want %d", got, 10)
 	}
-	if got := fields["parse"]; got != uint64(2) {
-		t.Fatalf("parse = %v, want %d", got, 2)
+	if got := fields["parse_failed"]; got != uint64(2) {
+		t.Fatalf("parse_failed = %v, want %d", got, 2)
 	}
-	if got := fields["cand"]; got != uint64(8) {
-		t.Fatalf("cand = %v, want %d", got, 8)
+	if got := fields["rule_candidates"]; got != uint64(8) {
+		t.Fatalf("rule_candidates = %v, want %d", got, 8)
 	}
-	if got := fields["match"]; got != uint64(4) {
-		t.Fatalf("match = %v, want %d", got, 4)
+	if got := fields["matched_rules"]; got != uint64(4) {
+		t.Fatalf("matched_rules = %v, want %d", got, 4)
 	}
-	if got := fields["drop"]; got != uint64(1) {
-		t.Fatalf("drop = %v, want %d", got, 1)
+	if got := fields["ringbuf_dropped"]; got != uint64(1) {
+		t.Fatalf("ringbuf_dropped = %v, want %d", got, 1)
 	}
 	if got := fields["xdp_tx"]; got != uint64(0) {
 		t.Fatalf("xdp_tx = %v, want %d", got, 0)
 	}
-	if got := fields["xsk_tx"]; got != uint64(0) {
-		t.Fatalf("xsk_tx = %v, want %d", got, 0)
+	if got := fields["xsk_redirected"]; got != uint64(0) {
+		t.Fatalf("xsk_redirected = %v, want %d", got, 0)
 	}
-	if got := fields["tx_fail"]; got != uint64(0) {
-		t.Fatalf("tx_fail = %v, want %d", got, 0)
+	if got := fields["tx_failed"]; got != uint64(0) {
+		t.Fatalf("tx_failed = %v, want %d", got, 0)
 	}
-	if got := fields["xsk_fail"]; got != uint64(0) {
-		t.Fatalf("xsk_fail = %v, want %d", got, 0)
+	if got := fields["xsk_redirect_failed"]; got != uint64(0) {
+		t.Fatalf("xsk_redirect_failed = %v, want %d", got, 0)
 	}
-	if got := fields["xsk_meta_fail"]; got != uint64(0) {
-		t.Fatalf("xsk_meta_fail = %v, want %d", got, 0)
+	if got := fields["xsk_meta_failed"]; got != uint64(0) {
+		t.Fatalf("xsk_meta_failed = %v, want %d", got, 0)
 	}
-	if got := fields["xsk_redirect_fail"]; got != uint64(0) {
-		t.Fatalf("xsk_redirect_fail = %v, want %d", got, 0)
+	if got := fields["xsk_map_redirect_failed"]; got != uint64(0) {
+		t.Fatalf("xsk_map_redirect_failed = %v, want %d", got, 0)
 	}
-	if got := fields["redir_tx"]; got != uint64(0) {
-		t.Fatalf("redir_tx = %v, want %d", got, 0)
+	if got := fields["redirect_tx"]; got != uint64(0) {
+		t.Fatalf("redirect_tx = %v, want %d", got, 0)
 	}
-	if got := fields["redir_fail"]; got != uint64(0) {
-		t.Fatalf("redir_fail = %v, want %d", got, 0)
+	if got := fields["redirect_failed"]; got != uint64(0) {
+		t.Fatalf("redirect_failed = %v, want %d", got, 0)
 	}
-	if got := fields["fib_fail"]; got != uint64(0) {
-		t.Fatalf("fib_fail = %v, want %d", got, 0)
+	if got := fields["fib_lookup_failed"]; got != uint64(0) {
+		t.Fatalf("fib_lookup_failed = %v, want %d", got, 0)
 	}
 	if len(fields) != 14 {
 		t.Fatalf("len(fields) = %d, want %d", len(fields), 14)

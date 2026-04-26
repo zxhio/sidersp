@@ -15,6 +15,7 @@ type ResponseExecutor struct {
 	queueID int
 	sender  responseSender
 	results *ResultBuffer
+	stats   *responseStatsCounters
 }
 
 type ResponseExecutorConfig struct {
@@ -22,6 +23,7 @@ type ResponseExecutorConfig struct {
 	QueueID int
 	Sender  responseSender
 	Results *ResultBuffer
+	Stats   *responseStatsCounters
 }
 
 func NewResponseExecutor(config ResponseExecutorConfig) (*ResponseExecutor, error) {
@@ -34,11 +36,15 @@ func NewResponseExecutor(config ResponseExecutorConfig) (*ResponseExecutor, erro
 	if config.Results == nil {
 		return nil, fmt.Errorf("create response executor: result buffer is required")
 	}
+	if config.Stats == nil {
+		return nil, fmt.Errorf("create response executor: stats counters are required")
+	}
 	return &ResponseExecutor{
 		ifindex: config.IfIndex,
 		queueID: config.QueueID,
 		sender:  config.Sender,
 		results: config.Results,
+		stats:   config.Stats,
 	}, nil
 }
 
@@ -60,6 +66,7 @@ func (e *ResponseExecutor) Execute(ctx context.Context, meta XSKMetadata, frame 
 	}
 
 	result.Result = ResultSent
+	e.stats.recordSent(result.TXBackend)
 	return e.results.Record(result)
 }
 
@@ -77,10 +84,11 @@ func (e *ResponseExecutor) ExecuteXSK(ctx context.Context, frame []byte) error {
 
 func (e *ResponseExecutor) newResult(meta XSKMetadata, action string, frame []byte) ResponseResult {
 	result := ResponseResult{
-		RuleID:  meta.RuleID,
-		Action:  action,
-		IfIndex: e.ifindex,
-		RXQueue: e.queueID,
+		RuleID:    meta.RuleID,
+		Action:    action,
+		TXBackend: e.sender.Backend(),
+		IfIndex:   e.ifindex,
+		RXQueue:   e.queueID,
 	}
 	fillTupleFields(&result, frame)
 	return result
@@ -89,6 +97,7 @@ func (e *ResponseExecutor) newResult(meta XSKMetadata, action string, frame []by
 func (e *ResponseExecutor) recordFailure(result ResponseResult, err error) {
 	result.Result = ResultFailed
 	result.Error = err.Error()
+	e.stats.recordFailed(result.TXBackend)
 	_ = e.results.Record(result)
 }
 

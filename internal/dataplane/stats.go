@@ -6,38 +6,38 @@ import (
 )
 
 type kernelStats struct {
-	RXPackets         uint64
-	ParseFailed       uint64
-	RuleCandidates    uint64
-	MatchedRules      uint64
-	RingbufDropped    uint64
-	XDPTX             uint64
-	XskTX             uint64
-	TXFailed          uint64
-	XskFailed         uint64
-	XskMetaFailed     uint64
-	XskRedirectFailed uint64
-	RedirectTX        uint64
-	RedirectFailed    uint64
-	FibLookupFailed   uint64
+	RXPackets            uint64
+	ParseFailed          uint64
+	RuleCandidates       uint64
+	MatchedRules         uint64
+	RingbufDropped       uint64
+	XDPTX                uint64
+	TXFailed             uint64
+	XskRedirected        uint64
+	XskRedirectFailed    uint64
+	XskMetaFailed        uint64
+	XskMapRedirectFailed uint64
+	RedirectTX           uint64
+	RedirectFailed       uint64
+	FibLookupFailed      uint64
 }
 
 func (s kernelStats) fields() logrus.Fields {
 	return logrus.Fields{
-		"rx":                s.RXPackets,
-		"parse":             s.ParseFailed,
-		"cand":              s.RuleCandidates,
-		"match":             s.MatchedRules,
-		"drop":              s.RingbufDropped,
-		"xdp_tx":            s.XDPTX,
-		"xsk_tx":            s.XskTX,
-		"tx_fail":           s.TXFailed,
-		"xsk_fail":          s.XskFailed,
-		"xsk_meta_fail":     s.XskMetaFailed,
-		"xsk_redirect_fail": s.XskRedirectFailed,
-		"redir_tx":          s.RedirectTX,
-		"redir_fail":        s.RedirectFailed,
-		"fib_fail":          s.FibLookupFailed,
+		"rx_packets":              s.RXPackets,
+		"parse_failed":            s.ParseFailed,
+		"rule_candidates":         s.RuleCandidates,
+		"matched_rules":           s.MatchedRules,
+		"ringbuf_dropped":         s.RingbufDropped,
+		"xdp_tx":                  s.XDPTX,
+		"tx_failed":               s.TXFailed,
+		"xsk_redirected":          s.XskRedirected,
+		"xsk_redirect_failed":     s.XskRedirectFailed,
+		"xsk_meta_failed":         s.XskMetaFailed,
+		"xsk_map_redirect_failed": s.XskMapRedirectFailed,
+		"redirect_tx":             s.RedirectTX,
+		"redirect_failed":         s.RedirectFailed,
+		"fib_lookup_failed":       s.FibLookupFailed,
 	}
 }
 

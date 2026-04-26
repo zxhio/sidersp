@@ -25,14 +25,20 @@ type Stats struct {
 	MatchedRules           uint64                    `json:"matched_rules"`
 	RingbufDropped         uint64                    `json:"ringbuf_dropped"`
 	XDPTX                  uint64                    `json:"xdp_tx"`
-	XskTX                  uint64                    `json:"xsk_tx"`
 	TXFailed               uint64                    `json:"tx_failed"`
-	XskFailed              uint64                    `json:"xsk_failed"`
-	XskMetaFailed          uint64                    `json:"xsk_meta_failed"`
+	XskRedirected          uint64                    `json:"xsk_redirected"`
 	XskRedirectFailed      uint64                    `json:"xsk_redirect_failed"`
+	XskMetaFailed          uint64                    `json:"xsk_meta_failed"`
+	XskMapRedirectFailed   uint64                    `json:"xsk_map_redirect_failed"`
 	RedirectTX             uint64                    `json:"redirect_tx"`
 	RedirectFailed         uint64                    `json:"redirect_failed"`
 	FibLookupFailed        uint64                    `json:"fib_lookup_failed"`
+	ResponseSent           uint64                    `json:"response_sent"`
+	ResponseFailed         uint64                    `json:"response_failed"`
+	AFXDPTX                uint64                    `json:"afxdp_tx"`
+	AFXDPTXFailed          uint64                    `json:"afxdp_tx_failed"`
+	AFPacketTX             uint64                    `json:"afpacket_tx"`
+	AFPacketTXFailed       uint64                    `json:"afpacket_tx_failed"`
 	Stages                 []DiagnosticStage         `json:"stages"`
 	Histories              []StatsHistorySeries      `json:"histories"`
 	StageHistories         []DiagnosticHistorySeries `json:"stage_histories"`
@@ -98,23 +104,29 @@ type MetricPoint struct {
 }
 
 type StatsPoint struct {
-	Timestamp         time.Time `json:"timestamp"`
-	TotalRules        int       `json:"total_rules"`
-	EnabledRules      int       `json:"enabled_rules"`
-	RXPackets         uint64    `json:"rx_packets"`
-	ParseFailed       uint64    `json:"parse_failed"`
-	RuleCandidates    uint64    `json:"rule_candidates"`
-	MatchedRules      uint64    `json:"matched_rules"`
-	RingbufDropped    uint64    `json:"ringbuf_dropped"`
-	XDPTX             uint64    `json:"xdp_tx"`
-	XskTX             uint64    `json:"xsk_tx"`
-	TXFailed          uint64    `json:"tx_failed"`
-	XskFailed         uint64    `json:"xsk_failed"`
-	XskMetaFailed     uint64    `json:"xsk_meta_failed"`
-	XskRedirectFailed uint64    `json:"xsk_redirect_failed"`
-	RedirectTX        uint64    `json:"redirect_tx"`
-	RedirectFailed    uint64    `json:"redirect_failed"`
-	FibLookupFailed   uint64    `json:"fib_lookup_failed"`
+	Timestamp            time.Time `json:"timestamp"`
+	TotalRules           int       `json:"total_rules"`
+	EnabledRules         int       `json:"enabled_rules"`
+	RXPackets            uint64    `json:"rx_packets"`
+	ParseFailed          uint64    `json:"parse_failed"`
+	RuleCandidates       uint64    `json:"rule_candidates"`
+	MatchedRules         uint64    `json:"matched_rules"`
+	RingbufDropped       uint64    `json:"ringbuf_dropped"`
+	XDPTX                uint64    `json:"xdp_tx"`
+	TXFailed             uint64    `json:"tx_failed"`
+	XskRedirected        uint64    `json:"xsk_redirected"`
+	XskRedirectFailed    uint64    `json:"xsk_redirect_failed"`
+	XskMetaFailed        uint64    `json:"xsk_meta_failed"`
+	XskMapRedirectFailed uint64    `json:"xsk_map_redirect_failed"`
+	RedirectTX           uint64    `json:"redirect_tx"`
+	RedirectFailed       uint64    `json:"redirect_failed"`
+	FibLookupFailed      uint64    `json:"fib_lookup_failed"`
+	ResponseSent         uint64    `json:"response_sent"`
+	ResponseFailed       uint64    `json:"response_failed"`
+	AFXDPTX              uint64    `json:"afxdp_tx"`
+	AFXDPTXFailed        uint64    `json:"afxdp_tx_failed"`
+	AFPacketTX           uint64    `json:"afpacket_tx"`
+	AFPacketTXFailed     uint64    `json:"afpacket_tx_failed"`
 }
 
 type StatsQuery struct {
@@ -192,15 +204,15 @@ var diagnosticStageDescriptors = []stageDescriptor{
 		},
 	},
 	{
-		Key:              model.StatsStageXSKRedirect,
+		Key:              model.StatsStageResponseRedirect,
 		Title:            "响应重定向",
-		Summary:          "把原始报文重定向到 XSK，由用户态响应模块继续处理。",
-		PrimaryMetricKey: model.StatsMetricXskTX,
+		Summary:          "BPF 把原始报文重定向到 XSK，由用户态响应模块继续处理。",
+		PrimaryMetricKey: model.StatsMetricXskRedirected,
 		Metrics: []metricDescriptor{
-			{Key: model.StatsMetricXskTX, Label: "重定向到响应模块", Description: "BPF 成功把报文提交到 XSK 的次数。", Role: model.MetricRoleSuccess},
-			{Key: model.StatsMetricXskFailed, Label: "响应重定向失败", Description: "XSK 重定向总失败次数。", Role: model.MetricRoleFailure},
-			{Key: model.StatsMetricXskMetaFailed, Label: "XSK 元数据失败", Description: "写入 XDP metadata 失败导致的 XSK 重定向失败次数。", Role: model.MetricRoleFailure},
-			{Key: model.StatsMetricXskRedirectFailed, Label: "XSK 提交失败", Description: "调用 redirect_map 提交到 XSK 失败的次数。", Role: model.MetricRoleFailure},
+			{Key: model.StatsMetricXskRedirected, Label: "重定向到响应模块", Description: "BPF 成功把原始报文提交到 XSK 的次数。", Role: model.MetricRoleSuccess},
+			{Key: model.StatsMetricXskRedirectFailed, Label: "响应重定向失败", Description: "XSK 重定向阶段总失败次数。", Role: model.MetricRoleFailure},
+			{Key: model.StatsMetricXskMetaFailed, Label: "XSK 元数据失败", Description: "申请或写入 XDP metadata 失败的次数。", Role: model.MetricRoleFailure},
+			{Key: model.StatsMetricXskMapRedirectFailed, Label: "XSK 映射重定向失败", Description: "调用 bpf_redirect_map() 提交到 XSK 失败的次数。", Role: model.MetricRoleFailure},
 		},
 	},
 	{
@@ -212,6 +224,20 @@ var diagnosticStageDescriptors = []stageDescriptor{
 			{Key: model.StatsMetricRedirectTX, Label: "出口重定向成功", Description: "BPF 成功把响应提交到出口网卡的次数。", Role: model.MetricRoleSuccess},
 			{Key: model.StatsMetricRedirectFailed, Label: "出口重定向失败", Description: "重定向准备阶段失败的次数。", Role: model.MetricRoleFailure},
 			{Key: model.StatsMetricFibLookupFailed, Label: "FIB 查询失败", Description: "出口重定向所需的 FIB 查询失败次数。", Role: model.MetricRoleFailure},
+		},
+	},
+	{
+		Key:              model.StatsStageResponseTX,
+		Title:            "响应发送",
+		Summary:          "用户态响应模块构造并发送响应帧，区分 AF_XDP 和 AF_PACKET backend。",
+		PrimaryMetricKey: model.StatsMetricResponseSent,
+		Metrics: []metricDescriptor{
+			{Key: model.StatsMetricResponseSent, Label: "响应发送成功", Description: "用户态响应模块成功发送响应帧的总次数。", Role: model.MetricRoleSuccess},
+			{Key: model.StatsMetricResponseFailed, Label: "响应发送失败", Description: "用户态响应模块发送失败的总次数。", Role: model.MetricRoleFailure},
+			{Key: model.StatsMetricAFXDPTX, Label: "AF_XDP 发送成功", Description: "通过 AF_XDP backend 成功发送响应帧的次数。", Role: model.MetricRoleSuccess},
+			{Key: model.StatsMetricAFXDPTXFailed, Label: "AF_XDP 发送失败", Description: "AF_XDP backend 路径失败的次数。", Role: model.MetricRoleFailure},
+			{Key: model.StatsMetricAFPacketTX, Label: "AF_PACKET 发送成功", Description: "通过 AF_PACKET backend 成功发送响应帧的次数。", Role: model.MetricRoleSuccess},
+			{Key: model.StatsMetricAFPacketTXFailed, Label: "AF_PACKET 发送失败", Description: "AF_PACKET backend 路径失败的次数。", Role: model.MetricRoleFailure},
 		},
 	},
 }
@@ -227,67 +253,79 @@ func buildStatsRetention(cfg config.ParsedConsoleStatsConfig) (time.Duration, ti
 	return cfg.CollectInterval, cfg.Retention, keepLimit
 }
 
-func newStats(rules rule.RuleSet, dpStats model.DataplaneStats) Stats {
-	counters := dpStats.Counters()
+func newStats(rules rule.RuleSet, runtimeStats model.RuntimeStats) Stats {
+	counters := runtimeStats.Counters()
 	stages := buildDiagnosticStages(counters)
 	totalRules := len(rules.Rules)
 	enabledRules := len(enabledRuleSet(rules).Rules)
 
 	return Stats{
-		Overview:          buildStatsOverview(totalRules, enabledRules, counters, stages),
-		TotalRules:        totalRules,
-		EnabledRules:      enabledRules,
-		RXPackets:         counters.RXPackets,
-		ParseFailed:       counters.ParseFailed,
-		RuleCandidates:    counters.RuleCandidates,
-		MatchedRules:      counters.MatchedRules,
-		RingbufDropped:    counters.RingbufDropped,
-		XDPTX:             counters.XDPTX,
-		XskTX:             counters.XskTX,
-		TXFailed:          counters.TXFailed,
-		XskFailed:         counters.XskFailed,
-		XskMetaFailed:     counters.XskMetaFailed,
-		XskRedirectFailed: counters.XskRedirectFailed,
-		RedirectTX:        counters.RedirectTX,
-		RedirectFailed:    counters.RedirectFailed,
-		FibLookupFailed:   counters.FibLookupFailed,
-		Stages:            stages,
+		Overview:             buildStatsOverview(totalRules, enabledRules, counters, stages),
+		TotalRules:           totalRules,
+		EnabledRules:         enabledRules,
+		RXPackets:            counters.Dataplane.RXPackets,
+		ParseFailed:          counters.Dataplane.ParseFailed,
+		RuleCandidates:       counters.Dataplane.RuleCandidates,
+		MatchedRules:         counters.Dataplane.MatchedRules,
+		RingbufDropped:       counters.Dataplane.RingbufDropped,
+		XDPTX:                counters.Dataplane.XDPTX,
+		TXFailed:             counters.Dataplane.TXFailed,
+		XskRedirected:        counters.Dataplane.XskRedirected,
+		XskRedirectFailed:    counters.Dataplane.XskRedirectFailed,
+		XskMetaFailed:        counters.Dataplane.XskMetaFailed,
+		XskMapRedirectFailed: counters.Dataplane.XskMapRedirectFailed,
+		RedirectTX:           counters.Dataplane.RedirectTX,
+		RedirectFailed:       counters.Dataplane.RedirectFailed,
+		FibLookupFailed:      counters.Dataplane.FibLookupFailed,
+		ResponseSent:         counters.Response.ResponseSent,
+		ResponseFailed:       counters.Response.ResponseFailed,
+		AFXDPTX:              counters.Response.AFXDPTX,
+		AFXDPTXFailed:        counters.Response.AFXDPTXFailed,
+		AFPacketTX:           counters.Response.AFPacketTX,
+		AFPacketTXFailed:     counters.Response.AFPacketTXFailed,
+		Stages:               stages,
 	}
 }
 
 func newStatsPoint(ts time.Time, item Stats) StatsPoint {
 	return StatsPoint{
-		Timestamp:         ts,
-		TotalRules:        item.TotalRules,
-		EnabledRules:      item.EnabledRules,
-		RXPackets:         item.RXPackets,
-		ParseFailed:       item.ParseFailed,
-		RuleCandidates:    item.RuleCandidates,
-		MatchedRules:      item.MatchedRules,
-		RingbufDropped:    item.RingbufDropped,
-		XDPTX:             item.XDPTX,
-		XskTX:             item.XskTX,
-		TXFailed:          item.TXFailed,
-		XskFailed:         item.XskFailed,
-		XskMetaFailed:     item.XskMetaFailed,
-		XskRedirectFailed: item.XskRedirectFailed,
-		RedirectTX:        item.RedirectTX,
-		RedirectFailed:    item.RedirectFailed,
-		FibLookupFailed:   item.FibLookupFailed,
+		Timestamp:            ts,
+		TotalRules:           item.TotalRules,
+		EnabledRules:         item.EnabledRules,
+		RXPackets:            item.RXPackets,
+		ParseFailed:          item.ParseFailed,
+		RuleCandidates:       item.RuleCandidates,
+		MatchedRules:         item.MatchedRules,
+		RingbufDropped:       item.RingbufDropped,
+		XDPTX:                item.XDPTX,
+		TXFailed:             item.TXFailed,
+		XskRedirected:        item.XskRedirected,
+		XskRedirectFailed:    item.XskRedirectFailed,
+		XskMetaFailed:        item.XskMetaFailed,
+		XskMapRedirectFailed: item.XskMapRedirectFailed,
+		RedirectTX:           item.RedirectTX,
+		RedirectFailed:       item.RedirectFailed,
+		FibLookupFailed:      item.FibLookupFailed,
+		ResponseSent:         item.ResponseSent,
+		ResponseFailed:       item.ResponseFailed,
+		AFXDPTX:              item.AFXDPTX,
+		AFXDPTXFailed:        item.AFXDPTXFailed,
+		AFPacketTX:           item.AFPacketTX,
+		AFPacketTXFailed:     item.AFPacketTXFailed,
 	}
 }
 
-func buildStatsOverview(totalRules int, enabledRules int, counters model.DataplaneCounters, stages []DiagnosticStage) StatsOverview {
+func buildStatsOverview(totalRules int, enabledRules int, counters model.RuntimeCounters, stages []DiagnosticStage) StatsOverview {
 	return StatsOverview{
 		TotalRules:        totalRules,
 		EnabledRules:      enabledRules,
-		RXPackets:         counters.RXPackets,
-		MatchedRules:      counters.MatchedRules,
+		RXPackets:         counters.Dataplane.RXPackets,
+		MatchedRules:      counters.Dataplane.MatchedRules,
 		PrimaryIssueStage: selectPrimaryIssueStage(stages),
 	}
 }
 
-func buildDiagnosticStages(counters model.DataplaneCounters) []DiagnosticStage {
+func buildDiagnosticStages(counters model.RuntimeCounters) []DiagnosticStage {
 	stages := make([]DiagnosticStage, 0, len(diagnosticStageDescriptors))
 	for _, desc := range diagnosticStageDescriptors {
 		metrics := make([]DiagnosticMetric, 0, len(desc.Metrics))
@@ -334,36 +372,48 @@ func selectPrimaryIssueStage(stages []DiagnosticStage) string {
 	return selected
 }
 
-func counterValueByKey(counters model.DataplaneCounters, key string) uint64 {
+func counterValueByKey(counters model.RuntimeCounters, key string) uint64 {
 	switch key {
 	case model.StatsMetricRXPackets:
-		return counters.RXPackets
+		return counters.Dataplane.RXPackets
 	case model.StatsMetricParseFailed:
-		return counters.ParseFailed
+		return counters.Dataplane.ParseFailed
 	case model.StatsMetricRuleCandidates:
-		return counters.RuleCandidates
+		return counters.Dataplane.RuleCandidates
 	case model.StatsMetricMatchedRules:
-		return counters.MatchedRules
+		return counters.Dataplane.MatchedRules
 	case model.StatsMetricRingbufDropped:
-		return counters.RingbufDropped
+		return counters.Dataplane.RingbufDropped
 	case model.StatsMetricXDPTX:
-		return counters.XDPTX
-	case model.StatsMetricXskTX:
-		return counters.XskTX
+		return counters.Dataplane.XDPTX
 	case model.StatsMetricTXFailed:
-		return counters.TXFailed
-	case model.StatsMetricXskFailed:
-		return counters.XskFailed
-	case model.StatsMetricXskMetaFailed:
-		return counters.XskMetaFailed
+		return counters.Dataplane.TXFailed
+	case model.StatsMetricXskRedirected:
+		return counters.Dataplane.XskRedirected
 	case model.StatsMetricXskRedirectFailed:
-		return counters.XskRedirectFailed
+		return counters.Dataplane.XskRedirectFailed
+	case model.StatsMetricXskMetaFailed:
+		return counters.Dataplane.XskMetaFailed
+	case model.StatsMetricXskMapRedirectFailed:
+		return counters.Dataplane.XskMapRedirectFailed
 	case model.StatsMetricRedirectTX:
-		return counters.RedirectTX
+		return counters.Dataplane.RedirectTX
 	case model.StatsMetricRedirectFailed:
-		return counters.RedirectFailed
+		return counters.Dataplane.RedirectFailed
 	case model.StatsMetricFibLookupFailed:
-		return counters.FibLookupFailed
+		return counters.Dataplane.FibLookupFailed
+	case model.StatsMetricResponseSent:
+		return counters.Response.ResponseSent
+	case model.StatsMetricResponseFailed:
+		return counters.Response.ResponseFailed
+	case model.StatsMetricAFXDPTX:
+		return counters.Response.AFXDPTX
+	case model.StatsMetricAFXDPTXFailed:
+		return counters.Response.AFXDPTXFailed
+	case model.StatsMetricAFPacketTX:
+		return counters.Response.AFPacketTX
+	case model.StatsMetricAFPacketTXFailed:
+		return counters.Response.AFPacketTXFailed
 	default:
 		return 0
 	}
@@ -391,7 +441,7 @@ func (r *Runtime) runStatsCollector(ctx context.Context) {
 }
 
 func (r *Runtime) collectStats(now time.Time) {
-	dpStats, err := r.stats.ReadStats()
+	runtimeStats, err := r.stats.ReadStats()
 	if err != nil {
 		logs.App().WithError(err).Warn("Fail to collect stats")
 		return
@@ -400,7 +450,7 @@ func (r *Runtime) collectStats(now time.Time) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	current := newStats(r.rules, dpStats)
+	current := newStats(r.rules, runtimeStats)
 	point := newStatsPoint(now.Truncate(r.statsCollectStep), current)
 	r.appendRawStatsPoint(point)
 	r.trimRawStatsHistory(point.Timestamp)
@@ -555,21 +605,31 @@ func aggregateDiagnosticStages(points []StatsPoint) []DiagnosticStageHistory {
 	return stages
 }
 
-func statsPointCounters(point StatsPoint) model.DataplaneCounters {
-	return model.DataplaneCounters{
-		RXPackets:         point.RXPackets,
-		ParseFailed:       point.ParseFailed,
-		RuleCandidates:    point.RuleCandidates,
-		MatchedRules:      point.MatchedRules,
-		RingbufDropped:    point.RingbufDropped,
-		XDPTX:             point.XDPTX,
-		XskTX:             point.XskTX,
-		TXFailed:          point.TXFailed,
-		XskFailed:         point.XskFailed,
-		XskMetaFailed:     point.XskMetaFailed,
-		XskRedirectFailed: point.XskRedirectFailed,
-		RedirectTX:        point.RedirectTX,
-		RedirectFailed:    point.RedirectFailed,
-		FibLookupFailed:   point.FibLookupFailed,
+func statsPointCounters(point StatsPoint) model.RuntimeCounters {
+	return model.RuntimeCounters{
+		Dataplane: model.DataplaneCounters{
+			RXPackets:            point.RXPackets,
+			ParseFailed:          point.ParseFailed,
+			RuleCandidates:       point.RuleCandidates,
+			MatchedRules:         point.MatchedRules,
+			RingbufDropped:       point.RingbufDropped,
+			XDPTX:                point.XDPTX,
+			TXFailed:             point.TXFailed,
+			XskRedirected:        point.XskRedirected,
+			XskRedirectFailed:    point.XskRedirectFailed,
+			XskMetaFailed:        point.XskMetaFailed,
+			XskMapRedirectFailed: point.XskMapRedirectFailed,
+			RedirectTX:           point.RedirectTX,
+			RedirectFailed:       point.RedirectFailed,
+			FibLookupFailed:      point.FibLookupFailed,
+		},
+		Response: model.ResponseCounters{
+			ResponseSent:     point.ResponseSent,
+			ResponseFailed:   point.ResponseFailed,
+			AFXDPTX:          point.AFXDPTX,
+			AFXDPTXFailed:    point.AFXDPTXFailed,
+			AFPacketTX:       point.AFPacketTX,
+			AFPacketTXFailed: point.AFPacketTXFailed,
+		},
 	}
 }

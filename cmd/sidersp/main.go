@@ -16,6 +16,7 @@ import (
 	"sidersp/internal/controlplane"
 	"sidersp/internal/dataplane"
 	"sidersp/internal/logs"
+	"sidersp/internal/model"
 	"sidersp/internal/response"
 	"sidersp/internal/response/afxdp"
 )
@@ -76,12 +77,15 @@ func main() {
 		}
 	}()
 
-	cp := controlplane.NewRuntime(cfg, dp, dp, dp)
-	consoleServer := console.NewServer(cfg.Console.ListenAddr, cp, logManager)
 	responseRuntime, err := buildResponseRuntime(cfg, dp)
 	if err != nil {
 		logs.App().WithError(err).Fatal("Fail to build response runtime")
 	}
+	cp := controlplane.NewRuntime(cfg, dp, dp, runtimeStatsReader{
+		dataplane: dp,
+		response:  responseRuntime,
+	})
+	consoleServer := console.NewServer(cfg.Console.ListenAddr, cp, logManager)
 	logs.App().WithFields(logrus.Fields{
 		"config_path": *configPath,
 		"interface":   cfg.Dataplane.Interface,
@@ -117,6 +121,36 @@ func main() {
 		logs.App().WithError(err).Fatal("Fail to run service")
 	case <-ctx.Done():
 	}
+}
+
+type dataplaneStatsReader interface {
+	ReadStats() (model.DataplaneStats, error)
+}
+
+type responseStatsReader interface {
+	ReadStats() model.ResponseStats
+}
+
+type runtimeStatsReader struct {
+	dataplane dataplaneStatsReader
+	response  responseStatsReader
+}
+
+func (r runtimeStatsReader) ReadStats() (model.RuntimeStats, error) {
+	dataplaneStats, err := r.dataplane.ReadStats()
+	if err != nil {
+		return model.RuntimeStats{}, err
+	}
+
+	var responseStats model.ResponseStats
+	if r.response != nil {
+		responseStats = r.response.ReadStats()
+	}
+
+	return model.RuntimeStats{
+		Dataplane: dataplaneStats,
+		Response:  responseStats,
+	}, nil
 }
 
 func buildXDPResponseOptions(cfg config.EgressConfig) (dataplane.XDPResponseOptions, error) {

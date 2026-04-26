@@ -269,25 +269,25 @@ func (r *Runtime) readKernelStats() (kernelStats, error) {
 	if err != nil {
 		return kernelStats{}, fmt.Errorf("lookup xdp_tx: %w", err)
 	}
-	xskTX, err := readPerCPUCounter(r.objs.StatsMap, statXskTX)
+	xskRedirected, err := readPerCPUCounter(r.objs.StatsMap, statXskTX)
 	if err != nil {
-		return kernelStats{}, fmt.Errorf("lookup xsk_tx: %w", err)
+		return kernelStats{}, fmt.Errorf("lookup xsk_redirected: %w", err)
 	}
 	txFailed, err := readPerCPUCounter(r.objs.StatsMap, statTXFailed)
 	if err != nil {
 		return kernelStats{}, fmt.Errorf("lookup tx_failed: %w", err)
 	}
-	xskFailed, err := readPerCPUCounter(r.objs.StatsMap, statXskFailed)
+	xskRedirectFailed, err := readPerCPUCounter(r.objs.StatsMap, statXskFailed)
 	if err != nil {
-		return kernelStats{}, fmt.Errorf("lookup xsk_failed: %w", err)
+		return kernelStats{}, fmt.Errorf("lookup xsk_redirect_failed: %w", err)
 	}
 	xskMetaFailed, err := readPerCPUCounter(r.objs.StatsMap, statXskMetaFailed)
 	if err != nil {
 		return kernelStats{}, fmt.Errorf("lookup xsk_meta_failed: %w", err)
 	}
-	xskRedirectFailed, err := readPerCPUCounter(r.objs.StatsMap, statXskRedirectFailed)
+	xskMapRedirectFailed, err := readPerCPUCounter(r.objs.StatsMap, statXskRedirectFailed)
 	if err != nil {
-		return kernelStats{}, fmt.Errorf("lookup xsk_redirect_failed: %w", err)
+		return kernelStats{}, fmt.Errorf("lookup xsk_map_redirect_failed: %w", err)
 	}
 	redirectTX, err := readPerCPUCounter(r.objs.StatsMap, statRedirectTX)
 	if err != nil {
@@ -303,20 +303,20 @@ func (r *Runtime) readKernelStats() (kernelStats, error) {
 	}
 
 	return kernelStats{
-		RXPackets:         rxPackets,
-		ParseFailed:       parseFailed,
-		RuleCandidates:    ruleCandidates,
-		MatchedRules:      matchedRules,
-		RingbufDropped:    ringbufDropped,
-		XDPTX:             xdpTX,
-		XskTX:             xskTX,
-		TXFailed:          txFailed,
-		XskFailed:         xskFailed,
-		XskMetaFailed:     xskMetaFailed,
-		XskRedirectFailed: xskRedirectFailed,
-		RedirectTX:        redirectTX,
-		RedirectFailed:    redirectFailed,
-		FibLookupFailed:   fibLookupFailed,
+		RXPackets:            rxPackets,
+		ParseFailed:          parseFailed,
+		RuleCandidates:       ruleCandidates,
+		MatchedRules:         matchedRules,
+		RingbufDropped:       ringbufDropped,
+		XDPTX:                xdpTX,
+		TXFailed:             txFailed,
+		XskRedirected:        xskRedirected,
+		XskRedirectFailed:    xskRedirectFailed,
+		XskMetaFailed:        xskMetaFailed,
+		XskMapRedirectFailed: xskMapRedirectFailed,
+		RedirectTX:           redirectTX,
+		RedirectFailed:       redirectFailed,
+		FibLookupFailed:      fibLookupFailed,
 	}, nil
 }
 
@@ -332,40 +332,22 @@ func (r *Runtime) ReadStats() (model.DataplaneStats, error) {
 	}
 	r.matchMu.RUnlock()
 
-	counters := model.DataplaneCounters{
-		RXPackets:         stats.RXPackets,
-		ParseFailed:       stats.ParseFailed,
-		RuleCandidates:    stats.RuleCandidates,
-		MatchedRules:      stats.MatchedRules,
-		RingbufDropped:    stats.RingbufDropped,
-		XDPTX:             stats.XDPTX,
-		XskTX:             stats.XskTX,
-		TXFailed:          stats.TXFailed,
-		XskFailed:         stats.XskFailed,
-		XskMetaFailed:     stats.XskMetaFailed,
-		XskRedirectFailed: stats.XskRedirectFailed,
-		RedirectTX:        stats.RedirectTX,
-		RedirectFailed:    stats.RedirectFailed,
-		FibLookupFailed:   stats.FibLookupFailed,
-	}
-
 	return model.DataplaneStats{
-		RXPackets:         counters.RXPackets,
-		ParseFailed:       counters.ParseFailed,
-		RuleCandidates:    counters.RuleCandidates,
-		MatchedRules:      counters.MatchedRules,
-		RuleMatches:       ruleMatches,
-		RingbufDropped:    counters.RingbufDropped,
-		XDPTX:             counters.XDPTX,
-		XskTX:             counters.XskTX,
-		TXFailed:          counters.TXFailed,
-		XskFailed:         counters.XskFailed,
-		XskMetaFailed:     counters.XskMetaFailed,
-		XskRedirectFailed: counters.XskRedirectFailed,
-		RedirectTX:        counters.RedirectTX,
-		RedirectFailed:    counters.RedirectFailed,
-		FibLookupFailed:   counters.FibLookupFailed,
-		Stages:            model.BuildDiagnosticStages(counters),
+		RXPackets:            stats.RXPackets,
+		ParseFailed:          stats.ParseFailed,
+		RuleCandidates:       stats.RuleCandidates,
+		MatchedRules:         stats.MatchedRules,
+		RuleMatches:          ruleMatches,
+		RingbufDropped:       stats.RingbufDropped,
+		XDPTX:                stats.XDPTX,
+		TXFailed:             stats.TXFailed,
+		XskRedirected:        stats.XskRedirected,
+		XskRedirectFailed:    stats.XskRedirectFailed,
+		XskMetaFailed:        stats.XskMetaFailed,
+		XskMapRedirectFailed: stats.XskMapRedirectFailed,
+		RedirectTX:           stats.RedirectTX,
+		RedirectFailed:       stats.RedirectFailed,
+		FibLookupFailed:      stats.FibLookupFailed,
 	}, nil
 }
 

@@ -44,11 +44,17 @@ func TestResponseExecutorSendsAndRecordsResult(t *testing.T) {
 	if result.RuleID != 1001 || result.Action != "icmp_echo_reply" || result.Result != ResultSent {
 		t.Fatalf("result = %+v, want sent icmp_echo_reply rule 1001", result)
 	}
+	if result.TXBackend != TXBackendAFXDP {
+		t.Fatalf("result backend = %q, want %q", result.TXBackend, TXBackendAFXDP)
+	}
 	if result.IfIndex != 7 || result.RXQueue != 3 {
 		t.Fatalf("result location = ifindex %d queue %d, want 7/3", result.IfIndex, result.RXQueue)
 	}
 	if result.SIP != 0x0a000001 || result.DIP != 0x0a000002 || result.IPProto != 1 {
 		t.Fatalf("result tuple = sip %x dip %x proto %d, want request tuple", result.SIP, result.DIP, result.IPProto)
+	}
+	if got := executor.stats.snapshot(); got.ResponseSent != 1 || got.AFXDPTX != 1 || got.ResponseFailed != 0 {
+		t.Fatalf("stats = %+v, want response_sent=1 afxdp_tx=1 response_failed=0", got)
 	}
 }
 
@@ -77,8 +83,14 @@ func TestResponseExecutorRecordsBuildFailure(t *testing.T) {
 	if recorded[0].Result != ResultFailed || recorded[0].Error == "" {
 		t.Fatalf("result = %+v, want failed result with error", recorded[0])
 	}
+	if recorded[0].TXBackend != TXBackendAFXDP {
+		t.Fatalf("result backend = %q, want %q", recorded[0].TXBackend, TXBackendAFXDP)
+	}
 	if recorded[0].SPort != 12345 || recorded[0].DPort != 80 || recorded[0].IPProto != 6 {
 		t.Fatalf("result tuple = sport %d dport %d proto %d, want tcp request tuple", recorded[0].SPort, recorded[0].DPort, recorded[0].IPProto)
+	}
+	if got := executor.stats.snapshot(); got.ResponseFailed != 1 || got.AFXDPTXFailed != 1 || got.ResponseSent != 0 {
+		t.Fatalf("stats = %+v, want response_failed=1 afxdp_tx_failed=1 response_sent=0", got)
 	}
 }
 
@@ -108,6 +120,12 @@ func TestResponseExecutorRecordsTransmitFailure(t *testing.T) {
 	if recorded[0].Result != ResultFailed || !strings.Contains(recorded[0].Error, "transmit response frame") {
 		t.Fatalf("result = %+v, want transmit failure result", recorded[0])
 	}
+	if recorded[0].TXBackend != TXBackendAFXDP {
+		t.Fatalf("result backend = %q, want %q", recorded[0].TXBackend, TXBackendAFXDP)
+	}
+	if got := executor.stats.snapshot(); got.ResponseFailed != 1 || got.AFXDPTXFailed != 1 || got.AFXDPTX != 0 {
+		t.Fatalf("stats = %+v, want response_failed=1 afxdp_tx_failed=1 afxdp_tx=0", got)
+	}
 }
 
 func TestResponseExecutorRecordsBuildFailureForVLANRequestKeepsTuple(t *testing.T) {
@@ -131,6 +149,87 @@ func TestResponseExecutorRecordsBuildFailureForVLANRequestKeepsTuple(t *testing.
 	}
 	if recorded[0].SIP != 0x0a000001 || recorded[0].DIP != 0x0a000002 || recorded[0].IPProto != 1 {
 		t.Fatalf("result tuple = sip %x dip %x proto %d, want vlan request tuple", recorded[0].SIP, recorded[0].DIP, recorded[0].IPProto)
+	}
+	if got := executor.stats.snapshot(); got.ResponseFailed != 1 || got.AFXDPTXFailed != 1 {
+		t.Fatalf("stats = %+v, want response_failed=1 afxdp_tx_failed=1", got)
+	}
+}
+
+func TestResponseExecutorTracksAFPacketBackend(t *testing.T) {
+	t.Parallel()
+
+	results := newTestResultBuffer(t, 4)
+	tx := &stubFrameTransmitter{}
+	stats := newResponseStatsCounters()
+	executor, err := NewResponseExecutor(ResponseExecutorConfig{
+		IfIndex: 7,
+		QueueID: 3,
+		Sender: &afpacketSender{
+			out: tx,
+			buildOpts: BuildOptions{
+				HardwareAddr: testHWAddr,
+			},
+		},
+		Results: results,
+		Stats:   stats,
+	})
+	if err != nil {
+		t.Fatalf("NewResponseExecutor() error = %v", err)
+	}
+
+	if err := executor.Execute(context.Background(), XSKMetadata{
+		RuleID: 1007,
+		Action: ActionARPReply,
+	}, buildTestARPRequest(t)); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	recorded := results.List()
+	if len(recorded) != 1 || recorded[0].TXBackend != TXBackendAFPacket {
+		t.Fatalf("results = %+v, want one afpacket result", recorded)
+	}
+	if got := stats.snapshot(); got.ResponseSent != 1 || got.AFPacketTX != 1 || got.AFXDPTX != 0 {
+		t.Fatalf("stats = %+v, want response_sent=1 afpacket_tx=1 afxdp_tx=0", got)
+	}
+}
+
+func TestResponseExecutorTracksAFPacketFailure(t *testing.T) {
+	t.Parallel()
+
+	wantErr := errors.New("afpacket failed")
+	results := newTestResultBuffer(t, 4)
+	tx := &stubFrameTransmitter{err: wantErr}
+	stats := newResponseStatsCounters()
+	executor, err := NewResponseExecutor(ResponseExecutorConfig{
+		IfIndex: 7,
+		QueueID: 3,
+		Sender: &afpacketSender{
+			out: tx,
+			buildOpts: BuildOptions{
+				HardwareAddr: testHWAddr,
+			},
+		},
+		Results: results,
+		Stats:   stats,
+	})
+	if err != nil {
+		t.Fatalf("NewResponseExecutor() error = %v", err)
+	}
+
+	err = executor.Execute(context.Background(), XSKMetadata{
+		RuleID: 1008,
+		Action: ActionARPReply,
+	}, buildTestARPRequest(t))
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("Execute() error = %v, want %v", err, wantErr)
+	}
+
+	recorded := results.List()
+	if len(recorded) != 1 || recorded[0].TXBackend != TXBackendAFPacket || recorded[0].Result != ResultFailed {
+		t.Fatalf("results = %+v, want one failed afpacket result", recorded)
+	}
+	if got := stats.snapshot(); got.ResponseFailed != 1 || got.AFPacketTXFailed != 1 || got.AFXDPTXFailed != 0 {
+		t.Fatalf("stats = %+v, want response_failed=1 afpacket_tx_failed=1 afxdp_tx_failed=0", got)
 	}
 }
 
@@ -181,6 +280,12 @@ func TestResponseExecutorExecutesRedirectedFrame(t *testing.T) {
 	if recorded[0].RuleID != 1005 || recorded[0].Result != ResultSent {
 		t.Fatalf("result = %+v, want sent rule 1005", recorded[0])
 	}
+	if recorded[0].TXBackend != TXBackendAFXDP {
+		t.Fatalf("result backend = %q, want %q", recorded[0].TXBackend, TXBackendAFXDP)
+	}
+	if got := executor.stats.snapshot(); got.ResponseSent != 1 || got.AFXDPTX != 1 {
+		t.Fatalf("stats = %+v, want response_sent=1 afxdp_tx=1", got)
+	}
 }
 
 func TestResponseExecutorRejectsShortRedirectedFrame(t *testing.T) {
@@ -213,6 +318,7 @@ func newTestExecutor(t testing.TB, tx frameSender, results *ResultBuffer, opts B
 			buildOpts: opts,
 		},
 		Results: results,
+		Stats:   newResponseStatsCounters(),
 	})
 	if err != nil {
 		t.Fatalf("NewResponseExecutor() error = %v", err)

@@ -11,11 +11,15 @@ import (
 )
 
 type ResultStatus string
+type TXBackend string
 
 const (
 	ResultSent    ResultStatus = "sent"
 	ResultSkipped ResultStatus = "skipped"
 	ResultFailed  ResultStatus = "failed"
+
+	TXBackendAFXDP    TXBackend = "afxdp"
+	TXBackendAFPacket TXBackend = "afpacket"
 )
 
 type ResponseResult struct {
@@ -23,6 +27,7 @@ type ResponseResult struct {
 	RuleID      uint32       `json:"rule_id"`
 	Action      string       `json:"action"`
 	Result      ResultStatus `json:"result"`
+	TXBackend   TXBackend    `json:"tx_backend"`
 	IfIndex     int          `json:"ifindex"`
 	RXQueue     int          `json:"rx_queue"`
 	SIP         uint32       `json:"sip"`
@@ -115,6 +120,11 @@ func validateResult(result ResponseResult) error {
 	default:
 		return fmt.Errorf("record response result: unsupported result %q", result.Result)
 	}
+	switch result.TXBackend {
+	case TXBackendAFXDP, TXBackendAFPacket:
+	default:
+		return fmt.Errorf("record response result: unsupported tx_backend %q", result.TXBackend)
+	}
 	if result.RXQueue < 0 {
 		return fmt.Errorf("record response result: rx_queue %d out of range", result.RXQueue)
 	}
@@ -139,6 +149,7 @@ func logResult(result ResponseResult) {
 		"rule_id":    result.RuleID,
 		"action":     result.Action,
 		"result":     result.Result,
+		"tx_backend": result.TXBackend,
 		"ifindex":    result.IfIndex,
 		"rx_queue":   result.RXQueue,
 		"sip":        result.SIP,

@@ -7,6 +7,7 @@ import (
 
 type responseSender interface {
 	Send(context.Context, XSKMetadata, []byte) error
+	Backend() TXBackend
 }
 
 // borrowedFrameSender declares that SendBorrowedFrame consumes the frame
@@ -55,8 +56,16 @@ func (s *afxdpSender) Send(ctx context.Context, meta XSKMetadata, frame []byte) 
 	return sendResponseFrame(ctx, s.out, meta, frame, s.buildOpts)
 }
 
+func (s *afxdpSender) Backend() TXBackend {
+	return TXBackendAFXDP
+}
+
 func (s *afpacketSender) Send(ctx context.Context, meta XSKMetadata, frame []byte) error {
 	return sendResponseFrame(ctx, s.out, meta, frame, s.buildOpts)
+}
+
+func (s *afpacketSender) Backend() TXBackend {
+	return TXBackendAFPacket
 }
 
 func sendResponseFrame(ctx context.Context, out frameSender, meta XSKMetadata, frame []byte, buildOpts BuildOptions) error {
