@@ -97,9 +97,9 @@ func benchmarkExecuteResponseFrame(b *testing.B, meta XSKMetadata, request []byt
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		err := executor.ExecuteXSKFrame(context.Background(), frame)
+		err := executor.ExecuteXSK(context.Background(), frame)
 		if err != nil {
-			b.Fatalf("ExecuteXSKFrame() error = %v", err)
+			b.Fatalf("ExecuteXSK() error = %v", err)
 		}
 	}
 

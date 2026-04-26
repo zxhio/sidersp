@@ -156,19 +156,19 @@ func TestResponseExecutorRejectsUnsupportedActionWithoutResult(t *testing.T) {
 	}
 }
 
-func TestResponseExecutorExecutesMetadataPrefixedFrame(t *testing.T) {
+func TestResponseExecutorExecutesRedirectedFrame(t *testing.T) {
 	t.Parallel()
 
 	results := newTestResultBuffer(t, 4)
 	tx := &stubFrameTransmitter{}
 	executor := newTestExecutor(t, tx, results, BuildOptions{})
 
-	err := executor.ExecuteXSKFrame(context.Background(), buildTestXSKFrame(t, XSKMetadata{
+	err := executor.ExecuteXSK(context.Background(), buildTestXSKFrame(t, XSKMetadata{
 		RuleID: 1005,
 		Action: ActionICMPEchoReply,
 	}, buildTestICMPEchoRequest(t)))
 	if err != nil {
-		t.Fatalf("ExecuteXSKFrame() error = %v", err)
+		t.Fatalf("ExecuteXSK() error = %v", err)
 	}
 	if len(tx.frames) != 1 {
 		t.Fatalf("transmitted frames = %d, want 1", len(tx.frames))
@@ -183,16 +183,16 @@ func TestResponseExecutorExecutesMetadataPrefixedFrame(t *testing.T) {
 	}
 }
 
-func TestResponseExecutorRejectsShortXSKFrame(t *testing.T) {
+func TestResponseExecutorRejectsShortRedirectedFrame(t *testing.T) {
 	t.Parallel()
 
 	results := newTestResultBuffer(t, 4)
 	tx := &stubFrameTransmitter{}
 	executor := newTestExecutor(t, tx, results, BuildOptions{})
 
-	err := executor.ExecuteXSKFrame(context.Background(), []byte{0x01, 0x02})
+	err := executor.ExecuteXSK(context.Background(), []byte{0x01, 0x02})
 	if err == nil {
-		t.Fatal("ExecuteXSKFrame() error = nil, want short frame error")
+		t.Fatal("ExecuteXSK() error = nil, want short frame error")
 	}
 	if len(tx.frames) != 0 {
 		t.Fatalf("transmitted frames = %d, want 0", len(tx.frames))

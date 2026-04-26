@@ -5,12 +5,12 @@ import (
 	"strings"
 )
 
-func (r *Runtime) writeTXConfig(opts TCPResetTXOptions) error {
+func (r *Runtime) writeXDPResponseConfig(opts XDPResponseOptions) error {
 	cfg := siderspTxConfig{
-		TcpResetMode:           tcpResetXDPMode(opts.EgressIfIndex),
+		TcpResetMode:           xdpResponseMode(opts.EgressIfIndex),
 		TcpResetEgressIfindex:  uint32(opts.EgressIfIndex),
-		TcpResetVlanMode:       tcpResetVLANMode(opts.VLANMode),
-		TcpResetFailureVerdict: tcpResetFailureVerdict(opts.FailureVerdict),
+		TcpResetVlanMode:       xdpResponseVLANMode(opts.VLANMode),
+		TcpResetFailureVerdict: xdpResponseFailureVerdict(opts.FailureVerdict),
 	}
 	if err := r.objs.TxConfigMap.Put(uint32(0), cfg); err != nil {
 		return fmt.Errorf("write tx_config_map: %w", err)
@@ -18,14 +18,14 @@ func (r *Runtime) writeTXConfig(opts TCPResetTXOptions) error {
 	return nil
 }
 
-func tcpResetXDPMode(egressIfIndex int) uint32 {
+func xdpResponseMode(egressIfIndex int) uint32 {
 	if egressIfIndex > 0 {
 		return tcpResetTXModeRedirect
 	}
 	return tcpResetTXModeTX
 }
 
-func tcpResetVLANMode(raw string) uint32 {
+func xdpResponseVLANMode(raw string) uint32 {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "access":
 		return tcpResetVLANAccess
@@ -34,7 +34,7 @@ func tcpResetVLANMode(raw string) uint32 {
 	}
 }
 
-func tcpResetFailureVerdict(raw string) uint32 {
+func xdpResponseFailureVerdict(raw string) uint32 {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "drop":
 		return tcpResetFailureDrop

@@ -56,16 +56,16 @@ func main() {
 		cancel()
 	}()
 
-	tcpResetTX, err := buildTCPResetTXOptions(cfg.Egress)
+	xdpResponse, err := buildXDPResponseOptions(cfg.Egress)
 	if err != nil {
-		logs.App().WithError(err).Fatal("Fail to configure tcp_reset TX")
+		logs.App().WithError(err).Fatal("Fail to configure xdp response path")
 	}
 
 	dp, err := dataplane.Open(dataplane.Options{
 		Interface:      cfg.Dataplane.Interface,
 		AttachMode:     cfg.Dataplane.AttachMode,
 		IngressVerdict: cfg.Dataplane.NormalizedIngressVerdict(),
-		TCPResetTX:     tcpResetTX,
+		XDPResponse:    xdpResponse,
 	})
 	if err != nil {
 		logs.App().WithError(err).Fatal("Fail to open dataplane")
@@ -119,17 +119,17 @@ func main() {
 	}
 }
 
-func buildTCPResetTXOptions(cfg config.EgressConfig) (dataplane.TCPResetTXOptions, error) {
+func buildXDPResponseOptions(cfg config.EgressConfig) (dataplane.XDPResponseOptions, error) {
 	var egressIfIndex int
 	if cfg.TXPath() == "egress-interface" {
 		iface, err := net.InterfaceByName(cfg.Interface)
 		if err != nil {
-			return dataplane.TCPResetTXOptions{}, fmt.Errorf("lookup egress interface %s: %w", cfg.Interface, err)
+			return dataplane.XDPResponseOptions{}, fmt.Errorf("lookup egress interface %s: %w", cfg.Interface, err)
 		}
 		egressIfIndex = iface.Index
 	}
 
-	return dataplane.TCPResetTXOptions{
+	return dataplane.XDPResponseOptions{
 		EgressIfIndex:  egressIfIndex,
 		VLANMode:       cfg.NormalizedVLANMode(),
 		FailureVerdict: cfg.NormalizedFailureVerdict(),
@@ -156,7 +156,7 @@ func buildResponseRuntime(cfg config.Config, registrar response.XSKRegistrar) (*
 
 	afxdpCfg := buildAFXDPConfig(cfg.Response.Runtime, iface.Index)
 
-	newBackend := func(queueID int) (response.XSKBackend, error) {
+	newXSK := func(queueID int) (response.XSKBackend, error) {
 		return afxdp.NewSocket(afxdpCfg, queueID)
 	}
 
@@ -168,7 +168,7 @@ func buildResponseRuntime(cfg config.Config, registrar response.XSKRegistrar) (*
 		TCPSeq:               cfg.Response.Actions.TCPSynAck.TCPSeq,
 		EgressInterface:      cfg.Egress.Interface,
 		Registrar:            registrar,
-		NewXSKBackend:        newBackend,
+		NewXSK:               newXSK,
 	})
 }
 

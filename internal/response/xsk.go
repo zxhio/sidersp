@@ -11,11 +11,11 @@ import (
 )
 
 type XSKRegistrar interface {
-	RegisterXSKSocket(queueID int, fd uint32) error
+	RegisterXSK(queueID int, fd uint32) error
 }
 
-// XSKFrameHandler processes a single metadata-prefixed XSK frame.
-type XSKFrameHandler func(ctx context.Context, frame []byte) error
+// XSKHandler processes a single metadata-prefixed XSK frame.
+type XSKHandler func(ctx context.Context, frame []byte) error
 
 type XSKSocket interface {
 	FD() uint32
@@ -27,10 +27,10 @@ type XSKWorker struct {
 	queueID   int
 	registrar XSKRegistrar
 	socket    XSKSocket
-	handler   XSKFrameHandler
+	handler   XSKHandler
 }
 
-func NewXSKWorker(ifindex, queueID int, registrar XSKRegistrar, socket XSKSocket, handler XSKFrameHandler) (*XSKWorker, error) {
+func NewXSKWorker(ifindex, queueID int, registrar XSKRegistrar, socket XSKSocket, handler XSKHandler) (*XSKWorker, error) {
 	if registrar == nil {
 		return nil, fmt.Errorf("create xsk worker: registrar is required")
 	}
@@ -57,7 +57,7 @@ func (w *XSKWorker) Run(ctx context.Context) error {
 		return fmt.Errorf("run xsk worker: nil worker")
 	}
 
-	if err := w.registrar.RegisterXSKSocket(w.queueID, w.socket.FD()); err != nil {
+	if err := w.registrar.RegisterXSK(w.queueID, w.socket.FD()); err != nil {
 		return err
 	}
 

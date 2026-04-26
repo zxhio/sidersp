@@ -63,7 +63,7 @@ func (e *ResponseExecutor) Execute(ctx context.Context, meta XSKMetadata, frame 
 	return e.results.Record(result)
 }
 
-func (e *ResponseExecutor) ExecuteXSKFrame(ctx context.Context, frame []byte) error {
+func (e *ResponseExecutor) ExecuteXSK(ctx context.Context, frame []byte) error {
 	if e == nil {
 		return fmt.Errorf("execute xsk frame: nil executor")
 	}

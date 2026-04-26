@@ -14,7 +14,7 @@ type stubRegistrar struct {
 	calls   int
 }
 
-func (s *stubRegistrar) RegisterXSKSocket(queueID int, fd uint32) error {
+func (s *stubRegistrar) RegisterXSK(queueID int, fd uint32) error {
 	s.queueID = queueID
 	s.fd = fd
 	s.calls++
@@ -47,54 +47,23 @@ func (s *stubSocket) Receive(ctx context.Context) ([]byte, error) {
 	return nil, s.err
 }
 
-func newStubHandler() (*[]frame, XSKFrameHandler) {
-	frames := &[]frame{}
+type handledFrame struct {
+	data []byte
+}
+
+func newStubHandler() (*[]handledFrame, XSKHandler) {
+	frames := &[]handledFrame{}
 	return frames, func(_ context.Context, data []byte) error {
-		*frames = append(*frames, frame{data: append([]byte(nil), data...)})
+		*frames = append(*frames, handledFrame{data: append([]byte(nil), data...)})
 		return nil
 	}
 }
 
-func newStubHandlerWithError(err error) XSKFrameHandler {
+func newStubHandlerWithError(err error) XSKHandler {
 	return func(_ context.Context, _ []byte) error { return err }
 }
 
-type frame struct {
-	data []byte
-}
-
-func TestDecodeXSKMetadata(t *testing.T) {
-	t.Parallel()
-
-	frameData := []byte{
-		0x04, 0x03, 0x02, 0x01,
-		0x05, 0x00,
-		0x00, 0x00,
-		0xaa, 0xbb,
-	}
-
-	meta, payload, err := DecodeXSKMetadata(frameData)
-	if err != nil {
-		t.Fatalf("DecodeXSKMetadata() error = %v", err)
-	}
-	if meta.RuleID != 0x01020304 || meta.Action != 5 || meta.Reserved != 0 {
-		t.Fatalf("meta = %+v, want rule_id=0x01020304 action=5 reserved=0", meta)
-	}
-	if len(payload) != 2 || payload[0] != 0xaa || payload[1] != 0xbb {
-		t.Fatalf("payload = %x, want aabb", payload)
-	}
-}
-
-func TestDecodeXSKMetadataRejectsShortFrame(t *testing.T) {
-	t.Parallel()
-
-	_, _, err := DecodeXSKMetadata([]byte{0x01, 0x02})
-	if err == nil {
-		t.Fatal("DecodeXSKMetadata() error = nil, want short frame error")
-	}
-}
-
-func TestXSKWorkerRegistersSocketBeforeReceive(t *testing.T) {
+func TestXSKWorkerRegistersBeforeReceive(t *testing.T) {
 	t.Parallel()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -196,13 +165,13 @@ func TestXSKWorkerContinuesAfterFrameHandlerError(t *testing.T) {
 func TestNewXSKWorkerValidation(t *testing.T) {
 	t.Parallel()
 
-	noopHandler := XSKFrameHandler(func(_ context.Context, _ []byte) error { return nil })
+	noopHandler := XSKHandler(func(_ context.Context, _ []byte) error { return nil })
 
 	tests := []struct {
 		name      string
 		registrar XSKRegistrar
 		socket    XSKSocket
-		handler   XSKFrameHandler
+		handler   XSKHandler
 		queueID   int
 		want      string
 	}{

@@ -36,10 +36,10 @@ type Options struct {
 	Interface      string
 	AttachMode     string
 	IngressVerdict string
-	TCPResetTX     TCPResetTXOptions
+	XDPResponse    XDPResponseOptions
 }
 
-type TCPResetTXOptions struct {
+type XDPResponseOptions struct {
 	EgressIfIndex  int
 	VLANMode       string
 	FailureVerdict string
@@ -61,7 +61,7 @@ func Open(opts Options) (*Runtime, error) {
 		opts:        opts,
 		matchCounts: make(map[uint32]uint64),
 	}
-	if err := r.writeTXConfig(opts.TCPResetTX); err != nil {
+	if err := r.writeXDPResponseConfig(opts.XDPResponse); err != nil {
 		_ = r.objs.Close()
 		return nil, err
 	}

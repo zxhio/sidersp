@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestRegisterXSKSocketValidation(t *testing.T) {
+func TestRegisterXSKValidation(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -47,18 +47,18 @@ func TestRegisterXSKSocketValidation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			err := tc.runtime.RegisterXSKSocket(tc.queueID, 1)
+			err := tc.runtime.RegisterXSK(tc.queueID, 1)
 			if err == nil {
-				t.Fatal("RegisterXSKSocket() error = nil, want error")
+				t.Fatal("RegisterXSK() error = nil, want error")
 			}
 			if tc.target != nil {
 				if !errors.Is(err, tc.target) {
-					t.Fatalf("RegisterXSKSocket() error = %v, want target %v", err, tc.target)
+					t.Fatalf("RegisterXSK() error = %v, want target %v", err, tc.target)
 				}
 				return
 			}
 			if !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("RegisterXSKSocket() error = %q, want %q", err, tc.want)
+				t.Fatalf("RegisterXSK() error = %q, want %q", err, tc.want)
 			}
 		})
 	}

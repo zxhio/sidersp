@@ -6,13 +6,27 @@ import (
 	"testing"
 )
 
+type runtimeStubRegistrar struct {
+	queueID int
+	fd      uint32
+	err     error
+	calls   int
+}
+
+func (s *runtimeStubRegistrar) RegisterXSK(queueID int, fd uint32) error {
+	s.queueID = queueID
+	s.fd = fd
+	s.calls++
+	return s.err
+}
+
 type stubBackendFactory struct {
 	err      error
 	backends map[int]*stubBackend
 	queues   []int
 }
 
-func (s *stubBackendFactory) newFunc() NewXSKBackendFunc {
+func (s *stubBackendFactory) newFunc() NewXSKFunc {
 	return func(queueID int) (XSKBackend, error) {
 		s.queues = append(s.queues, queueID)
 		if s.err != nil {
@@ -54,15 +68,15 @@ func (s *stubBackend) Close() error {
 func TestNewRuntimeBuildsWorkersForQueues(t *testing.T) {
 	t.Parallel()
 
-	registrar := &stubRegistrar{}
+	registrar := &runtimeStubRegistrar{}
 	factory := &stubBackendFactory{}
 	runtime, err := NewRuntime(RuntimeConfig{
-		IfIndex:       7,
-		Queues:        []int{0, 1},
-		HardwareAddr:  testHWAddr,
-		TCPSeq:        1000,
-		Registrar:     registrar,
-		NewXSKBackend: factory.newFunc(),
+		IfIndex:      7,
+		Queues:       []int{0, 1},
+		HardwareAddr: testHWAddr,
+		TCPSeq:       1000,
+		Registrar:    registrar,
+		NewXSK:       factory.newFunc(),
 	})
 	if err != nil {
 		t.Fatalf("NewRuntime() error = %v", err)
@@ -87,8 +101,8 @@ func TestNewRuntimeUsesDefaults(t *testing.T) {
 
 	factory := &stubBackendFactory{}
 	runtime, err := NewRuntime(RuntimeConfig{
-		Registrar:     &stubRegistrar{},
-		NewXSKBackend: factory.newFunc(),
+		Registrar: &runtimeStubRegistrar{},
+		NewXSK:    factory.newFunc(),
 	})
 	if err != nil {
 		t.Fatalf("NewRuntime() error = %v", err)
@@ -106,9 +120,9 @@ func TestNewRuntimeReturnsBackendError(t *testing.T) {
 
 	wantErr := errors.New("backend failed")
 	_, err := NewRuntime(RuntimeConfig{
-		Queues:        []int{3},
-		Registrar:     &stubRegistrar{},
-		NewXSKBackend: (&stubBackendFactory{err: wantErr}).newFunc(),
+		Queues:    []int{3},
+		Registrar: &runtimeStubRegistrar{},
+		NewXSK:    (&stubBackendFactory{err: wantErr}).newFunc(),
 	})
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("NewRuntime() error = %v, want %v", err, wantErr)
@@ -119,8 +133,8 @@ func TestRuntimeResultsReturnsCopy(t *testing.T) {
 	t.Parallel()
 
 	runtime, err := NewRuntime(RuntimeConfig{
-		Registrar:     &stubRegistrar{},
-		NewXSKBackend: (&stubBackendFactory{}).newFunc(),
+		Registrar: &runtimeStubRegistrar{},
+		NewXSK:    (&stubBackendFactory{}).newFunc(),
 	})
 	if err != nil {
 		t.Fatalf("NewRuntime() error = %v", err)

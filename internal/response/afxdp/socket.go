@@ -125,9 +125,9 @@ func (s *Socket) FD() uint32 {
 	return uint32(s.sockfd)
 }
 
-// Receive polls the RX ring and returns one metadata-prefixed XSK frame. The
-// returned slice is copied out of UMEM so callers do not hold AF_XDP frame
-// ownership across response execution.
+// Receive polls the RX ring and returns one metadata-prefixed redirected
+// frame. The returned slice is copied out of UMEM so callers do not hold
+// AF_XDP frame ownership across response execution.
 func (s *Socket) Receive(ctx context.Context) ([]byte, error) {
 	pollFds := []unix.PollFd{
 		{Fd: int32(s.sockfd), Events: unix.POLLIN},

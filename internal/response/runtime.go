@@ -18,8 +18,8 @@ type XSKBackend interface {
 	io.Closer
 }
 
-// NewXSKBackendFunc creates an XSKBackend for the given queue ID.
-type NewXSKBackendFunc func(queueID int) (XSKBackend, error)
+// NewXSKFunc creates a queue-local XSK backend for the given queue ID.
+type NewXSKFunc func(queueID int) (XSKBackend, error)
 
 type RuntimeConfig struct {
 	IfIndex              int
@@ -29,7 +29,7 @@ type RuntimeConfig struct {
 	TCPSeq               uint32
 	EgressInterface      string
 	Registrar            XSKRegistrar
-	NewXSKBackend        NewXSKBackendFunc
+	NewXSK               NewXSKFunc
 }
 
 type Runtime struct {
@@ -47,7 +47,7 @@ func NewRuntime(config RuntimeConfig) (*Runtime, error) {
 	if config.Registrar == nil {
 		return nil, fmt.Errorf("create response runtime: registrar is required")
 	}
-	if config.NewXSKBackend == nil {
+	if config.NewXSK == nil {
 		return nil, fmt.Errorf("create response runtime: xsk backend is required")
 	}
 
@@ -79,11 +79,11 @@ func NewRuntime(config RuntimeConfig) (*Runtime, error) {
 		closers = append(closers, afpacketOut.(io.Closer))
 	}
 	for _, queueID := range queues {
-		backend, err := config.NewXSKBackend(queueID)
+		backend, err := config.NewXSK(queueID)
 		if err != nil {
 			closeBackends(backends)
 			closeClosers(closers)
-			return nil, fmt.Errorf("create xsk backend queue %d: %w", queueID, err)
+			return nil, fmt.Errorf("create xsk queue %d: %w", queueID, err)
 		}
 		backends = append(backends, backend)
 		sender := buildResponseSender(backend, afpacketOut, buildOpts)
@@ -98,7 +98,7 @@ func NewRuntime(config RuntimeConfig) (*Runtime, error) {
 			closeClosers(closers)
 			return nil, err
 		}
-		worker, err := NewXSKWorker(config.IfIndex, queueID, config.Registrar, backend, executor.ExecuteXSKFrame)
+		worker, err := NewXSKWorker(config.IfIndex, queueID, config.Registrar, backend, executor.ExecuteXSK)
 		if err != nil {
 			closeBackends(backends)
 			closeClosers(closers)
