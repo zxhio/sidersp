@@ -489,15 +489,18 @@ tr:last-child td {
   align-items: flex-start;
   justify-content: center;
   z-index: 100;
-  padding-top: 80px;
+  padding: 24px;
+  overflow-y: auto;
 }
 
 .modal {
   background: var(--c-surface);
   border-radius: var(--radius);
   width: 600px;
-  max-height: calc(100vh - 160px);
-  overflow-y: auto;
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
 }
 
@@ -507,6 +510,7 @@ tr:last-child td {
   align-items: center;
   padding: 16px 24px;
   border-bottom: 1px solid var(--c-border);
+  flex-shrink: 0;
 }
 
 .modal-header h3 {
@@ -527,6 +531,9 @@ tr:last-child td {
 
 .modal-body {
   padding: 20px 24px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .modal-footer {
@@ -535,6 +542,15 @@ tr:last-child td {
   gap: 8px;
   padding: 12px 24px;
   border-top: 1px solid var(--c-border);
+  flex-shrink: 0;
+  background: var(--c-surface);
+}
+
+.modal-form {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
 }
 
 /* ===== Form ===== */
@@ -785,6 +801,9 @@ tr:last-child td {
 .confirm-body {
   padding: 24px;
   text-align: center;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .confirm-body p {
@@ -803,6 +822,9 @@ tr:last-child td {
   justify-content: center;
   gap: 12px;
   padding: 12px 24px 20px;
+  flex-shrink: 0;
+  border-top: 1px solid var(--c-border);
+  background: var(--c-surface);
 }
 
 /* ===== Responsive ===== */
@@ -823,6 +845,13 @@ tr:last-child td {
   }
   .page-body {
     padding: 16px;
+  }
+  .modal-overlay {
+    padding: 12px;
+  }
+  .modal {
+    width: 100%;
+    max-height: calc(100vh - 24px);
   }
   .diagnostic-stage-head {
     flex-direction: column;

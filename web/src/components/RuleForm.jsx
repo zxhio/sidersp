@@ -473,7 +473,7 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
           <h3>{isNew ? '新建规则' : '编辑规则'}</h3>
           <button className="modal-close" onClick={onCancel}>&times;</button>
         </div>
-        <form onSubmit={handleSubmit}>
+        <form className="modal-form" onSubmit={handleSubmit}>
           <div className="modal-body">
             {error && <div className="error-msg">{error}</div>}
 
