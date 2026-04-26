@@ -1,16 +1,43 @@
 import { useState } from 'react'
 
-const ACTION_OPTIONS = [
-  { value: 'tcp_reset', label: 'TCP Reset' },
-  { value: 'icmp_port_unreachable', label: 'ICMP Port Unreachable' },
-  { value: 'udp_echo_reply', label: 'UDP Echo Reply' },
-  { value: 'dns_refused', label: 'DNS Refused' },
-  { value: 'tcp_syn_ack', label: 'TCP SYN-ACK' },
-  { value: 'icmp_echo_reply', label: 'ICMP Echo Reply' },
-  { value: 'arp_reply', label: 'ARP Reply' },
-  { value: 'alert', label: 'Alert' },
-  { value: 'none', label: 'None' },
+const ACTION_GROUPS = [
+  {
+    label: '通用',
+    options: [
+      { value: 'alert', label: 'Alert' },
+      { value: 'none', label: 'None' },
+    ],
+  },
+  {
+    label: 'TCP',
+    options: [
+      { value: 'tcp_reset', label: 'TCP Reset' },
+      { value: 'tcp_syn_ack', label: 'TCP SYN-ACK' },
+    ],
+  },
+  {
+    label: 'UDP',
+    options: [
+      { value: 'icmp_port_unreachable', label: 'ICMP Port Unreachable' },
+      { value: 'udp_echo_reply', label: 'UDP Echo Reply' },
+      { value: 'dns_refused', label: 'DNS Refused' },
+    ],
+  },
+  {
+    label: 'ICMP',
+    options: [
+      { value: 'icmp_echo_reply', label: 'ICMP Echo Reply' },
+    ],
+  },
+  {
+    label: 'ARP',
+    options: [
+      { value: 'arp_reply', label: 'ARP Reply' },
+    ],
+  },
 ]
+
+const ACTION_OPTIONS = ACTION_GROUPS.flatMap(group => group.options)
 
 const PROTOCOL_OPTIONS = [
   { value: 'tcp', label: 'TCP' },
@@ -517,10 +544,14 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
             <div className="form-group">
               <label>动作类型</label>
               <select value={form.action} onChange={e => set('action', e.target.value)}>
-                {ACTION_OPTIONS.map(option => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
+                {ACTION_GROUPS.map(group => (
+                  <optgroup key={group.label} label={group.label}>
+                    {group.options.map(option => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
               {isUDPOnlyAction && (
