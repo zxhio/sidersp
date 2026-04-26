@@ -1,6 +1,7 @@
 package logs
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,23 +12,24 @@ import (
 	"sidersp/internal/config"
 )
 
+type testLogPaths struct {
+	App   string
+	Stats string
+	Event string
+}
+
 func TestManagerWritesEachChannelToOwnFile(t *testing.T) {
 	t.Parallel()
 
 	manager, paths := newTestManager(t)
-	defer func() {
-		if err := manager.Close(); err != nil {
-			t.Fatalf("Close() error = %v", err)
-		}
-	}()
 
 	manager.App().Info("app-only-message")
 	manager.Stats().Info("stats-only-message")
 	manager.Event().Info("event-only-message")
 
-	appData := readLogFile(t, paths[ChannelApp])
-	statsData := readLogFile(t, paths[ChannelStats])
-	eventData := readLogFile(t, paths[ChannelEvent])
+	appData := readLogFile(t, paths.App)
+	statsData := readLogFile(t, paths.Stats)
+	eventData := readLogFile(t, paths.Event)
 
 	if !strings.Contains(appData, "app-only-message") || strings.Contains(appData, "stats-only-message") || strings.Contains(appData, "event-only-message") {
 		t.Fatalf("app log = %q, want only app message", appData)
@@ -44,11 +46,6 @@ func TestManagerSetChannelLevelOnlyAffectsTargetChannel(t *testing.T) {
 	t.Parallel()
 
 	manager, _ := newTestManager(t)
-	defer func() {
-		if err := manager.Close(); err != nil {
-			t.Fatalf("Close() error = %v", err)
-		}
-	}()
 
 	level, err := manager.SetChannelLevel(ChannelEvent, "debug")
 	if err != nil {
@@ -74,11 +71,6 @@ func TestManagerSetLevelCompatibilityUsesAppChannel(t *testing.T) {
 	t.Parallel()
 
 	manager, _ := newTestManager(t)
-	defer func() {
-		if err := manager.Close(); err != nil {
-			t.Fatalf("Close() error = %v", err)
-		}
-	}()
 
 	level, err := manager.SetLevel("warning")
 	if err != nil {
@@ -183,46 +175,45 @@ func TestManagerRejectsConflictingSharedWriterConfig(t *testing.T) {
 	}
 }
 
-func newTestManager(t testing.TB) (*Manager, map[string]string) {
+func newTestManager(t testing.TB) (*Manager, testLogPaths) {
 	t.Helper()
 
-	dir := t.TempDir()
-	paths := map[string]string{
-		ChannelApp:   filepath.Join(dir, "sidersp.log"),
-		ChannelStats: filepath.Join(dir, "sidersp.stats.log"),
-		ChannelEvent: filepath.Join(dir, "sidersp.event.log"),
-	}
-
-	manager, err := NewManager(config.LoggingConfig{
-		App: config.LogChannelConfig{
-			Level:      "info",
-			FilePath:   paths[ChannelApp],
-			MaxSizeMB:  10,
-			MaxBackups: 2,
-			MaxAgeDays: 3,
-			Compress:   boolRef(false),
-		},
-		Stats: config.LogChannelConfig{
-			Level:      "info",
-			FilePath:   paths[ChannelStats],
-			MaxSizeMB:  10,
-			MaxBackups: 2,
-			MaxAgeDays: 3,
-			Compress:   boolRef(false),
-		},
-		Event: config.LogChannelConfig{
-			Level:      "info",
-			FilePath:   paths[ChannelEvent],
-			MaxSizeMB:  10,
-			MaxBackups: 2,
-			MaxAgeDays: 3,
-			Compress:   boolRef(false),
-		},
-	})
+	cfg, paths := newTestLoggingConfig(t.TempDir())
+	manager, err := NewManager(cfg)
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
 	}
+	t.Cleanup(func() {
+		if err := manager.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	})
 	return manager, paths
+}
+
+func newTestLoggingConfig(dir string) (config.LoggingConfig, testLogPaths) {
+	paths := testLogPaths{
+		App:   filepath.Join(dir, "sidersp.log"),
+		Stats: filepath.Join(dir, "sidersp.stats.log"),
+		Event: filepath.Join(dir, "sidersp.event.log"),
+	}
+
+	return config.LoggingConfig{
+		App:   newTestChannelConfig(paths.App),
+		Stats: newTestChannelConfig(paths.Stats),
+		Event: newTestChannelConfig(paths.Event),
+	}, paths
+}
+
+func newTestChannelConfig(path string) config.LogChannelConfig {
+	return config.LogChannelConfig{
+		Level:      "info",
+		FilePath:   path,
+		MaxSizeMB:  10,
+		MaxBackups: 1,
+		MaxAgeDays: 1,
+		Compress:   boolRef(false),
+	}
 }
 
 func readLogFile(t testing.TB, path string) string {
@@ -230,6 +221,9 @@ func readLogFile(t testing.TB, path string) string {
 
 	data, err := os.ReadFile(path)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return ""
+		}
 		t.Fatalf("read log file %s: %v", path, err)
 	}
 	return string(data)
