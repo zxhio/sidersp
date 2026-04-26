@@ -82,7 +82,6 @@ func TestCreateRulePersistsAndSyncs(t *testing.T) {
 	}
 
 	item, err := r.CreateRule(rule.Rule{
-		ID:       2,
 		Name:     "two",
 		Enabled:  true,
 		Priority: 20,
@@ -101,9 +100,17 @@ func TestCreateRulePersistsAndSyncs(t *testing.T) {
 	if _, err := os.Stat(rulesPath); err != nil {
 		t.Fatalf("stat rules file: %v", err)
 	}
+
+	set, err := LoadRules(rulesPath)
+	if err != nil {
+		t.Fatalf("LoadRules() error = %v", err)
+	}
+	if len(set.Rules) != 2 || set.Rules[1].ID != 2 {
+		t.Fatalf("persisted rules = %+v, want second rule id 2", set.Rules)
+	}
 }
 
-func TestUpdateRuleConflict(t *testing.T) {
+func TestUpdateRuleIgnoresBodyID(t *testing.T) {
 	t.Parallel()
 
 	r := NewRuntime(config.Config{}, &testSyncer{}, testStreamer{}, testStatsReader{})
@@ -114,32 +121,9 @@ func TestUpdateRuleConflict(t *testing.T) {
 		},
 	}
 
-	_, err := r.UpdateRule(2, rule.Rule{
+	updated, err := r.UpdateRule(2, rule.Rule{
 		ID:       1,
-		Name:     "dup",
-		Enabled:  true,
-		Priority: 20,
-		Response: rule.RuleResponse{Action: "tcp_reset"},
-	})
-	if !errors.Is(err, ErrRuleConflict) {
-		t.Fatalf("UpdateRule() error = %v, want %v", err, ErrRuleConflict)
-	}
-}
-
-func TestUpdateRuleAllowsChangingOwnID(t *testing.T) {
-	t.Parallel()
-
-	r := NewRuntime(config.Config{}, &testSyncer{}, testStreamer{}, testStatsReader{})
-	r.rules = rule.RuleSet{
-		Rules: []rule.Rule{
-			{ID: 1, Name: "one", Enabled: true, Priority: 10, Response: rule.RuleResponse{Action: "tcp_reset"}},
-			{ID: 2, Name: "two", Enabled: true, Priority: 20, Response: rule.RuleResponse{Action: "tcp_reset"}},
-		},
-	}
-
-	updated, err := r.UpdateRule(1, rule.Rule{
-		ID:       3,
-		Name:     "three",
+		Name:     "two-updated",
 		Enabled:  true,
 		Priority: 10,
 		Response: rule.RuleResponse{Action: "tcp_reset"},
@@ -147,14 +131,53 @@ func TestUpdateRuleAllowsChangingOwnID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpdateRule() error = %v", err)
 	}
-	if updated.ID != 3 {
-		t.Fatalf("updated rule id = %d, want 3", updated.ID)
+	if updated.ID != 2 {
+		t.Fatalf("updated rule id = %d, want 2", updated.ID)
 	}
-	if r.rules.Rules[0].ID != 3 {
-		t.Fatalf("first rule id = %d, want 3", r.rules.Rules[0].ID)
+	if r.rules.Rules[0].ID != 1 {
+		t.Fatalf("first rule id = %d, want 1", r.rules.Rules[0].ID)
 	}
 	if r.rules.Rules[1].ID != 2 {
 		t.Fatalf("second rule id = %d, want 2", r.rules.Rules[1].ID)
+	}
+}
+
+func TestBootstrapPersistsAssignedRuleIDs(t *testing.T) {
+	t.Parallel()
+
+	rulesPath := filepath.Join(t.TempDir(), "rules.yaml")
+	if err := os.WriteFile(rulesPath, []byte(`rules:
+  - name: one
+    enabled: true
+    priority: 10
+    response:
+      action: tcp_reset
+`), 0o644); err != nil {
+		t.Fatalf("write rules file: %v", err)
+	}
+
+	syncer := &testSyncer{}
+	r := NewRuntime(config.Config{
+		ControlPlane: config.ControlPlaneConfig{RulesPath: rulesPath},
+	}, syncer, testStreamer{}, testStatsReader{})
+
+	set, err := r.bootstrap()
+	if err != nil {
+		t.Fatalf("bootstrap() error = %v", err)
+	}
+	if len(set.Rules) != 1 || set.Rules[0].ID != 1 {
+		t.Fatalf("bootstrapped rules = %+v, want one rule id 1", set.Rules)
+	}
+	if len(syncer.last.Rules) != 1 || syncer.last.Rules[0].ID != 1 {
+		t.Fatalf("synced rules = %+v, want one rule id 1", syncer.last.Rules)
+	}
+
+	persisted, err := LoadRules(rulesPath)
+	if err != nil {
+		t.Fatalf("LoadRules() error = %v", err)
+	}
+	if len(persisted.Rules) != 1 || persisted.Rules[0].ID != 1 {
+		t.Fatalf("persisted rules = %+v, want one rule id 1", persisted.Rules)
 	}
 }
 

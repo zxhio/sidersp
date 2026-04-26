@@ -8,8 +8,7 @@ Rules are stored as a list under the top-level `rules` field:
 
 ```yaml
 rules:
-  - id: 1001
-    name: http_tcp_reset
+  - name: http_tcp_reset
     enabled: true
     priority: 100
     match:
@@ -25,11 +24,15 @@ rules:
       action: tcp_reset
 ```
 
+`id` may be omitted in input YAML or API create requests. The control plane
+assigns a unique positive ID, keeps provided positive IDs unchanged, and writes
+the finalized IDs back when the rule set is persisted.
+
 ## Rule Fields
 
 | Field | Required | Default | Semantics |
 |-------|----------|---------|-----------|
-| `id` | yes | none | Unique non-zero rule ID |
+| `id` | input: no, persisted: yes | auto-assigned | Internal unique non-zero rule ID used by CRUD, stats, and event attribution |
 | `name` | yes | none | Non-empty display and audit name |
 | `enabled` | no | `false` | Disabled rules remain in config but are not loaded into the dataplane |
 | `priority` | no | `0` | Lower number means higher priority; must be `>= 0` |
@@ -126,8 +129,9 @@ port in v1.
 
 The control plane must:
 
-- Reject duplicate rule IDs
-- Reject missing `id`, empty `name`, missing `response.action`, or negative `priority`
+- Assign IDs to rules whose input `id` is missing or `0`
+- Reject duplicate rule IDs after assignment
+- Reject negative `id`, empty `name`, missing `response.action`, or negative `priority`
 - Normalize action and protocol names to lower case
 - Validate protocol, action, ICMP type, and ARP operation values
 - Reject XSK TX actions without compatible match conditions

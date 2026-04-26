@@ -47,6 +47,9 @@ func (s *stubService) GetRule(id int) (rule.Rule, error) {
 	return rule.Rule{}, controlplane.ErrRuleNotFound
 }
 func (s *stubService) CreateRule(item rule.Rule) (rule.Rule, error) {
+	if item.ID == 0 {
+		item.ID = nextStubRuleID(s.rules)
+	}
 	if err := validateStubRule(item); err != nil {
 		return rule.Rule{}, err
 	}
@@ -59,6 +62,7 @@ func (s *stubService) CreateRule(item rule.Rule) (rule.Rule, error) {
 	return item, nil
 }
 func (s *stubService) UpdateRule(id int, item rule.Rule) (rule.Rule, error) {
+	item.ID = id
 	if err := validateStubRule(item); err != nil {
 		return rule.Rule{}, err
 	}
@@ -78,6 +82,16 @@ func (s *stubService) DeleteRule(id int) error {
 		}
 	}
 	return controlplane.ErrRuleNotFound
+}
+
+func nextStubRuleID(items []rule.Rule) int {
+	nextID := 1
+	for _, item := range items {
+		if item.ID >= nextID {
+			nextID = item.ID + 1
+		}
+	}
+	return nextID
 }
 func (s *stubService) SetRuleEnabled(id int, enabled bool) (rule.Rule, error) {
 	for idx := range s.rules {
@@ -769,6 +783,32 @@ func TestCreateRule(t *testing.T) {
 	t.Parallel()
 
 	server := NewServer("127.0.0.1:0", &stubService{})
+	body := []byte(`{"name":"three","enabled":true,"priority":30,"match":{"dst_ports":[443]},"response":{"action":"tcp_reset"}}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/rules", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.newRouter().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusCreated)
+	}
+
+	var payload struct {
+		Data RuleBody `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if payload.Data.ID != 1 {
+		t.Fatalf("created rule id = %d, want 1", payload.Data.ID)
+	}
+}
+
+func TestCreateRuleKeepsExplicitID(t *testing.T) {
+	t.Parallel()
+
+	server := NewServer("127.0.0.1:0", &stubService{})
 	body := []byte(`{"id":3,"name":"three","enabled":true,"priority":30,"match":{"dst_ports":[443]},"response":{"action":"tcp_reset"}}`)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/rules", bytes.NewReader(body))
@@ -787,7 +827,7 @@ func TestUpdateRule(t *testing.T) {
 	server := NewServer("127.0.0.1:0", &stubService{
 		rules: []rule.Rule{{ID: 2, Name: "two", Enabled: false, Priority: 20, Response: rule.RuleResponse{Action: "tcp_reset"}}},
 	})
-	body := []byte(`{"id":2,"name":"two-updated","enabled":true,"priority":10,"match":{"dst_ports":[80]},"response":{"action":"tcp_reset"}}`)
+	body := []byte(`{"id":7,"name":"two-updated","enabled":true,"priority":10,"match":{"dst_ports":[80]},"response":{"action":"tcp_reset"}}`)
 
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/rules/2", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -796,6 +836,16 @@ func TestUpdateRule(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var payload struct {
+		Data RuleBody `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if payload.Data.ID != 2 {
+		t.Fatalf("updated rule id = %d, want 2", payload.Data.ID)
 	}
 }
 

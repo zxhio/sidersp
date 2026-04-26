@@ -1,3 +1,5 @@
+# `id` is optional on input. These sample IDs are shown for readability and are
+# preserved if provided.
 rules:
   - id: 1001
     name: observe_tcp_syn_80

@@ -90,6 +90,72 @@ func TestLoadRules(t *testing.T) {
 	}
 }
 
+func TestLoadRulesAssignsMissingID(t *testing.T) {
+	t.Parallel()
+
+	path := writeRulesFile(t, `rules:
+  - name: auto-id
+    enabled: true
+    priority: 100
+    response:
+      action: tcp_reset
+`)
+
+	set, err := LoadRules(path)
+	if err != nil {
+		t.Fatalf("LoadRules() error = %v", err)
+	}
+	if len(set.Rules) != 1 {
+		t.Fatalf("len(Rules) = %d, want 1", len(set.Rules))
+	}
+	if set.Rules[0].ID != 1 {
+		t.Fatalf("assigned rule id = %d, want 1", set.Rules[0].ID)
+	}
+}
+
+func TestLoadRulesAssignsMissingIDsAfterExistingMax(t *testing.T) {
+	t.Parallel()
+
+	path := writeRulesFile(t, `rules:
+  - id: 1004
+    name: existing
+    enabled: true
+    priority: 100
+    response:
+      action: tcp_reset
+  - name: auto-one
+    enabled: true
+    priority: 110
+    response:
+      action: tcp_reset
+  - id: 1009
+    name: existing-max
+    enabled: true
+    priority: 120
+    response:
+      action: tcp_reset
+  - name: auto-two
+    enabled: true
+    priority: 130
+    response:
+      action: tcp_reset
+`)
+
+	set, err := LoadRules(path)
+	if err != nil {
+		t.Fatalf("LoadRules() error = %v", err)
+	}
+	if len(set.Rules) != 4 {
+		t.Fatalf("len(Rules) = %d, want 4", len(set.Rules))
+	}
+	if set.Rules[1].ID != 1010 {
+		t.Fatalf("auto-one id = %d, want 1010", set.Rules[1].ID)
+	}
+	if set.Rules[3].ID != 1011 {
+		t.Fatalf("auto-two id = %d, want 1011", set.Rules[3].ID)
+	}
+}
+
 func TestLoadRulesValidationError(t *testing.T) {
 	t.Parallel()
 
@@ -240,6 +306,60 @@ func TestSaveRulesNormalizesAndSorts(t *testing.T) {
 	}
 	if got := set.Rules[1].Response.Action; got != "tcp_reset" {
 		t.Fatalf("action = %q, want tcp_reset", got)
+	}
+}
+
+func TestSaveRulesWritesAssignedIDs(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "rules.yaml")
+	err := SaveRules(path, rule.RuleSet{
+		Rules: []rule.Rule{
+			{
+				Name:     "auto-id",
+				Enabled:  true,
+				Priority: 10,
+				Response: rule.RuleResponse{Action: "tcp_reset"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("SaveRules() error = %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read rules file: %v", err)
+	}
+	if !strings.Contains(string(data), "id: 1") {
+		t.Fatalf("saved rules = %q, want assigned id", string(data))
+	}
+}
+
+func TestLoadRulesSortsByPriorityThenID(t *testing.T) {
+	t.Parallel()
+
+	path := writeRulesFile(t, `rules:
+  - id: 20
+    name: later-id
+    enabled: true
+    priority: 100
+    response:
+      action: tcp_reset
+  - id: 10
+    name: earlier-id
+    enabled: true
+    priority: 100
+    response:
+      action: tcp_reset
+`)
+
+	set, err := LoadRules(path)
+	if err != nil {
+		t.Fatalf("LoadRules() error = %v", err)
+	}
+	if set.Rules[0].ID != 10 || set.Rules[1].ID != 20 {
+		t.Fatalf("rule order ids = %d,%d, want 10,20", set.Rules[0].ID, set.Rules[1].ID)
 	}
 }
 

@@ -72,9 +72,14 @@ func NewRuntime(cfg config.Config, syncer RuleSyncer, streamer EventStreamer, st
 }
 
 func (r *Runtime) bootstrap() (rule.RuleSet, error) {
-	rules, err := LoadRules(r.cfg.ControlPlane.RulesPath)
+	rules, changed, err := loadRulesFile(r.cfg.ControlPlane.RulesPath)
 	if err != nil {
 		return rule.RuleSet{}, fmt.Errorf("load rules: %w", err)
+	}
+	if changed {
+		if err := r.persistRules(rules); err != nil {
+			return rule.RuleSet{}, err
+		}
 	}
 
 	if err := r.syncRules(rules); err != nil {
@@ -246,7 +251,9 @@ func (r *Runtime) CreateRule(item rule.Rule) (rule.Rule, error) {
 	defer r.mu.Unlock()
 
 	next := cloneRuleSet(r.rules)
+	existingIDs := make(map[int]struct{}, len(next.Rules))
 	for _, existing := range next.Rules {
+		existingIDs[existing.ID] = struct{}{}
 		if existing.ID == item.ID {
 			return rule.Rule{}, ErrRuleConflict
 		}
@@ -256,6 +263,17 @@ func (r *Runtime) CreateRule(item rule.Rule) (rule.Rule, error) {
 	if err := normalizeRuleSet(&next); err != nil {
 		return rule.Rule{}, err
 	}
+
+	createdID := item.ID
+	if createdID == 0 {
+		for _, current := range next.Rules {
+			if _, ok := existingIDs[current.ID]; ok {
+				continue
+			}
+			createdID = current.ID
+			break
+		}
+	}
 	if err := r.persistRules(next); err != nil {
 		return rule.Rule{}, err
 	}
@@ -264,38 +282,26 @@ func (r *Runtime) CreateRule(item rule.Rule) (rule.Rule, error) {
 	}
 
 	r.rules = next
-	return r.findRuleLocked(item.ID)
+	return r.findRuleLocked(createdID)
 }
 
 func (r *Runtime) UpdateRule(id int, item rule.Rule) (rule.Rule, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	item.ID = id
 	next := cloneRuleSet(r.rules)
 	found := false
-	replacedIdx := -1
 	for idx := range next.Rules {
 		if next.Rules[idx].ID != id {
 			continue
 		}
 		next.Rules[idx] = cloneRule(item)
 		found = true
-		replacedIdx = idx
 		break
 	}
 	if !found {
 		return rule.Rule{}, ErrRuleNotFound
-	}
-
-	if item.ID != id {
-		for i, existing := range next.Rules {
-			if i == replacedIdx {
-				continue
-			}
-			if existing.ID == item.ID {
-				return rule.Rule{}, ErrRuleConflict
-			}
-		}
 	}
 
 	if err := normalizeRuleSet(&next); err != nil {
@@ -309,7 +315,7 @@ func (r *Runtime) UpdateRule(id int, item rule.Rule) (rule.Rule, error) {
 	}
 
 	r.rules = next
-	return r.findRuleLocked(item.ID)
+	return r.findRuleLocked(id)
 }
 
 func (r *Runtime) DeleteRule(id int) error {

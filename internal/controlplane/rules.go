@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -38,23 +39,29 @@ var allowedProtocols = map[string]struct{}{
 var ErrRuleValidation = errors.New("rule validation failed")
 
 func LoadRules(path string) (rule.RuleSet, error) {
+	set, _, err := loadRulesFile(path)
+	return set, err
+}
+
+func loadRulesFile(path string) (rule.RuleSet, bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return rule.RuleSet{}, fmt.Errorf("read rules file: %w", err)
+		return rule.RuleSet{}, false, fmt.Errorf("read rules file: %w", err)
 	}
 
 	var set rule.RuleSet
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&set); err != nil {
-		return rule.RuleSet{}, fmt.Errorf("decode rules file: %w", err)
+		return rule.RuleSet{}, false, fmt.Errorf("decode rules file: %w", err)
 	}
 
-	if err := normalizeRuleSet(&set); err != nil {
-		return rule.RuleSet{}, err
+	normalized := cloneRuleSet(set)
+	if err := normalizeRuleSet(&normalized); err != nil {
+		return rule.RuleSet{}, false, err
 	}
 
-	return set, nil
+	return normalized, !reflect.DeepEqual(set, normalized), nil
 }
 
 func SaveRules(path string, set rule.RuleSet) error {
@@ -80,18 +87,37 @@ func SaveRules(path string, set rule.RuleSet) error {
 
 func normalizeRuleSet(s *rule.RuleSet) error {
 	seenIDs := make(map[int]struct{}, len(s.Rules))
+	nextID := 1
 	for i := range s.Rules {
 		if err := normalizeRule(&s.Rules[i]); err != nil {
 			return fmt.Errorf("%w: rule %d: %v", ErrRuleValidation, i, err)
+		}
+		if s.Rules[i].ID == 0 {
+			continue
 		}
 		if _, ok := seenIDs[s.Rules[i].ID]; ok {
 			return fmt.Errorf("%w: duplicate id %d", ErrRuleValidation, s.Rules[i].ID)
 		}
 		seenIDs[s.Rules[i].ID] = struct{}{}
+		if s.Rules[i].ID >= nextID {
+			nextID = s.Rules[i].ID + 1
+		}
+	}
+
+	for i := range s.Rules {
+		if s.Rules[i].ID != 0 {
+			continue
+		}
+		s.Rules[i].ID = nextID
+		seenIDs[nextID] = struct{}{}
+		nextID++
 	}
 
 	slices.SortStableFunc(s.Rules, func(a, b rule.Rule) int {
-		return cmp.Compare(a.Priority, b.Priority)
+		if priorityCmp := cmp.Compare(a.Priority, b.Priority); priorityCmp != 0 {
+			return priorityCmp
+		}
+		return cmp.Compare(a.ID, b.ID)
 	})
 
 	return nil
@@ -114,8 +140,8 @@ func enabledRuleSet(set rule.RuleSet) rule.RuleSet {
 
 func normalizeRule(r *rule.Rule) error {
 	switch {
-	case r.ID == 0:
-		return fmt.Errorf("id is required")
+	case r.ID < 0:
+		return fmt.Errorf("id must be >= 0")
 	case strings.TrimSpace(r.Name) == "":
 		return fmt.Errorf("name is required")
 	case r.Priority < 0:

@@ -38,7 +38,6 @@ const TCP_FLAG_FIELDS = [
 const TCP_RESET_FLAG_FIELDS = TCP_FLAG_FIELDS.filter(field => field.key !== 'rst')
 
 const EMPTY_RULE = {
-  id: 0,
   name: '',
   enabled: true,
   priority: 100,
@@ -186,7 +185,6 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
   const initial = normalizeRule(rule)
 
   const [form, setForm] = useState({
-    id: initial.id,
     name: initial.name,
     enabled: initial.enabled,
     priority: initial.priority,
@@ -339,11 +337,6 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
     e.preventDefault()
     setError('')
 
-    const id = parseInt(form.id, 10)
-    if (isNew && (isNaN(id) || id <= 0)) {
-      setError('ID 必须为正整数')
-      return
-    }
     if (!form.name.trim()) {
       setError('规则名称不能为空')
       return
@@ -456,7 +449,6 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
     )
 
     const payload = {
-      id: isNew ? id : rule.id,
       name: form.name.trim(),
       enabled: form.enabled,
       priority,
@@ -488,13 +480,12 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
             <div className="form-section-title">基本信息</div>
             <div className="form-row">
               <div className="form-group">
-                <label>规则 ID <span className="required">*</span></label>
+                <label>规则名称 <span className="required">*</span></label>
                 <input
-                  type="number"
-                  value={form.id}
-                  onChange={e => set('id', e.target.value)}
-                  disabled={!isNew}
-                  placeholder="正整数"
+                  type="text"
+                  value={form.name}
+                  onChange={e => set('name', e.target.value)}
+                  placeholder="输入规则名称"
                 />
               </div>
               <div className="form-group">
@@ -508,15 +499,6 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
             </div>
             <div className="form-row">
               <div className="form-group">
-                <label>规则名称 <span className="required">*</span></label>
-                <input
-                  type="text"
-                  value={form.name}
-                  onChange={e => set('name', e.target.value)}
-                  placeholder="输入规则名称"
-                />
-              </div>
-              <div className="form-group">
                 <label style={{ marginTop: 22 }}>
                   <span className="checkbox-label">
                     <input
@@ -524,10 +506,11 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
                       checked={form.enabled}
                       onChange={e => set('enabled', e.target.checked)}
                     />
-                    创建后立即启用
+                    {isNew ? '创建后立即启用' : '启用规则'}
                   </span>
                 </label>
               </div>
+              <div />
             </div>
 
             <div className="form-section-title">响应动作</div>

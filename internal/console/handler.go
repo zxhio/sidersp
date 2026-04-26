@@ -187,7 +187,10 @@ func (h Handler) updateRule(c *gin.Context) {
 		return
 	}
 
-	item, err := h.service.UpdateRule(id, newRuleModel(req))
+	model := newRuleModel(req)
+	model.ID = id
+
+	item, err := h.service.UpdateRule(id, model)
 	if err != nil {
 		h.writeServiceError(c, err)
 		return
