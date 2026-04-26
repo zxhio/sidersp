@@ -197,6 +197,18 @@ func TestResponseActionName(t *testing.T) {
 			ok:     true,
 		},
 		{
+			name:   "udp echo reply",
+			action: ActionUDPEchoReply,
+			want:   "udp_echo_reply",
+			ok:     true,
+		},
+		{
+			name:   "dns refused",
+			action: ActionDNSRefused,
+			want:   "dns_refused",
+			ok:     true,
+		},
+		{
 			name:   "unknown",
 			action: 99,
 			ok:     false,

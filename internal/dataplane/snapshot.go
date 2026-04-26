@@ -213,6 +213,12 @@ func encodeAction(action string) (uint16, error) {
 		return actionARPReply, nil
 	case "tcp_syn_ack":
 		return actionTCPSynAck, nil
+	case "icmp_port_unreachable":
+		return actionICMPPortUnreachable, nil
+	case "udp_echo_reply":
+		return actionUDPEchoReply, nil
+	case "dns_refused":
+		return actionDNSRefused, nil
 	default:
 		return 0, fmt.Errorf("unsupported action %q", action)
 	}

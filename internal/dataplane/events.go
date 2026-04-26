@@ -63,6 +63,12 @@ func actionName(action uint16) string {
 		return "ARP_REPLY"
 	case actionTCPSynAck:
 		return "TCP_SYN_ACK"
+	case actionICMPPortUnreachable:
+		return "ICMP_PORT_UNREACHABLE"
+	case actionUDPEchoReply:
+		return "UDP_ECHO_REPLY"
+	case actionDNSRefused:
+		return "DNS_REFUSED"
 	default:
 		return fmt.Sprintf("UNKNOWN(%d)", action)
 	}

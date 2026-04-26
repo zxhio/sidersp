@@ -58,6 +58,57 @@ func TestResponseExecutorSendsAndRecordsResult(t *testing.T) {
 	}
 }
 
+func TestResponseExecutorSendsAndRecordsUDPEchoResult(t *testing.T) {
+	t.Parallel()
+
+	results := newTestResultBuffer(t, 4)
+	tx := &stubFrameTransmitter{}
+	executor := newTestExecutor(t, tx, results, BuildOptions{})
+
+	err := executor.Execute(context.Background(), XSKMetadata{
+		RuleID: 2001,
+		Action: ActionUDPEchoReply,
+	}, buildTestUDPDatagram(t, 12345, 7, []byte("echo-me")))
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	recorded := results.List()
+	if len(recorded) != 1 {
+		t.Fatalf("results = %d, want 1", len(recorded))
+	}
+	if recorded[0].Action != "udp_echo_reply" || recorded[0].Result != ResultSent {
+		t.Fatalf("result = %+v, want sent udp_echo_reply", recorded[0])
+	}
+	if recorded[0].SPort != 12345 || recorded[0].DPort != 7 || recorded[0].IPProto != 17 {
+		t.Fatalf("result tuple = sport %d dport %d proto %d, want 12345/7/17", recorded[0].SPort, recorded[0].DPort, recorded[0].IPProto)
+	}
+}
+
+func TestResponseExecutorRecordsDNSBuildFailure(t *testing.T) {
+	t.Parallel()
+
+	results := newTestResultBuffer(t, 4)
+	tx := &stubFrameTransmitter{}
+	executor := newTestExecutor(t, tx, results, BuildOptions{})
+
+	err := executor.Execute(context.Background(), XSKMetadata{
+		RuleID: 2002,
+		Action: ActionDNSRefused,
+	}, buildTestUDPDatagram(t, 12345, 53, []byte("short")))
+	if err == nil {
+		t.Fatal("Execute() error = nil, want build error")
+	}
+
+	recorded := results.List()
+	if len(recorded) != 1 {
+		t.Fatalf("results = %d, want 1", len(recorded))
+	}
+	if recorded[0].Action != "dns_refused" || recorded[0].Result != ResultFailed || recorded[0].Error == "" {
+		t.Fatalf("result = %+v, want failed dns_refused result", recorded[0])
+	}
+}
+
 func TestResponseExecutorRecordsBuildFailure(t *testing.T) {
 	t.Parallel()
 

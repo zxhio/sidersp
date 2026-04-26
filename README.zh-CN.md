@@ -8,8 +8,8 @@
 
 - 基于 XDP 的镜像流量入口处理
 - 轻量规则加载、校验和同步
-- TCP reset 支持同口 XDP_TX 或配置的独立出口网卡响应
-- XSK 重定向通道，用于后续用户态 spoof 响应
+- 内核态 TX 响应支持同口 XDP_TX 或配置的独立出口网卡
+- XSK 重定向通道，用于用户态 spoof 响应
 - ringbuf 观测事件输出
 - 基础状态、规则和统计 Web 管理页
 - 规则页与 `specs/RULES.md` 对齐，支持 `protocol`、VLAN/IP/端口过滤、`tcp_flags`、`icmp.type`、`arp.operation` 和 snake_case 动作
@@ -132,7 +132,7 @@ skills/     本地 agent 指引
 
 - 镜像流量入口处理
 - 基于规则的分类和动作选择
-- TCP reset 响应
+- 主动响应执行路径
 - 事件和统计可视化
 - 基础管理页面
 
@@ -143,8 +143,10 @@ Web 规则页遵循 [specs/RULES.md](specs/RULES.md) 的当前契约，编辑字
 `dst_ports`、`tcp_flags`、`icmp.type`、`arp.operation` 和
 `response.action`。
 
-页面支持的动作值为 `none`、`alert`、`tcp_reset`、`icmp_echo_reply`、
-`arp_reply` 和 `tcp_syn_ack`。前端只做基础可用性校验，后端校验仍然是最终依据。
+页面支持的动作值为 `none`、`alert`、`tcp_reset`、
+`icmp_port_unreachable`、`udp_echo_reply`、`dns_refused`、
+`icmp_echo_reply`、`arp_reply` 和 `tcp_syn_ack`。前端只做基础可用性校验，
+后端校验仍然是最终依据。
 
 暂不包含：
 

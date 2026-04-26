@@ -54,7 +54,7 @@ Owns:
 - Basic classification and feature extraction
 - Lightweight rule matching
 - XDP verdict selection
-- Kernel TX actions such as `tcp_reset`, including same-interface `XDP_TX` and configured egress-interface redirect
+- Kernel TX actions such as `tcp_reset` and `icmp_port_unreachable`, including same-interface `XDP_TX` and configured egress-interface redirect
 - XSK redirect and XSK fd registration for actions that need full packet context
 - Observation event output
 - Dataplane interface setup required for packet capture, including promiscuous

@@ -17,7 +17,7 @@ Stats are grouped in this fixed order:
 | `parse` | Packet parsing and protocol validation |
 | `match` | Candidate selection and final rule match |
 | `observe` | Ringbuf observation delivery |
-| `tx_same_interface` | Same-interface kernel TX, mainly `tcp_reset` via `XDP_TX` |
+| `tx_same_interface` | Same-interface kernel TX, mainly `tcp_reset` and `icmp_port_unreachable` via `XDP_TX` |
 | `response_redirect` | Dataplane redirect of the original packet into XSK |
 | `redirect_egress` | Dataplane redirect of a kernel-built response to the configured egress interface |
 | `response_tx` | User-space response transmission through AF_XDP or AF_PACKET |

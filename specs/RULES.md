@@ -77,7 +77,7 @@ response:
 
 `params` is part of the rule schema but is not encoded into BPF `rule_meta` and has no effect in the current implementation.
 
-Execution path is not exposed as a rule field. The control plane validates `response.action`; dataplane compilation encodes it into the numeric action code. Dataplane and response modules own the configured execution path for each action. For `tcp_reset`, local runtime config selects same-interface `XDP_TX` or egress-interface redirect for all rules.
+Execution path is not exposed as a rule field. The control plane validates `response.action`; dataplane compilation encodes it into the numeric action code. Dataplane and response modules own the configured execution path for each action. For kernel TX actions such as `tcp_reset` and `icmp_port_unreachable`, local runtime config selects same-interface `XDP_TX` or egress-interface redirect for all rules.
 
 ## Actions
 
@@ -88,21 +88,31 @@ Execution path is not exposed as a rule field. The control plane validates `resp
 | `tcp_reset` | `2` | dataplane kernel TX | Build TCP RST in BPF and send by configured same-interface or egress-interface TX mode |
 | `icmp_echo_reply` | `3` | XSK RX + user-space TX | Redirect original packet to XSK; user space builds ICMP echo reply and transmits through same-interface XSK TX or configured shared TX egress |
 | `arp_reply` | `4` | XSK RX + user-space TX | Redirect original packet to XSK; user space builds ARP reply and transmits through same-interface XSK TX or configured shared TX egress |
-| `tcp_syn_ack` | `5` | XSK TX | Redirect original packet to XSK; user space builds TCP SYN-ACK |
+| `tcp_syn_ack` | `5` | XSK RX + user-space TX | Redirect original packet to XSK; user space builds TCP SYN-ACK |
+| `icmp_port_unreachable` | `6` | dataplane kernel TX | Build ICMP destination-unreachable / port-unreachable in BPF and send by configured same-interface or egress-interface TX mode |
+| `udp_echo_reply` | `7` | XSK RX + user-space TX | Redirect original packet to XSK; user space swaps the UDP tuple and echoes the original payload |
+| `dns_refused` | `8` | XSK RX + user-space TX | Redirect original packet to XSK; user space returns a DNS `REFUSED` response for a compatible UDP DNS query |
 
 External rules must not expose implementation details such as `xdp`, `xsk`, or `user_space` as fields.
 `dataplane.ingress_verdict` is a runtime dataplane setting, not a per-rule field.
 
 ## Action Compatibility
 
-The control plane rejects XSK TX actions whose match conditions do not select
-the packet type required to construct the response:
+The control plane rejects actions whose match conditions do not select the
+packet type required to construct the response:
 
 | Action | Required match conditions |
 |--------|---------------------------|
 | `icmp_echo_reply` | `protocol: icmp` and `icmp.type: echo_request` |
 | `arp_reply` | `protocol: arp` and `arp.operation: request` |
 | `tcp_syn_ack` | `protocol: tcp` and `tcp_flags.syn: true` |
+| `icmp_port_unreachable` | `protocol: udp` |
+| `udp_echo_reply` | `protocol: udp` |
+| `dns_refused` | `protocol: udp` |
+
+`dns_refused` v1 supports IPv4 UDP DNS queries only. Rules should usually also
+limit `dst_ports` to `53`, but the control plane does not hard-require that
+port in v1.
 
 ## Match Semantics
 

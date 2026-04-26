@@ -7,6 +7,9 @@ const (
 	ActionICMPEchoReply
 	ActionARPReply
 	ActionTCPSynAck
+	ActionICMPPortUnreachable
+	ActionUDPEchoReply
+	ActionDNSRefused
 )
 
 type RuleSet struct {

@@ -30,12 +30,15 @@ const (
 	condARPReply        = 1 << 17
 	condL4Payload       = 1 << 18
 
-	actionNone          = rule.ActionNone
-	actionAlert         = rule.ActionAlert
-	actionTCPReset      = rule.ActionTCPReset
-	actionICMPEchoReply = rule.ActionICMPEchoReply
-	actionARPReply      = rule.ActionARPReply
-	actionTCPSynAck     = rule.ActionTCPSynAck
+	actionNone                = rule.ActionNone
+	actionAlert               = rule.ActionAlert
+	actionTCPReset            = rule.ActionTCPReset
+	actionICMPEchoReply       = rule.ActionICMPEchoReply
+	actionARPReply            = rule.ActionARPReply
+	actionTCPSynAck           = rule.ActionTCPSynAck
+	actionICMPPortUnreachable = rule.ActionICMPPortUnreachable
+	actionUDPEchoReply        = rule.ActionUDPEchoReply
+	actionDNSRefused          = rule.ActionDNSRefused
 )
 
 const (

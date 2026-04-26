@@ -2,6 +2,9 @@ import { useState } from 'react'
 
 const ACTION_OPTIONS = [
   { value: 'tcp_reset', label: 'TCP Reset' },
+  { value: 'icmp_port_unreachable', label: 'ICMP Port Unreachable' },
+  { value: 'udp_echo_reply', label: 'UDP Echo Reply' },
+  { value: 'dns_refused', label: 'DNS Refused' },
   { value: 'tcp_syn_ack', label: 'TCP SYN-ACK' },
   { value: 'icmp_echo_reply', label: 'ICMP Echo Reply' },
   { value: 'arp_reply', label: 'ARP Reply' },
@@ -11,6 +14,7 @@ const ACTION_OPTIONS = [
 
 const PROTOCOL_OPTIONS = [
   { value: 'tcp', label: 'TCP' },
+  { value: 'udp', label: 'UDP' },
   { value: 'icmp', label: 'ICMP' },
   { value: 'arp', label: 'ARP' },
 ]
@@ -137,6 +141,10 @@ function getProtocolForAction(action, currentProtocol = 'tcp') {
     case 'tcp_reset':
     case 'tcp_syn_ack':
       return 'tcp'
+    case 'icmp_port_unreachable':
+    case 'udp_echo_reply':
+    case 'dns_refused':
+      return 'udp'
     case 'icmp_echo_reply':
       return 'icmp'
     case 'arp_reply':
@@ -202,9 +210,15 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
   const isProtocolEditable = isProtocolSelectable(form.action)
   const protocol = form.protocol
   const isTCPProtocol = protocol === 'tcp'
+  const isUDPProtocol = protocol === 'udp'
+  const isPortProtocol = isTCPProtocol || isUDPProtocol
   const isICMPProtocol = protocol === 'icmp'
   const isARPProtocol = protocol === 'arp'
   const isTCPResetAction = form.action === 'tcp_reset'
+  const isICMPPortUnreachableAction = form.action === 'icmp_port_unreachable'
+  const isUDPEchoReplyAction = form.action === 'udp_echo_reply'
+  const isDNSRefusedAction = form.action === 'dns_refused'
+  const isUDPOnlyAction = isICMPPortUnreachableAction || isUDPEchoReplyAction || isDNSRefusedAction
   const isTCPSynAckAction = form.action === 'tcp_syn_ack'
   const isICMPEchoReplyAction = form.action === 'icmp_echo_reply'
   const isARPReplyAction = form.action === 'arp_reply'
@@ -242,6 +256,16 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
           next.tcp_flag_psh = false
           next.icmp_type = ''
           next.arp_operation = ''
+        }
+
+        if (value === 'icmp_port_unreachable' || value === 'udp_echo_reply' || value === 'dns_refused') {
+          next.icmp_type = ''
+          next.arp_operation = ''
+          next.tcp_flag_syn = false
+          next.tcp_flag_ack = false
+          next.tcp_flag_rst = false
+          next.tcp_flag_fin = false
+          next.tcp_flag_psh = false
         }
 
         if (value === 'icmp_echo_reply') {
@@ -402,6 +426,13 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
       return
     }
 
+    if (action === 'icmp_port_unreachable' || action === 'udp_echo_reply' || action === 'dns_refused') {
+      if (protocol !== 'udp') {
+        setError(`\`${action}\` 要求协议为 udp`)
+        return
+      }
+    }
+
     const match = {
       protocol,
       vlans,
@@ -509,6 +540,12 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
                   </option>
                 ))}
               </select>
+              {isUDPOnlyAction && (
+                <div className="form-section-desc">该动作会自动固定为 UDP。</div>
+              )}
+              {isDNSRefusedAction && (
+                <div className="form-section-desc">v1 建议额外限制目标端口为 53。</div>
+              )}
             </div>
 
             <div className="form-section-title">匹配条件</div>
@@ -558,7 +595,7 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
                 />
               </div>
             </div>
-            {isTCPProtocol && (
+            {isPortProtocol && (
               <div className="form-row">
                 <div className="form-group">
                   <label>源端口</label>

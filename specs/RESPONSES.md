@@ -16,6 +16,9 @@ in `RULES.md`.
 | `icmp_echo_reply` | `3` | XSK RX + user-space TX | active | Redirect the original packet to XSK; user space builds ICMP echo reply and transmits through AF_XDP by default or AF_PACKET when egress is configured |
 | `arp_reply` | `4` | XSK RX + user-space TX | active | Redirect the original packet to XSK; user space builds ARP reply and transmits through AF_XDP by default or AF_PACKET when egress is configured |
 | `tcp_syn_ack` | `5` | XSK RX + user-space TX | Linux AF_XDP socket implemented, integration pending | Redirect the original packet to XSK; user space builds TCP SYN-ACK and transmits through AF_XDP by default or AF_PACKET when egress is configured |
+| `icmp_port_unreachable` | `6` | BPF kernel TX | active | Build ICMP destination-unreachable / port-unreachable in BPF and send by same-interface `XDP_TX` or configured egress-interface `XDP_REDIRECT` |
+| `udp_echo_reply` | `7` | XSK RX + user-space TX | active | Redirect the original packet to XSK; user space swaps Ethernet/IP/UDP source and destination fields and echoes the UDP payload |
+| `dns_refused` | `8` | XSK RX + user-space TX | active | Redirect the original packet to XSK; user space returns a UDP DNS response with `RCODE=REFUSED` and the original question copied back |
 
 Action names are stable snake-case API values. Numeric codes are the dataplane
 ABI and must stay synchronized with BPF definitions.
@@ -44,11 +47,11 @@ The ringbuf event is only for observation, statistics, and audit.
 
 ### BPF Kernel TX
 
-Used by `tcp_reset`.
+Used by `tcp_reset` and `icmp_port_unreachable`.
 
 ```text
-packet -> BPF parse/match -> build TCP RST in-place -> ringbuf event -> XDP_TX
-packet -> BPF parse/match -> build TCP RST in-place -> bpf_fib_lookup -> ringbuf event -> XDP_REDIRECT
+packet -> BPF parse/match -> build response in-place -> ringbuf event -> XDP_TX
+packet -> BPF parse/match -> build response in-place -> bpf_fib_lookup -> ringbuf event -> XDP_REDIRECT
 ```
 
 Kernel TX does not depend on ringbuf consumption or user-space response
@@ -67,7 +70,7 @@ configured failure verdict: `XDP_PASS` or `XDP_DROP`.
 
 ### XSK RX + User-Space TX
 
-Used by `icmp_echo_reply`, `arp_reply`, and `tcp_syn_ack`.
+Used by `icmp_echo_reply`, `arp_reply`, `tcp_syn_ack`, `udp_echo_reply`, and `dns_refused`.
 
 ```text
 packet -> BPF parse/match -> write xsk_meta into XDP metadata -> XDP_REDIRECT to XSK
@@ -99,6 +102,14 @@ The current same-interface response builders reject VLAN-tagged frames until
 VLAN tag preservation is implemented for user-space TX. The `tcp_syn_ack`
 builder also rejects SYN payloads until TCP Fast Open style payload ACK
 semantics are implemented.
+
+`udp_echo_reply` preserves the original UDP payload unchanged and rebuilds the
+IPv4 and UDP checksums on the swapped tuple.
+
+`dns_refused` v1 supports IPv4 UDP DNS queries only. It requires a standard
+query with exactly one question, returns `QR=1` and `RCODE=REFUSED`, copies the
+question section back unchanged, and clears answer, authority, and additional
+sections. EDNS OPT and other additional records are not preserved in v1.
 
 ## XSK Metadata
 
@@ -244,10 +255,11 @@ response:
   user-space actions, a non-empty interface name enables AF_PACKET TX after the
   packet is received from ingress XSK.
 - `vlan_mode`: shared TX VLAN policy for actions that support alternate egress
-  transmission, starting with `tcp_reset`, `icmp_echo_reply`, and `arp_reply`.
+  transmission, starting with `tcp_reset`, `icmp_port_unreachable`,
+  `icmp_echo_reply`, and `arp_reply`.
 - `failure_verdict`: shared TX failure policy surface for actions that support
   alternate egress transmission, starting with `tcp_reset`,
-  `icmp_echo_reply`, and `arp_reply`.
+  `icmp_port_unreachable`, `icmp_echo_reply`, and `arp_reply`.
 
 `response.actions.arp_reply.hardware_addr` selects the ARP reply source
 hardware address when configured.

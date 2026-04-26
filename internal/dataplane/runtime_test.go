@@ -190,6 +190,15 @@ func TestActionName(t *testing.T) {
 	if got := actionName(actionTCPReset); got != "TCP_RESET" {
 		t.Fatalf("actionName(actionTCPReset) = %q, want %q", got, "TCP_RESET")
 	}
+	if got := actionName(actionICMPPortUnreachable); got != "ICMP_PORT_UNREACHABLE" {
+		t.Fatalf("actionName(actionICMPPortUnreachable) = %q, want %q", got, "ICMP_PORT_UNREACHABLE")
+	}
+	if got := actionName(actionUDPEchoReply); got != "UDP_ECHO_REPLY" {
+		t.Fatalf("actionName(actionUDPEchoReply) = %q, want %q", got, "UDP_ECHO_REPLY")
+	}
+	if got := actionName(actionDNSRefused); got != "DNS_REFUSED" {
+		t.Fatalf("actionName(actionDNSRefused) = %q, want %q", got, "DNS_REFUSED")
+	}
 	if got := actionName(99); got != "UNKNOWN(99)" {
 		t.Fatalf("actionName(99) = %q, want %q", got, "UNKNOWN(99)")
 	}

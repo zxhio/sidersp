@@ -7,9 +7,9 @@ Events are emitted by BPF through ringbuf after a rule match produces an observa
 ## Event Scope
 
 - `alert` emits an observation event before applying `dataplane.ingress_verdict`.
-- `tcp_reset` emits an event only after successful BPF kernel TX. It returns
-  `XDP_TX` for same-interface TX or `XDP_REDIRECT` for configured egress
-  interface TX.
+- `tcp_reset` and `icmp_port_unreachable` emit an event only after successful
+  BPF kernel TX. They return `XDP_TX` for same-interface TX or `XDP_REDIRECT`
+  for configured egress interface TX.
 - XSK TX actions emit an event only after successful `XDP_REDIRECT` to XSK.
 - `none` does not require an event.
 - XSK worker response results are separate from dataplane observation events; see `RESPONSES.md`.

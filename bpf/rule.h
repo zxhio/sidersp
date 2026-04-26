@@ -75,6 +75,9 @@ enum rule_action {
     ACTION_ICMP_ECHO_REPLY = 3,
     ACTION_ARP_REPLY       = 4,
     ACTION_TCP_SYN_ACK     = 5,
+    ACTION_ICMP_PORT_UNREACHABLE = 6,
+    ACTION_UDP_ECHO_REPLY        = 7,
+    ACTION_DNS_REFUSED           = 8,
 };
 
 enum dataplane_verdict {

@@ -17,12 +17,15 @@ import (
 )
 
 var allowedActions = map[string]struct{}{
-	"none":            {},
-	"alert":           {},
-	"tcp_reset":       {},
-	"icmp_echo_reply": {},
-	"arp_reply":       {},
-	"tcp_syn_ack":     {},
+	"none":                  {},
+	"alert":                 {},
+	"tcp_reset":             {},
+	"icmp_echo_reply":       {},
+	"arp_reply":             {},
+	"tcp_syn_ack":           {},
+	"icmp_port_unreachable": {},
+	"udp_echo_reply":        {},
+	"dns_refused":           {},
 }
 
 var allowedProtocols = map[string]struct{}{
@@ -212,6 +215,10 @@ func validateActionMatch(action string, r *rule.Rule) error {
 		}
 		if r.Match.TCPFlags.SYN == nil || !*r.Match.TCPFlags.SYN {
 			return fmt.Errorf("response.action tcp_syn_ack requires match.tcp_flags.syn true")
+		}
+	case "icmp_port_unreachable", "udp_echo_reply", "dns_refused":
+		if r.Match.Protocol != "udp" {
+			return fmt.Errorf("response.action %s requires match.protocol udp", action)
 		}
 	}
 	return nil

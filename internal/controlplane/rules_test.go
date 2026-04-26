@@ -293,6 +293,30 @@ func TestLoadRulesRejectsIncompatibleXSKActions(t *testing.T) {
       action: tcp_syn_ack`,
 			want: "requires match.protocol tcp",
 		},
+		{
+			name: "icmp port unreachable requires udp protocol",
+			ruleYAML: `match:
+      protocol: tcp
+    response:
+      action: icmp_port_unreachable`,
+			want: "requires match.protocol udp",
+		},
+		{
+			name: "udp echo reply requires udp protocol",
+			ruleYAML: `match:
+      protocol: icmp
+    response:
+      action: udp_echo_reply`,
+			want: "requires match.protocol udp",
+		},
+		{
+			name: "dns refused requires udp protocol",
+			ruleYAML: `match:
+      protocol: arp
+    response:
+      action: dns_refused`,
+			want: "requires match.protocol udp",
+		},
 	}
 
 	for _, tc := range tests {
@@ -353,14 +377,40 @@ func TestLoadRulesAcceptsCompatibleXSKActions(t *testing.T) {
         syn: true
     response:
       action: tcp_syn_ack
+  - id: 1004
+    name: icmp-port-unreachable
+    enabled: true
+    priority: 130
+    match:
+      protocol: udp
+      dst_ports: [9999]
+    response:
+      action: icmp_port_unreachable
+  - id: 1005
+    name: udp-echo
+    enabled: true
+    priority: 140
+    match:
+      protocol: udp
+    response:
+      action: udp_echo_reply
+  - id: 1006
+    name: dns-refused
+    enabled: true
+    priority: 150
+    match:
+      protocol: udp
+      dst_ports: [53]
+    response:
+      action: dns_refused
 `)
 
 	set, err := LoadRules(path)
 	if err != nil {
 		t.Fatalf("LoadRules() error = %v", err)
 	}
-	if len(set.Rules) != 3 {
-		t.Fatalf("len(Rules) = %d, want 3", len(set.Rules))
+	if len(set.Rules) != 6 {
+		t.Fatalf("len(Rules) = %d, want 6", len(set.Rules))
 	}
 }
 

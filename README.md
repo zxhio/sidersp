@@ -8,8 +8,8 @@ Lightweight side-path traffic pre-decision and active response service.
 
 - XDP-based ingress handling for mirrored traffic
 - Lightweight rule loading, validation, and synchronization
-- TCP reset response via same-interface XDP_TX or a configured egress interface
-- XSK redirect path for future user-space spoof responses
+- Kernel TX responses via same-interface XDP_TX or a configured egress interface
+- XSK redirect path for user-space spoof responses
 - Ringbuf observation event output
 - Basic Web console for status, rules, and statistics
 - Rule UI aligned with `specs/RULES.md`, including `protocol`, VLAN/IP/port filters, `tcp_flags`, `icmp.type`, `arp.operation`, and snake_case response actions
@@ -134,7 +134,7 @@ Current focus:
 
 - Mirrored-traffic ingress handling
 - Rule-driven classification and action selection
-- TCP reset response
+- Active response execution paths
 - Event/statistics visibility
 - Basic management UI
 
@@ -146,9 +146,9 @@ It edits `protocol`, `vlans`, `src_prefixes`, `dst_prefixes`, `src_ports`,
 `response.action`.
 
 Supported actions in the UI are `none`, `alert`, `tcp_reset`,
+`icmp_port_unreachable`, `udp_echo_reply`, `dns_refused`,
 `icmp_echo_reply`, `arp_reply`, and `tcp_syn_ack`. The UI performs basic
-compatibility checks for XSK TX actions, but backend validation remains
-authoritative.
+compatibility checks, but backend validation remains authoritative.
 
 Not included yet:
 
