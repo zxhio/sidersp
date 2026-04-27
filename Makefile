@@ -8,7 +8,7 @@ GOARCH := amd64
 
 .PHONY: build build-all build-web build-xdp package run clean test test-unit test-bpf
 
-build: build-web
+build: build-xdp build-web
 	CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) go build -trimpath -ldflags="-s -w" -o $(BIN) $(MAIN)
 
 build-web:
@@ -18,7 +18,6 @@ build-xdp:
 	go generate ./internal/dataplane
 
 build-all:
-	$(MAKE) build-xdp
 	$(MAKE) build
 
 package: build-all
@@ -34,7 +33,7 @@ clean:
 
 test: test-unit
 
-test-unit:
+test-unit: build-xdp
 	go test ./... -v -count=1
 
 test-bpf: build-xdp
