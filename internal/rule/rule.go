@@ -10,6 +10,8 @@ const (
 	ActionICMPPortUnreachable
 	ActionUDPEchoReply
 	ActionDNSRefused
+	ActionICMPHostUnreachable
+	ActionICMPAdminProhibited
 )
 
 type RuleSet struct {

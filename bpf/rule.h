@@ -78,6 +78,8 @@ enum rule_action {
     ACTION_ICMP_PORT_UNREACHABLE = 6,
     ACTION_UDP_ECHO_REPLY        = 7,
     ACTION_DNS_REFUSED           = 8,
+    ACTION_ICMP_HOST_UNREACHABLE = 9,
+    ACTION_ICMP_ADMIN_PROHIBITED = 10,
 };
 
 enum dataplane_verdict {

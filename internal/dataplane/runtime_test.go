@@ -107,6 +107,43 @@ func TestBuildSnapshotUsesConfiguredIngressVerdict(t *testing.T) {
 	}
 }
 
+func TestBuildSnapshotEncodesExtendedICMPUnreachableActions(t *testing.T) {
+	t.Parallel()
+
+	set := rule.RuleSet{
+		Rules: []rule.Rule{
+			{
+				ID:       2001,
+				Name:     "icmp-host-unreachable",
+				Enabled:  true,
+				Priority: 100,
+				Match:    rule.RuleMatch{Protocol: "udp"},
+				Response: rule.RuleResponse{Action: "icmp_host_unreachable"},
+			},
+			{
+				ID:       2002,
+				Name:     "icmp-admin-prohibited",
+				Enabled:  true,
+				Priority: 200,
+				Match:    rule.RuleMatch{Protocol: "udp"},
+				Response: rule.RuleResponse{Action: "icmp_admin_prohibited"},
+			},
+		},
+	}
+
+	got, err := buildSnapshot(set, Options{})
+	if err != nil {
+		t.Fatalf("buildSnapshot() error = %v", err)
+	}
+
+	if got.ruleIndex[0].Action != actionICMPHostUnreachable {
+		t.Fatalf("rule 0 action = %d, want %d", got.ruleIndex[0].Action, actionICMPHostUnreachable)
+	}
+	if got.ruleIndex[1].Action != actionICMPAdminProhibited {
+		t.Fatalf("rule 1 action = %d, want %d", got.ruleIndex[1].Action, actionICMPAdminProhibited)
+	}
+}
+
 func boolRulePtr(v bool) *bool {
 	return &v
 }
@@ -192,6 +229,12 @@ func TestActionName(t *testing.T) {
 	}
 	if got := actionName(actionICMPPortUnreachable); got != "ICMP_PORT_UNREACHABLE" {
 		t.Fatalf("actionName(actionICMPPortUnreachable) = %q, want %q", got, "ICMP_PORT_UNREACHABLE")
+	}
+	if got := actionName(actionICMPHostUnreachable); got != "ICMP_HOST_UNREACHABLE" {
+		t.Fatalf("actionName(actionICMPHostUnreachable) = %q, want %q", got, "ICMP_HOST_UNREACHABLE")
+	}
+	if got := actionName(actionICMPAdminProhibited); got != "ICMP_ADMIN_PROHIBITED" {
+		t.Fatalf("actionName(actionICMPAdminProhibited) = %q, want %q", got, "ICMP_ADMIN_PROHIBITED")
 	}
 	if got := actionName(actionUDPEchoReply); got != "UDP_ECHO_REPLY" {
 		t.Fatalf("actionName(actionUDPEchoReply) = %q, want %q", got, "UDP_ECHO_REPLY")

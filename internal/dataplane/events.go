@@ -65,6 +65,10 @@ func actionName(action uint16) string {
 		return "TCP_SYN_ACK"
 	case actionICMPPortUnreachable:
 		return "ICMP_PORT_UNREACHABLE"
+	case actionICMPHostUnreachable:
+		return "ICMP_HOST_UNREACHABLE"
+	case actionICMPAdminProhibited:
+		return "ICMP_ADMIN_PROHIBITED"
 	case actionUDPEchoReply:
 		return "UDP_ECHO_REPLY"
 	case actionDNSRefused:

@@ -19,6 +19,8 @@ in `RULES.md`.
 | `icmp_port_unreachable` | `6` | BPF kernel TX | active | Build ICMP destination-unreachable / port-unreachable in BPF and send by same-interface `XDP_TX` or configured egress-interface `XDP_REDIRECT` |
 | `udp_echo_reply` | `7` | XSK RX + user-space TX | active | Redirect the original packet to XSK; user space swaps Ethernet/IP/UDP source and destination fields and echoes the UDP payload |
 | `dns_refused` | `8` | XSK RX + user-space TX | active | Redirect the original packet to XSK; user space returns a UDP DNS response with `RCODE=REFUSED` and the original question copied back |
+| `icmp_host_unreachable` | `9` | BPF kernel TX | active | Build ICMP destination-unreachable / host-unreachable in BPF and send by same-interface `XDP_TX` or configured egress-interface `XDP_REDIRECT` |
+| `icmp_admin_prohibited` | `10` | BPF kernel TX | active | Build ICMP destination-unreachable / administratively-prohibited in BPF and send by same-interface `XDP_TX` or configured egress-interface `XDP_REDIRECT` |
 
 Action names are stable snake-case API values. Numeric codes are the dataplane
 ABI and must stay synchronized with BPF definitions.
@@ -47,7 +49,7 @@ The ringbuf event is only for observation, statistics, and audit.
 
 ### BPF Kernel TX
 
-Used by `tcp_reset` and `icmp_port_unreachable`.
+Used by `tcp_reset`, `icmp_port_unreachable`, `icmp_host_unreachable`, and `icmp_admin_prohibited`.
 
 ```text
 packet -> BPF parse/match -> build response in-place -> ringbuf event -> XDP_TX

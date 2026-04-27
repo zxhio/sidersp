@@ -95,6 +95,8 @@ Execution path is not exposed as a rule field. The control plane validates `resp
 | `icmp_port_unreachable` | `6` | dataplane kernel TX | Build ICMP destination-unreachable / port-unreachable in BPF and send by configured same-interface or egress-interface TX mode |
 | `udp_echo_reply` | `7` | XSK RX + user-space TX | Redirect original packet to XSK; user space swaps the UDP tuple and echoes the original payload |
 | `dns_refused` | `8` | XSK RX + user-space TX | Redirect original packet to XSK; user space returns a DNS `REFUSED` response for a compatible UDP DNS query |
+| `icmp_host_unreachable` | `9` | dataplane kernel TX | Build ICMP destination-unreachable / host-unreachable in BPF and send by configured same-interface or egress-interface TX mode |
+| `icmp_admin_prohibited` | `10` | dataplane kernel TX | Build ICMP destination-unreachable / administratively-prohibited in BPF and send by configured same-interface or egress-interface TX mode |
 
 External rules must not expose implementation details such as `xdp`, `xsk`, or `user_space` as fields.
 `dataplane.ingress_verdict` is a runtime dataplane setting, not a per-rule field.
@@ -110,6 +112,8 @@ packet type required to construct the response:
 | `arp_reply` | `protocol: arp` and `arp.operation: request` |
 | `tcp_syn_ack` | `protocol: tcp` and `tcp_flags.syn: true` |
 | `icmp_port_unreachable` | `protocol: udp` |
+| `icmp_host_unreachable` | `protocol: udp` |
+| `icmp_admin_prohibited` | `protocol: udp` |
 | `udp_echo_reply` | `protocol: udp` |
 | `dns_refused` | `protocol: udp` |
 

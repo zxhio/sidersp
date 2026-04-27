@@ -215,6 +215,10 @@ func encodeAction(action string) (uint16, error) {
 		return actionTCPSynAck, nil
 	case "icmp_port_unreachable":
 		return actionICMPPortUnreachable, nil
+	case "icmp_host_unreachable":
+		return actionICMPHostUnreachable, nil
+	case "icmp_admin_prohibited":
+		return actionICMPAdminProhibited, nil
 	case "udp_echo_reply":
 		return actionUDPEchoReply, nil
 	case "dns_refused":

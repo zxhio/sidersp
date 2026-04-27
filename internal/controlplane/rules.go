@@ -27,6 +27,8 @@ var allowedActions = map[string]struct{}{
 	"icmp_port_unreachable": {},
 	"udp_echo_reply":        {},
 	"dns_refused":           {},
+	"icmp_host_unreachable": {},
+	"icmp_admin_prohibited": {},
 }
 
 var allowedProtocols = map[string]struct{}{
@@ -242,7 +244,7 @@ func validateActionMatch(action string, r *rule.Rule) error {
 		if r.Match.TCPFlags.SYN == nil || !*r.Match.TCPFlags.SYN {
 			return fmt.Errorf("response.action tcp_syn_ack requires match.tcp_flags.syn true")
 		}
-	case "icmp_port_unreachable", "udp_echo_reply", "dns_refused":
+	case "icmp_port_unreachable", "icmp_host_unreachable", "icmp_admin_prohibited", "udp_echo_reply", "dns_refused":
 		if r.Match.Protocol != "udp" {
 			return fmt.Errorf("response.action %s requires match.protocol udp", action)
 		}

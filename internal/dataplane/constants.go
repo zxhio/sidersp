@@ -39,6 +39,8 @@ const (
 	actionICMPPortUnreachable = rule.ActionICMPPortUnreachable
 	actionUDPEchoReply        = rule.ActionUDPEchoReply
 	actionDNSRefused          = rule.ActionDNSRefused
+	actionICMPHostUnreachable = rule.ActionICMPHostUnreachable
+	actionICMPAdminProhibited = rule.ActionICMPAdminProhibited
 )
 
 const (

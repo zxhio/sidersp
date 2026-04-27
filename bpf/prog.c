@@ -28,6 +28,12 @@
 #ifndef ICMP_PORT_UNREACH
 #define ICMP_PORT_UNREACH 3
 #endif
+#ifndef ICMP_HOST_UNREACH
+#define ICMP_HOST_UNREACH 1
+#endif
+#ifndef ICMP_PKT_FILTERED
+#define ICMP_PKT_FILTERED 13
+#endif
 #ifndef AF_INET
 #define AF_INET 2
 #endif
@@ -467,8 +473,9 @@ static __always_inline int do_tcp_reset_tx(struct xdp_md *xdp,
     return XDP_TX;
 }
 
-static __always_inline int do_icmp_port_unreachable_tx(struct xdp_md *xdp,
-                                                       const struct pkt_ctx *ctx)
+static __always_inline int do_icmp_dest_unreachable_tx(struct xdp_md *xdp,
+                                                       const struct pkt_ctx *ctx,
+                                                       __u8 icmp_code)
 {
     void *data = (void *)(long)xdp->data;
     void *data_end = (void *)(long)xdp->data_end;
@@ -560,7 +567,7 @@ static __always_inline int do_icmp_port_unreachable_tx(struct xdp_md *xdp,
     ip->check = ipv4_header_csum(ip);
 
     icmp->type = ICMP_DEST_UNREACH;
-    icmp->code = ICMP_PORT_UNREACH;
+    icmp->code = icmp_code;
     icmp->checksum = 0;
     icmp->un.gateway = 0;
     __builtin_memcpy(quote, quoted, sizeof(quoted));
@@ -890,14 +897,23 @@ int xdp_sidersp(struct xdp_md *xdp)
 
     switch (best_rule.action) {
     case ACTION_TCP_RESET:
-    case ACTION_ICMP_PORT_UNREACHABLE: {
+    case ACTION_ICMP_PORT_UNREACHABLE:
+    case ACTION_ICMP_HOST_UNREACHABLE:
+    case ACTION_ICMP_ADMIN_PROHIBITED: {
         int ret;
         if (best_rule.action == ACTION_TCP_RESET && (ctx.tcp_flags & TCP_FLAG_RST))
             return XDP_PASS;
         if (best_rule.action == ACTION_TCP_RESET)
             ret = do_tcp_reset_tx(xdp, &ctx);
         else
-            ret = do_icmp_port_unreachable_tx(xdp, &ctx);
+            ret = do_icmp_dest_unreachable_tx(
+                xdp,
+                &ctx,
+                best_rule.action == ACTION_ICMP_PORT_UNREACHABLE
+                    ? ICMP_PORT_UNREACH
+                    : best_rule.action == ACTION_ICMP_HOST_UNREACHABLE
+                        ? ICMP_HOST_UNREACH
+                        : ICMP_PKT_FILTERED);
         if (ret == XDP_TX) {
             stat_inc(STAT_XDP_TX);
             emit_event(&ctx, &best_rule, pkt_conds, VERDICT_TX);

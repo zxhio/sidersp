@@ -422,6 +422,22 @@ func TestLoadRulesRejectsIncompatibleXSKActions(t *testing.T) {
 			want: "requires match.protocol udp",
 		},
 		{
+			name: "icmp host unreachable requires udp protocol",
+			ruleYAML: `match:
+      protocol: tcp
+    response:
+      action: icmp_host_unreachable`,
+			want: "requires match.protocol udp",
+		},
+		{
+			name: "icmp admin prohibited requires udp protocol",
+			ruleYAML: `match:
+      protocol: icmp
+    response:
+      action: icmp_admin_prohibited`,
+			want: "requires match.protocol udp",
+		},
+		{
 			name: "udp echo reply requires udp protocol",
 			ruleYAML: `match:
       protocol: icmp
@@ -523,14 +539,30 @@ func TestLoadRulesAcceptsCompatibleXSKActions(t *testing.T) {
       dst_ports: [53]
     response:
       action: dns_refused
+  - id: 1007
+    name: icmp-host-unreachable
+    enabled: true
+    priority: 160
+    match:
+      protocol: udp
+    response:
+      action: icmp_host_unreachable
+  - id: 1008
+    name: icmp-admin-prohibited
+    enabled: true
+    priority: 170
+    match:
+      protocol: udp
+    response:
+      action: icmp_admin_prohibited
 `)
 
 	set, err := LoadRules(path)
 	if err != nil {
 		t.Fatalf("LoadRules() error = %v", err)
 	}
-	if len(set.Rules) != 6 {
-		t.Fatalf("len(Rules) = %d, want 6", len(set.Rules))
+	if len(set.Rules) != 8 {
+		t.Fatalf("len(Rules) = %d, want 8", len(set.Rules))
 	}
 }
 

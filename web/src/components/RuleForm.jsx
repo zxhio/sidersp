@@ -19,6 +19,8 @@ const ACTION_GROUPS = [
     label: 'UDP',
     options: [
       { value: 'icmp_port_unreachable', label: 'ICMP Port Unreachable' },
+      { value: 'icmp_host_unreachable', label: 'ICMP Host Unreachable' },
+      { value: 'icmp_admin_prohibited', label: 'ICMP Admin Prohibited' },
       { value: 'udp_echo_reply', label: 'UDP Echo Reply' },
       { value: 'dns_refused', label: 'DNS Refused' },
     ],
@@ -168,6 +170,8 @@ function getProtocolForAction(action, currentProtocol = 'tcp') {
     case 'tcp_syn_ack':
       return 'tcp'
     case 'icmp_port_unreachable':
+    case 'icmp_host_unreachable':
+    case 'icmp_admin_prohibited':
     case 'udp_echo_reply':
     case 'dns_refused':
       return 'udp'
@@ -241,9 +245,11 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
   const isARPProtocol = protocol === 'arp'
   const isTCPResetAction = form.action === 'tcp_reset'
   const isICMPPortUnreachableAction = form.action === 'icmp_port_unreachable'
+  const isICMPHostUnreachableAction = form.action === 'icmp_host_unreachable'
+  const isICMPAdminProhibitedAction = form.action === 'icmp_admin_prohibited'
   const isUDPEchoReplyAction = form.action === 'udp_echo_reply'
   const isDNSRefusedAction = form.action === 'dns_refused'
-  const isUDPOnlyAction = isICMPPortUnreachableAction || isUDPEchoReplyAction || isDNSRefusedAction
+  const isUDPOnlyAction = isICMPPortUnreachableAction || isICMPHostUnreachableAction || isICMPAdminProhibitedAction || isUDPEchoReplyAction || isDNSRefusedAction
   const isTCPSynAckAction = form.action === 'tcp_syn_ack'
   const isICMPEchoReplyAction = form.action === 'icmp_echo_reply'
   const isARPReplyAction = form.action === 'arp_reply'
@@ -283,7 +289,7 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
           next.arp_operation = ''
         }
 
-        if (value === 'icmp_port_unreachable' || value === 'udp_echo_reply' || value === 'dns_refused') {
+        if (value === 'icmp_port_unreachable' || value === 'icmp_host_unreachable' || value === 'icmp_admin_prohibited' || value === 'udp_echo_reply' || value === 'dns_refused') {
           next.icmp_type = ''
           next.arp_operation = ''
           next.tcp_flag_syn = false
@@ -446,7 +452,7 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
       return
     }
 
-    if (action === 'icmp_port_unreachable' || action === 'udp_echo_reply' || action === 'dns_refused') {
+    if (action === 'icmp_port_unreachable' || action === 'icmp_host_unreachable' || action === 'icmp_admin_prohibited' || action === 'udp_echo_reply' || action === 'dns_refused') {
       if (protocol !== 'udp') {
         setError(`\`${action}\` 要求协议为 udp`)
         return
