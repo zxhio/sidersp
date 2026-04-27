@@ -19,6 +19,7 @@ import (
 	"sidersp/internal/model"
 	"sidersp/internal/response"
 	"sidersp/internal/response/afxdp"
+	"sidersp/internal/rule"
 )
 
 func main() {
@@ -82,7 +83,14 @@ func main() {
 	if err != nil {
 		logs.App().WithError(err).Fatal("Fail to build response runtime")
 	}
-	cp := controlplane.NewRuntime(cfg, dp, dp, runtimeStatsReader{
+	// Apply dataplane first so a failed dataplane sync never leaves user-space
+	// response params ahead of the active redirect rules.
+	syncer := ruleSyncFanout{targets: []controlplane.RuleSyncer{dp}}
+	if responseRuntime != nil {
+		syncer.targets = append(syncer.targets, responseRuntime)
+	}
+
+	cp := controlplane.NewRuntime(cfg, syncer, dp, runtimeStatsReader{
 		dataplane: dp,
 		response:  responseRuntime,
 	})
@@ -250,4 +258,17 @@ func buildAFXDPConfig(cfg config.ResponseRuntimeConfig, ifindex int) afxdp.Socke
 	}
 
 	return afxdpCfg
+}
+
+type ruleSyncFanout struct {
+	targets []controlplane.RuleSyncer
+}
+
+func (s ruleSyncFanout) ReplaceRules(set rule.RuleSet) error {
+	for _, target := range s.targets {
+		if err := target.ReplaceRules(set); err != nil {
+			return err
+		}
+	}
+	return nil
 }

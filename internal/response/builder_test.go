@@ -9,6 +9,8 @@ import (
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
+
+	"sidersp/internal/rule"
 )
 
 var (
@@ -72,16 +74,24 @@ func TestBuildResponseIPv4Packet(t *testing.T) {
 		name      string
 		meta      XSKMetadata
 		request   []byte
+		opts      BuildOptions
 		wantProto layers.IPProtocol
 	}{
 		{name: "icmp", meta: XSKMetadata{Action: ActionICMPEchoReply}, request: buildTestICMPEchoRequest(t), wantProto: layers.IPProtocolICMPv4},
-		{name: "tcp", meta: XSKMetadata{Action: ActionTCPSynAck}, request: buildTestTCPSyn(t), wantProto: layers.IPProtocolTCP},
+		{name: "tcp", meta: XSKMetadata{Action: ActionTCPSynAck}, request: buildTestTCPSyn(t), opts: BuildOptions{TCPSeq: 1000}, wantProto: layers.IPProtocolTCP},
 		{name: "udp", meta: XSKMetadata{Action: ActionUDPEchoReply}, request: buildTestUDPDatagram(t, 12345, 5353, []byte("udp-payload")), wantProto: layers.IPProtocolUDP},
-		{name: "dns", meta: XSKMetadata{Action: ActionDNSRefused}, request: buildTestDNSQuery(t, "example.org"), wantProto: layers.IPProtocolUDP},
+		{name: "dns refused", meta: XSKMetadata{Action: ActionDNSRefused}, request: buildTestDNSQuery(t, "example.org"), wantProto: layers.IPProtocolUDP},
+		{
+			name:      "dns sinkhole",
+			meta:      XSKMetadata{RuleID: 7001, Action: ActionDNSSinkhole},
+			request:   buildTestDNSQuery(t, "example.org"),
+			opts:      testDNSSinkholeBuildOptions(t, 7001, "192.0.2.10"),
+			wantProto: layers.IPProtocolUDP,
+		},
 	}
 
 	for _, tc := range tests {
-		packetBytes, err := BuildResponseIPv4Packet(tc.meta, tc.request, BuildOptions{TCPSeq: 1000})
+		packetBytes, err := BuildResponseIPv4Packet(tc.meta, tc.request, tc.opts)
 		if err != nil {
 			t.Fatalf("%s: BuildResponseIPv4Packet() error = %v", tc.name, err)
 		}
@@ -215,6 +225,78 @@ func TestBuildDNSRefused(t *testing.T) {
 	}
 }
 
+func TestBuildDNSSinkhole(t *testing.T) {
+	t.Parallel()
+
+	const ruleID = 7002
+
+	request := buildTestDNSQuery(t, "example.org")
+	reply, err := BuildResponseFrame(XSKMetadata{RuleID: ruleID, Action: ActionDNSSinkhole}, request, testDNSSinkholeBuildOptions(t, ruleID, "192.0.2.10"))
+	if err != nil {
+		t.Fatalf("BuildResponseFrame() error = %v", err)
+	}
+
+	packet := parseTestPacket(t, reply)
+	eth := packet.Layer(layers.LayerTypeEthernet).(*layers.Ethernet)
+	ip4 := packet.Layer(layers.LayerTypeIPv4).(*layers.IPv4)
+	udp := packet.Layer(layers.LayerTypeUDP).(*layers.UDP)
+	dns := packet.Layer(layers.LayerTypeDNS).(*layers.DNS)
+
+	if !sameMAC(eth.SrcMAC, testDstMAC) || !sameMAC(eth.DstMAC, testSrcMAC) {
+		t.Fatalf("ethernet = %s -> %s, want swapped", eth.SrcMAC, eth.DstMAC)
+	}
+	if ip4.SrcIP.String() != "10.0.0.2" || ip4.DstIP.String() != "10.0.0.1" {
+		t.Fatalf("ip = %s -> %s, want swapped", ip4.SrcIP, ip4.DstIP)
+	}
+	if udp.SrcPort != 53 || udp.DstPort != 53000 {
+		t.Fatalf("udp ports = %d -> %d, want 53 -> 53000", udp.SrcPort, udp.DstPort)
+	}
+	if !dns.QR || dns.ResponseCode != layers.DNSResponseCodeNoErr {
+		t.Fatalf("dns flags = qr:%v rcode:%v, want response noerror", dns.QR, dns.ResponseCode)
+	}
+	if !dns.RD || dns.ID != 0x1234 || len(dns.Questions) != 1 {
+		t.Fatalf("dns rd/id/questions = %v/%d/%d, want true/0x1234/1", dns.RD, dns.ID, len(dns.Questions))
+	}
+	if string(dns.Questions[0].Name) != "example.org" {
+		t.Fatalf("dns question = %q, want example.org", string(dns.Questions[0].Name))
+	}
+	if len(dns.Answers) != 1 {
+		t.Fatalf("dns answers = %d, want 1", len(dns.Answers))
+	}
+	answer := dns.Answers[0]
+	if string(answer.Name) != "example.org" || answer.Type != layers.DNSTypeA || answer.Class != layers.DNSClassIN {
+		t.Fatalf("dns answer = %+v, want example.org/A/IN", answer)
+	}
+	if answer.TTL != 60 || answer.IP.String() != "192.0.2.10" {
+		t.Fatalf("dns answer ttl/ip = %d/%s, want 60/192.0.2.10", answer.TTL, answer.IP)
+	}
+	if len(dns.Authorities) != 0 || len(dns.Additionals) != 0 {
+		t.Fatalf("dns records = authorities:%d additionals:%d, want 0/0", len(dns.Authorities), len(dns.Additionals))
+	}
+}
+
+func TestBuildDNSSinkholeCustomTTL(t *testing.T) {
+	t.Parallel()
+
+	const ruleID = 7003
+
+	request := buildTestDNSQuery(t, "example.org")
+	reply, err := BuildResponseFrame(
+		XSKMetadata{RuleID: ruleID, Action: ActionDNSSinkhole},
+		request,
+		testDNSSinkholeBuildOptions(t, ruleID, "192.0.2.10", 300),
+	)
+	if err != nil {
+		t.Fatalf("BuildResponseFrame() error = %v", err)
+	}
+
+	packet := parseTestPacket(t, reply)
+	dns := packet.Layer(layers.LayerTypeDNS).(*layers.DNS)
+	if len(dns.Answers) != 1 || dns.Answers[0].TTL != 300 {
+		t.Fatalf("dns answers = %+v, want ttl 300", dns.Answers)
+	}
+}
+
 func TestBuildResponseFrameRejectsIncompatiblePackets(t *testing.T) {
 	t.Parallel()
 
@@ -290,6 +372,40 @@ func TestBuildResponseFrameRejectsIncompatiblePackets(t *testing.T) {
 			meta:  XSKMetadata{Action: ActionDNSRefused},
 			frame: buildTestDNSCompressedQuestion(t),
 			want:  "compressed dns names are not supported",
+		},
+		{
+			name:  "dns sinkhole requires configured address",
+			meta:  XSKMetadata{RuleID: 7100, Action: ActionDNSSinkhole},
+			frame: buildTestDNSQuery(t, "example.org"),
+			want:  "dns sinkhole config is not configured",
+		},
+		{
+			name:  "dns sinkhole rejects non A query",
+			meta:  XSKMetadata{RuleID: 7101, Action: ActionDNSSinkhole},
+			frame: buildTestDNSQueryWithTypeClass(t, "example.org", layers.DNSTypeAAAA, layers.DNSClassIN),
+			opts:  testDNSSinkholeBuildOptions(t, 7101, "192.0.2.10"),
+			want:  "only dns A queries are supported",
+		},
+		{
+			name:  "dns sinkhole rejects multi question query",
+			meta:  XSKMetadata{RuleID: 7102, Action: ActionDNSSinkhole},
+			frame: buildTestDNSMultiQuestionQuery(t),
+			opts:  testDNSSinkholeBuildOptions(t, 7102, "192.0.2.10"),
+			want:  "exactly one dns question is required",
+		},
+		{
+			name:  "dns sinkhole rejects compressed question",
+			meta:  XSKMetadata{RuleID: 7103, Action: ActionDNSSinkhole},
+			frame: buildTestDNSCompressedQuestion(t),
+			opts:  testDNSSinkholeBuildOptions(t, 7103, "192.0.2.10"),
+			want:  "compressed dns names are not supported",
+		},
+		{
+			name:  "dns sinkhole rejects truncated dns payload",
+			meta:  XSKMetadata{RuleID: 7104, Action: ActionDNSSinkhole},
+			frame: buildTestUDPDatagram(t, 12345, 53, []byte("short")),
+			opts:  testDNSSinkholeBuildOptions(t, 7104, "192.0.2.10"),
+			want:  "dns header missing",
 		},
 		{
 			name:  "unknown action",
@@ -407,6 +523,11 @@ func buildTestUDPDatagram(t testing.TB, srcPort, dstPort uint16, payload []byte)
 
 func buildTestDNSQuery(t testing.TB, name string) []byte {
 	t.Helper()
+	return buildTestDNSQueryWithTypeClass(t, name, layers.DNSTypeA, layers.DNSClassIN)
+}
+
+func buildTestDNSQueryWithTypeClass(t testing.TB, name string, qtype layers.DNSType, qclass layers.DNSClass) []byte {
+	t.Helper()
 
 	eth := &layers.Ethernet{SrcMAC: testSrcMAC, DstMAC: testDstMAC, EthernetType: layers.EthernetTypeIPv4}
 	ip4 := &layers.IPv4{
@@ -426,7 +547,7 @@ func buildTestDNSQuery(t testing.TB, name string) []byte {
 		QR:           false,
 		OpCode:       layers.DNSOpCodeQuery,
 		RD:           true,
-		Questions:    []layers.DNSQuestion{{Name: []byte(name), Type: layers.DNSTypeA, Class: layers.DNSClassIN}},
+		Questions:    []layers.DNSQuestion{{Name: []byte(name), Type: qtype, Class: qclass}},
 		QDCount:      1,
 		ANCount:      0,
 		NSCount:      0,
@@ -596,4 +717,30 @@ func ip(raw string) net.IP {
 
 func sameMAC(a, b []byte) bool {
 	return net.HardwareAddr(a).String() == net.HardwareAddr(b).String()
+}
+
+func testDNSSinkholeBuildOptions(t testing.TB, ruleID uint32, address string, ttl ...int) BuildOptions {
+	t.Helper()
+
+	params := map[string]interface{}{"address": address}
+	if len(ttl) > 0 {
+		params["ttl"] = ttl[0]
+	}
+
+	store := NewRuleConfigStore()
+	if err := store.ReplaceRules(rule.RuleSet{
+		Rules: []rule.Rule{
+			{
+				ID: int(ruleID),
+				Response: rule.RuleResponse{
+					Action: "dns_sinkhole",
+					Params: params,
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("ReplaceRules() error = %v", err)
+	}
+
+	return BuildOptions{RuleConfigs: store}
 }

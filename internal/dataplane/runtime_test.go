@@ -242,6 +242,9 @@ func TestActionName(t *testing.T) {
 	if got := actionName(actionDNSRefused); got != "DNS_REFUSED" {
 		t.Fatalf("actionName(actionDNSRefused) = %q, want %q", got, "DNS_REFUSED")
 	}
+	if got := actionName(actionDNSSinkhole); got != "DNS_SINKHOLE" {
+		t.Fatalf("actionName(actionDNSSinkhole) = %q, want %q", got, "DNS_SINKHOLE")
+	}
 	if got := actionName(99); got != "UNKNOWN(99)" {
 		t.Fatalf("actionName(99) = %q, want %q", got, "UNKNOWN(99)")
 	}

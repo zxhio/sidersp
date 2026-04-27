@@ -109,6 +109,30 @@ func TestResponseExecutorRecordsDNSBuildFailure(t *testing.T) {
 	}
 }
 
+func TestResponseExecutorSendsAndRecordsDNSSinkholeResult(t *testing.T) {
+	t.Parallel()
+
+	results := newTestResultBuffer(t, 4)
+	tx := &stubFrameTransmitter{}
+	executor := newTestExecutor(t, tx, results, testDNSSinkholeBuildOptions(t, 2003, "192.0.2.10"))
+
+	err := executor.Execute(context.Background(), XSKMetadata{
+		RuleID: 2003,
+		Action: ActionDNSSinkhole,
+	}, buildTestDNSQuery(t, "example.org"))
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	recorded := results.List()
+	if len(recorded) != 1 {
+		t.Fatalf("results = %d, want 1", len(recorded))
+	}
+	if recorded[0].Action != "dns_sinkhole" || recorded[0].Result != ResultSent {
+		t.Fatalf("result = %+v, want sent dns_sinkhole result", recorded[0])
+	}
+}
+
 func TestResponseExecutorRecordsBuildFailure(t *testing.T) {
 	t.Parallel()
 

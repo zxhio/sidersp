@@ -453,6 +453,16 @@ func TestLoadRulesRejectsIncompatibleXSKActions(t *testing.T) {
       action: dns_refused`,
 			want: "requires match.protocol udp",
 		},
+		{
+			name: "dns sinkhole requires udp protocol",
+			ruleYAML: `match:
+      protocol: tcp
+    response:
+      action: dns_sinkhole
+      params:
+        address: 192.0.2.10`,
+			want: "requires match.protocol udp",
+		},
 	}
 
 	for _, tc := range tests {
@@ -555,14 +565,143 @@ func TestLoadRulesAcceptsCompatibleXSKActions(t *testing.T) {
       protocol: udp
     response:
       action: icmp_admin_prohibited
+  - id: 1009
+    name: dns-sinkhole
+    enabled: true
+    priority: 180
+    match:
+      protocol: udp
+      dst_ports: [53]
+    response:
+      action: dns_sinkhole
+      params:
+        address: 192.0.2.10
 `)
 
 	set, err := LoadRules(path)
 	if err != nil {
 		t.Fatalf("LoadRules() error = %v", err)
 	}
-	if len(set.Rules) != 8 {
-		t.Fatalf("len(Rules) = %d, want 8", len(set.Rules))
+	if len(set.Rules) != 9 {
+		t.Fatalf("len(Rules) = %d, want 9", len(set.Rules))
+	}
+}
+
+func TestLoadRulesValidatesResponseParams(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		ruleYAML string
+		want     string
+	}{
+		{
+			name: "dns sinkhole accepts valid address",
+			ruleYAML: `match:
+      protocol: udp
+    response:
+      action: dns_sinkhole
+      params:
+        address: 192.0.2.10`,
+		},
+		{
+			name: "dns sinkhole accepts valid ttl",
+			ruleYAML: `match:
+      protocol: udp
+    response:
+      action: dns_sinkhole
+      params:
+        address: 192.0.2.10
+        ttl: 300`,
+		},
+		{
+			name: "dns sinkhole rejects missing address",
+			ruleYAML: `match:
+      protocol: udp
+    response:
+      action: dns_sinkhole`,
+			want: "response.params.address is required",
+		},
+		{
+			name: "dns sinkhole rejects invalid address",
+			ruleYAML: `match:
+      protocol: udp
+    response:
+      action: dns_sinkhole
+      params:
+        address: 2001:db8::1`,
+			want: "response.params.address must be a single IPv4 address string",
+		},
+		{
+			name: "dns sinkhole rejects ttl above rfc limit",
+			ruleYAML: `match:
+      protocol: udp
+    response:
+      action: dns_sinkhole
+      params:
+        address: 192.0.2.10
+        ttl: 2147483648`,
+			want: "response.params.ttl must be an integer in range 0..2147483647",
+		},
+		{
+			name: "dns sinkhole rejects unknown param key",
+			ruleYAML: `match:
+      protocol: udp
+    response:
+      action: dns_sinkhole
+      params:
+        address: 192.0.2.10
+        foo: 1`,
+			want: "response.params.foo is not allowed",
+		},
+		{
+			name: "no param action rejects params",
+			ruleYAML: `match:
+      protocol: udp
+    response:
+      action: dns_refused
+      params:
+        address: 192.0.2.10`,
+			want: "response.params.address is not allowed",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			path := writeRulesFile(t, `rules:
+  - id: 1001
+    name: params
+    enabled: true
+    priority: 100
+    `+tc.ruleYAML+`
+`)
+
+			set, err := LoadRules(path)
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("LoadRules() error = %v", err)
+				}
+				if got := set.Rules[0].Response.Params["address"]; got != "192.0.2.10" {
+					t.Fatalf("address = %v, want 192.0.2.10", got)
+				}
+				if strings.Contains(tc.name, "ttl") {
+					if got := set.Rules[0].Response.Params["ttl"]; got != 300 {
+						t.Fatalf("ttl = %v, want 300", got)
+					}
+				}
+				return
+			}
+
+			if err == nil {
+				t.Fatal("LoadRules() error = nil, want validation error")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("LoadRules() error = %q, want %q", err, tc.want)
+			}
+		})
 	}
 }
 

@@ -209,6 +209,12 @@ func TestResponseActionName(t *testing.T) {
 			ok:     true,
 		},
 		{
+			name:   "dns sinkhole",
+			action: ActionDNSSinkhole,
+			want:   "dns_sinkhole",
+			ok:     true,
+		},
+		{
 			name:   "unknown",
 			action: 99,
 			ok:     false,

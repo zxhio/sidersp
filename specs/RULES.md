@@ -76,9 +76,28 @@ response:
 | Field | Required | Semantics |
 |-------|----------|-----------|
 | `action` | yes | Snake-case action name |
-| `params` | no | Reserved for future user-space response options |
+| `params` | no | Action-specific response parameters; schema depends on `action` |
 
-`params` is part of the rule schema but is not encoded into BPF `rule_meta` and has no effect in the current implementation.
+`response.params` is not encoded into BPF `rule_meta`. The control plane validates
+it per action and the response runtime uses it only for actions that require
+user-space response parameters.
+
+Parameter schema:
+
+| Action | `response.params` |
+|--------|-------------------|
+| `none` | forbidden |
+| `alert` | forbidden |
+| `tcp_reset` | forbidden |
+| `icmp_echo_reply` | forbidden |
+| `arp_reply` | forbidden |
+| `tcp_syn_ack` | forbidden |
+| `icmp_port_unreachable` | forbidden |
+| `icmp_host_unreachable` | forbidden |
+| `icmp_admin_prohibited` | forbidden |
+| `udp_echo_reply` | forbidden |
+| `dns_refused` | forbidden |
+| `dns_sinkhole` | required `address` string containing one IPv4 address; optional `ttl` integer in `0..2147483647` |
 
 Execution path is not exposed as a rule field. The control plane validates `response.action`; dataplane compilation encodes it into the numeric action code. Dataplane and response modules own the configured execution path for each action. For kernel TX actions such as `tcp_reset` and `icmp_port_unreachable`, local runtime config selects same-interface `XDP_TX` or egress-interface redirect for all rules.
 
@@ -97,6 +116,7 @@ Execution path is not exposed as a rule field. The control plane validates `resp
 | `dns_refused` | `8` | XSK RX + user-space TX | Redirect original packet to XSK; user space returns a DNS `REFUSED` response for a compatible UDP DNS query |
 | `icmp_host_unreachable` | `9` | dataplane kernel TX | Build ICMP destination-unreachable / host-unreachable in BPF and send by configured same-interface or egress-interface TX mode |
 | `icmp_admin_prohibited` | `10` | dataplane kernel TX | Build ICMP destination-unreachable / administratively-prohibited in BPF and send by configured same-interface or egress-interface TX mode |
+| `dns_sinkhole` | `11` | XSK RX + user-space TX | Redirect original packet to XSK; user space returns a DNS `NOERROR` response with one fixed A answer from `response.params.address` and optional `response.params.ttl` |
 
 External rules must not expose implementation details such as `xdp`, `xsk`, or `user_space` as fields.
 `dataplane.ingress_verdict` is a runtime dataplane setting, not a per-rule field.
@@ -116,10 +136,15 @@ packet type required to construct the response:
 | `icmp_admin_prohibited` | `protocol: udp` |
 | `udp_echo_reply` | `protocol: udp` |
 | `dns_refused` | `protocol: udp` |
+| `dns_sinkhole` | `protocol: udp` |
 
 `dns_refused` v1 supports IPv4 UDP DNS queries only. Rules should usually also
 limit `dst_ports` to `53`, but the control plane does not hard-require that
 port in v1.
+
+`dns_sinkhole` v1 also supports IPv4 UDP DNS queries only. Rules should usually
+also limit `dst_ports` to `53`, but the control plane does not hard-require
+that port in v1.
 
 ## Match Semantics
 
@@ -138,6 +163,7 @@ The control plane must:
 - Reject negative `id`, empty `name`, missing `response.action`, or negative `priority`
 - Normalize action and protocol names to lower case
 - Validate protocol, action, ICMP type, and ARP operation values
+- Validate `response.params` by action schema and reject unknown keys
 - Reject XSK TX actions without compatible match conditions
 - Validate VLAN, port, and IPv4 CIDR ranges
 - Reject negative TCP flag conditions

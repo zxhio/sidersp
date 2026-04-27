@@ -12,6 +12,7 @@ const (
 	ActionDNSRefused
 	ActionICMPHostUnreachable
 	ActionICMPAdminProhibited
+	ActionDNSSinkhole
 )
 
 type RuleSet struct {

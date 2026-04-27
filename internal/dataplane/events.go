@@ -73,6 +73,8 @@ func actionName(action uint16) string {
 		return "UDP_ECHO_REPLY"
 	case actionDNSRefused:
 		return "DNS_REFUSED"
+	case actionDNSSinkhole:
+		return "DNS_SINKHOLE"
 	default:
 		return fmt.Sprintf("UNKNOWN(%d)", action)
 	}

@@ -44,6 +44,7 @@ var responseActionNames = map[uint16]string{
 	ActionTCPSynAck:     "tcp_syn_ack",
 	ActionUDPEchoReply:  "udp_echo_reply",
 	ActionDNSRefused:    "dns_refused",
+	ActionDNSSinkhole:   "dns_sinkhole",
 }
 
 func ResponseActionName(action uint16) (string, bool) {

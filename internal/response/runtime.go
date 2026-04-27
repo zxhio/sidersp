@@ -10,6 +10,7 @@ import (
 
 	"sidersp/internal/logs"
 	"sidersp/internal/model"
+	"sidersp/internal/rule"
 )
 
 type XSKBackend interface {
@@ -39,6 +40,7 @@ type Runtime struct {
 	stats           *responseStatsCounters
 	backends        []XSKBackend
 	closers         []io.Closer
+	ruleConfigs     *RuleConfigStore
 	ifindex         int
 	queues          []int
 	senderMode      string
@@ -70,9 +72,11 @@ func NewRuntime(config RuntimeConfig) (*Runtime, error) {
 	workerSpecs := make([]WorkerSpec, 0, len(queues))
 	backends := make([]XSKBackend, 0, len(queues))
 	closers := make([]io.Closer, 0, 1)
+	ruleConfigs := NewRuleConfigStore()
 	buildOpts := BuildOptions{
 		HardwareAddr: append(net.HardwareAddr(nil), config.HardwareAddr...),
 		TCPSeq:       config.TCPSeq,
+		RuleConfigs:  ruleConfigs,
 	}
 	afpacketOut, err := openAFPacketFrameSender(config.EgressInterface)
 	if err != nil {
@@ -123,6 +127,7 @@ func NewRuntime(config RuntimeConfig) (*Runtime, error) {
 		stats:           stats,
 		backends:        backends,
 		closers:         closers,
+		ruleConfigs:     ruleConfigs,
 		ifindex:         config.IfIndex,
 		queues:          append([]int(nil), queues...),
 		senderMode:      responseSenderMode(config.EgressInterface),
@@ -195,6 +200,13 @@ func (r *Runtime) Results() []ResponseResult {
 		return nil
 	}
 	return r.results.List()
+}
+
+func (r *Runtime) ReplaceRules(set rule.RuleSet) error {
+	if r == nil {
+		return nil
+	}
+	return r.ruleConfigs.ReplaceRules(set)
 }
 
 func (r *Runtime) ReadStats() model.ResponseStats {

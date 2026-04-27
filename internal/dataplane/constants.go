@@ -41,6 +41,7 @@ const (
 	actionDNSRefused          = rule.ActionDNSRefused
 	actionICMPHostUnreachable = rule.ActionICMPHostUnreachable
 	actionICMPAdminProhibited = rule.ActionICMPAdminProhibited
+	actionDNSSinkhole         = rule.ActionDNSSinkhole
 )
 
 const (

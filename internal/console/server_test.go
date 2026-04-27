@@ -845,6 +845,35 @@ func TestCreateRuleKeepsExplicitID(t *testing.T) {
 	}
 }
 
+func TestCreateRulePreservesResponseParams(t *testing.T) {
+	t.Parallel()
+
+	server := NewServer("127.0.0.1:0", &stubService{})
+	body := []byte(`{"name":"sinkhole","enabled":true,"priority":30,"match":{"protocol":"udp","dst_ports":[53]},"response":{"action":"dns_sinkhole","params":{"address":"192.0.2.10","ttl":300}}}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/rules", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.newRouter().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusCreated)
+	}
+
+	var payload struct {
+		Data RuleBody `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if got := payload.Data.Response.Params["address"]; got != "192.0.2.10" {
+		t.Fatalf("response.params.address = %v, want 192.0.2.10", got)
+	}
+	if got := payload.Data.Response.Params["ttl"]; got != float64(300) {
+		t.Fatalf("response.params.ttl = %v, want 300", got)
+	}
+}
+
 func TestUpdateRule(t *testing.T) {
 	t.Parallel()
 

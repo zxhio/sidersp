@@ -23,6 +23,7 @@ const ACTION_GROUPS = [
       { value: 'icmp_admin_prohibited', label: 'ICMP Admin Prohibited' },
       { value: 'udp_echo_reply', label: 'UDP Echo Reply' },
       { value: 'dns_refused', label: 'DNS Refused' },
+      { value: 'dns_sinkhole', label: 'DNS Sinkhole' },
     ],
   },
   {
@@ -65,6 +66,16 @@ const TCP_FLAG_FIELDS = [
   { key: 'psh', label: 'PSH' },
 ]
 const TCP_RESET_FLAG_FIELDS = TCP_FLAG_FIELDS.filter(field => field.key !== 'rst')
+const UDP_ONLY_ACTIONS = new Set([
+  'icmp_port_unreachable',
+  'icmp_host_unreachable',
+  'icmp_admin_prohibited',
+  'udp_echo_reply',
+  'dns_refused',
+  'dns_sinkhole',
+])
+const DNS_TTL_DEFAULT = 60
+const DNS_TTL_MAX = 2147483647
 
 const EMPTY_RULE = {
   name: '',
@@ -81,7 +92,7 @@ const EMPTY_RULE = {
     icmp: null,
     arp: null,
   },
-  response: { action: 'tcp_reset' },
+  response: { action: 'tcp_reset', params: {} },
 }
 
 function joinArr(arr) {
@@ -110,12 +121,24 @@ function normalizePrefixesInput(str) {
   return splitArr(str).map(normalizePrefixValue)
 }
 
+function normalizeResponseParams(action, params) {
+  if (action !== 'dns_sinkhole') {
+    return {}
+  }
+
+  return {
+    address: typeof params?.address === 'string' ? params.address : '',
+    ttl: params?.ttl !== undefined && params?.ttl !== null ? String(params.ttl) : String(DNS_TTL_DEFAULT),
+  }
+}
+
 function normalizeRule(rule) {
   if (!rule) return EMPTY_RULE
 
   const action = getActionOption(rule.response?.action).value
   const rawProtocol = isKnownProtocol(rule.match?.protocol) ? rule.match.protocol : 'tcp'
   const protocol = getProtocolForAction(action, rawProtocol)
+  const responseParams = normalizeResponseParams(action, rule.response?.params)
   const tcpFlags = { ...(rule.match?.tcp_flags || {}) }
   const icmpType = rule.match?.icmp?.type || ''
   const arpOperation = rule.match?.arp?.operation || ''
@@ -155,7 +178,7 @@ function normalizeRule(rule) {
     },
     response: {
       action,
-      params: rule.response?.params || {},
+      params: responseParams,
     },
   }
 }
@@ -165,16 +188,14 @@ function getActionOption(action) {
 }
 
 function getProtocolForAction(action, currentProtocol = 'tcp') {
+  if (UDP_ONLY_ACTIONS.has(action)) {
+    return 'udp'
+  }
+
   switch (action) {
     case 'tcp_reset':
     case 'tcp_syn_ack':
       return 'tcp'
-    case 'icmp_port_unreachable':
-    case 'icmp_host_unreachable':
-    case 'icmp_admin_prohibited':
-    case 'udp_echo_reply':
-    case 'dns_refused':
-      return 'udp'
     case 'icmp_echo_reply':
       return 'icmp'
     case 'arp_reply':
@@ -188,6 +209,14 @@ function getProtocolForAction(action, currentProtocol = 'tcp') {
 
 function isProtocolSelectable(action) {
   return action === 'alert' || action === 'none'
+}
+
+function isUDPOnlyResponseAction(action) {
+  return UDP_ONLY_ACTIONS.has(action)
+}
+
+function usesDNSSinkholeParams(action) {
+  return action === 'dns_sinkhole'
 }
 
 function buildTCPFlags(form) {
@@ -211,6 +240,23 @@ function validateNumberList(values, min, max, label) {
   return ''
 }
 
+function isBasicIPv4Address(value) {
+  const parts = value.split('.')
+  if (parts.length !== 4) {
+    return false
+  }
+
+  return parts.every(part => /^\d{1,3}$/.test(part) && Number(part) >= 0 && Number(part) <= 255)
+}
+
+function clearTCPFlagsState(form) {
+  form.tcp_flag_syn = false
+  form.tcp_flag_ack = false
+  form.tcp_flag_rst = false
+  form.tcp_flag_fin = false
+  form.tcp_flag_psh = false
+}
+
 export default function RuleForm({ rule, onSubmit, onCancel }) {
   const isNew = !rule
   const initial = normalizeRule(rule)
@@ -232,6 +278,8 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
     tcp_flag_psh: Boolean(initial.match.tcp_flags.psh),
     icmp_type: initial.match.icmp?.type || '',
     arp_operation: initial.match.arp?.operation || '',
+    response_address: initial.response.params.address || '',
+    response_ttl: initial.response.params.ttl ?? '',
     action: initial.response.action,
   })
   const [error, setError] = useState('')
@@ -249,7 +297,8 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
   const isICMPAdminProhibitedAction = form.action === 'icmp_admin_prohibited'
   const isUDPEchoReplyAction = form.action === 'udp_echo_reply'
   const isDNSRefusedAction = form.action === 'dns_refused'
-  const isUDPOnlyAction = isICMPPortUnreachableAction || isICMPHostUnreachableAction || isICMPAdminProhibitedAction || isUDPEchoReplyAction || isDNSRefusedAction
+  const isDNSSinkholeAction = form.action === 'dns_sinkhole'
+  const isUDPOnlyAction = isUDPOnlyResponseAction(form.action)
   const isTCPSynAckAction = form.action === 'tcp_syn_ack'
   const isICMPEchoReplyAction = form.action === 'icmp_echo_reply'
   const isARPReplyAction = form.action === 'arp_reply'
@@ -266,11 +315,7 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
         }
 
         if (nextProtocol !== 'tcp') {
-          next.tcp_flag_syn = false
-          next.tcp_flag_ack = false
-          next.tcp_flag_rst = false
-          next.tcp_flag_fin = false
-          next.tcp_flag_psh = false
+          clearTCPFlagsState(next)
         }
 
         if (value === 'tcp_reset') {
@@ -280,43 +325,28 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
         }
 
         if (value === 'tcp_syn_ack') {
+          clearTCPFlagsState(next)
           next.tcp_flag_syn = true
-          next.tcp_flag_ack = false
-          next.tcp_flag_rst = false
-          next.tcp_flag_fin = false
-          next.tcp_flag_psh = false
           next.icmp_type = ''
           next.arp_operation = ''
         }
 
-        if (value === 'icmp_port_unreachable' || value === 'icmp_host_unreachable' || value === 'icmp_admin_prohibited' || value === 'udp_echo_reply' || value === 'dns_refused') {
+        if (isUDPOnlyResponseAction(value)) {
           next.icmp_type = ''
           next.arp_operation = ''
-          next.tcp_flag_syn = false
-          next.tcp_flag_ack = false
-          next.tcp_flag_rst = false
-          next.tcp_flag_fin = false
-          next.tcp_flag_psh = false
+          clearTCPFlagsState(next)
         }
 
         if (value === 'icmp_echo_reply') {
+          clearTCPFlagsState(next)
           next.icmp_type = 'echo_request'
           next.arp_operation = ''
-          next.tcp_flag_syn = false
-          next.tcp_flag_ack = false
-          next.tcp_flag_rst = false
-          next.tcp_flag_fin = false
-          next.tcp_flag_psh = false
         }
 
         if (value === 'arp_reply') {
+          clearTCPFlagsState(next)
           next.arp_operation = 'request'
           next.icmp_type = ''
-          next.tcp_flag_syn = false
-          next.tcp_flag_ack = false
-          next.tcp_flag_rst = false
-          next.tcp_flag_fin = false
-          next.tcp_flag_psh = false
         }
 
         if (value === 'alert' || value === 'none') {
@@ -326,6 +356,13 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
           if (nextProtocol !== 'arp') {
             next.arp_operation = ''
           }
+        }
+
+        if (!usesDNSSinkholeParams(value)) {
+          next.response_address = ''
+          next.response_ttl = ''
+        } else if (!next.response_ttl) {
+          next.response_ttl = String(DNS_TTL_DEFAULT)
         }
 
         return next
@@ -347,11 +384,7 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
       }
 
       if (value !== 'tcp') {
-        next.tcp_flag_syn = false
-        next.tcp_flag_ack = false
-        next.tcp_flag_rst = false
-        next.tcp_flag_fin = false
-        next.tcp_flag_psh = false
+        clearTCPFlagsState(next)
       }
 
       if (value !== 'icmp') {
@@ -386,6 +419,8 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
     const tcpFlags = isTCPProtocol ? buildTCPFlags(form) : {}
     const protocol = form.protocol.trim()
     const action = form.action.trim()
+    const responseAddress = form.response_address.trim()
+    const responseTTL = form.response_ttl.trim()
 
     const vlanError = validateNumberList(vlans, 0, 4095, 'VLAN')
     if (vlanError) {
@@ -452,10 +487,28 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
       return
     }
 
-    if (action === 'icmp_port_unreachable' || action === 'icmp_host_unreachable' || action === 'icmp_admin_prohibited' || action === 'udp_echo_reply' || action === 'dns_refused') {
+    if (isUDPOnlyResponseAction(action)) {
       if (protocol !== 'udp') {
         setError(`\`${action}\` 要求协议为 udp`)
         return
+      }
+    }
+
+    if (usesDNSSinkholeParams(action)) {
+      if (!responseAddress) {
+        setError('`dns_sinkhole` 要求填写 address')
+        return
+      }
+      if (!isBasicIPv4Address(responseAddress)) {
+        setError('`dns_sinkhole` 的 address 必须是 IPv4 地址')
+        return
+      }
+      if (responseTTL) {
+        const ttl = Number(responseTTL)
+        if (!Number.isInteger(ttl) || ttl < 0 || ttl > DNS_TTL_MAX) {
+          setError('`dns_sinkhole` 的 ttl 必须是 0 到 2147483647 的整数')
+          return
+        }
       }
     }
 
@@ -481,12 +534,20 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
       Object.entries(match).filter(([, value]) => hasValue(value)),
     )
 
+    const response = { action }
+    if (usesDNSSinkholeParams(action)) {
+      response.params = { address: responseAddress }
+      if (responseTTL) {
+        response.params.ttl = Number(responseTTL)
+      }
+    }
+
     const payload = {
       name: form.name.trim(),
       enabled: form.enabled,
       priority,
       match: compactMatch,
-      response: { action },
+      response,
     }
 
     setSubmitting(true)
@@ -566,7 +627,39 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
               {isDNSRefusedAction && (
                 <div className="form-section-desc">v1 建议额外限制目标端口为 53。</div>
               )}
+              {isDNSSinkholeAction && (
+                <div className="form-section-desc">v1 仅支持 IPv4 UDP DNS A 查询，返回固定 A 记录。</div>
+              )}
             </div>
+
+            {isDNSSinkholeAction && (
+              <>
+                <div className="form-section-title">响应参数</div>
+                <div className="form-row">
+                  <div className="form-group">
+                    <label>IPv4 Address <span className="required">*</span></label>
+                    <input
+                      type="text"
+                      value={form.response_address}
+                      onChange={e => set('response_address', e.target.value)}
+                      placeholder="如 192.0.2.10"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>TTL</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max={DNS_TTL_MAX}
+                      value={form.response_ttl}
+                      onChange={e => set('response_ttl', e.target.value)}
+                      placeholder={`默认 ${DNS_TTL_DEFAULT}`}
+                    />
+                    <div className="form-section-desc">可选，范围 0 到 2147483647。</div>
+                  </div>
+                </div>
+              </>
+            )}
 
             <div className="form-section-title">匹配条件</div>
             <div className="form-section-desc">多个值用英文逗号分隔，留空表示不限制</div>

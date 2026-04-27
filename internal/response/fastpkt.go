@@ -450,7 +450,7 @@ func buildUDPEchoReplyIPv4PacketToBuffer(dst []byte, ip4 fastpktIPv4Packet, udp 
 	return out
 }
 
-func buildDNSRefusedFrameToBuffer(dst []byte, eth fastpktEthernetFrame, ip4 fastpktIPv4Packet, udp fastpktUDPPacket, query dnsRefusedQuery) []byte {
+func buildDNSRefusedFrameToBuffer(dst []byte, eth fastpktEthernetFrame, ip4 fastpktIPv4Packet, udp fastpktUDPPacket, query dnsQuery) []byte {
 	dnsLen := dnsHeaderLen + len(query.question)
 	udpLen := fastpktUDPHeaderLen + dnsLen
 	ipLen := fastpktIPv4HeaderMinLen + udpLen
@@ -477,7 +477,7 @@ func buildDNSRefusedFrameToBuffer(dst []byte, eth fastpktEthernetFrame, ip4 fast
 	return out
 }
 
-func buildDNSRefusedIPv4PacketToBuffer(dst []byte, ip4 fastpktIPv4Packet, udp fastpktUDPPacket, query dnsRefusedQuery) []byte {
+func buildDNSRefusedIPv4PacketToBuffer(dst []byte, ip4 fastpktIPv4Packet, udp fastpktUDPPacket, query dnsQuery) []byte {
 	dnsLen := dnsHeaderLen + len(query.question)
 	udpLen := fastpktUDPHeaderLen + dnsLen
 	ipLen := fastpktIPv4HeaderMinLen + udpLen
@@ -497,6 +497,68 @@ func buildDNSRefusedIPv4PacketToBuffer(dst []byte, ip4 fastpktIPv4Packet, udp fa
 	binary.BigEndian.PutUint16(out[udpOffset+6:udpOffset+8], udpChecksum(ip4.dst, ip4.src, out[udpOffset:udpOffset+udpLen]))
 
 	return out
+}
+
+func buildDNSSinkholeFrameToBuffer(dst []byte, eth fastpktEthernetFrame, ip4 fastpktIPv4Packet, udp fastpktUDPPacket, query dnsQuery, config DNSSinkholeConfig) []byte {
+	dnsLen := dnsHeaderLen + len(query.question) + len(query.name) + 14
+	udpLen := fastpktUDPHeaderLen + dnsLen
+	ipLen := fastpktIPv4HeaderMinLen + udpLen
+	out := reserveFastpktBuffer(dst, fastpktEthernetHeaderLen+ipLen)
+
+	copy(out[0:6], eth.srcMAC[:])
+	copy(out[6:12], eth.dstMAC[:])
+	binary.BigEndian.PutUint16(out[12:14], fastpktEtherTypeIPv4)
+
+	ipOffset := fastpktEthernetHeaderLen
+	writeIPv4Header(out[ipOffset:ipOffset+fastpktIPv4HeaderMinLen], ip4.dst, ip4.src, ip4.id, fastpktIPProtoUDP, ipLen)
+
+	udpOffset := ipOffset + fastpktIPv4HeaderMinLen
+	writeUDPHeader(out[udpOffset:udpOffset+fastpktUDPHeaderLen], udp.dstPort, udp.srcPort, udpLen)
+
+	dnsOffset := udpOffset + fastpktUDPHeaderLen
+	writeDNSSinkholePayload(out[dnsOffset:dnsOffset+dnsLen], query, config)
+
+	binary.BigEndian.PutUint16(out[udpOffset+6:udpOffset+8], udpChecksum(ip4.dst, ip4.src, out[udpOffset:udpOffset+udpLen]))
+
+	return out
+}
+
+func buildDNSSinkholeIPv4PacketToBuffer(dst []byte, ip4 fastpktIPv4Packet, udp fastpktUDPPacket, query dnsQuery, config DNSSinkholeConfig) []byte {
+	dnsLen := dnsHeaderLen + len(query.question) + len(query.name) + 14
+	udpLen := fastpktUDPHeaderLen + dnsLen
+	ipLen := fastpktIPv4HeaderMinLen + udpLen
+	out := reserveFastpktBuffer(dst, ipLen)
+
+	writeIPv4Header(out[:fastpktIPv4HeaderMinLen], ip4.dst, ip4.src, ip4.id, fastpktIPProtoUDP, ipLen)
+
+	udpOffset := fastpktIPv4HeaderMinLen
+	writeUDPHeader(out[udpOffset:udpOffset+fastpktUDPHeaderLen], udp.dstPort, udp.srcPort, udpLen)
+
+	dnsOffset := udpOffset + fastpktUDPHeaderLen
+	writeDNSSinkholePayload(out[dnsOffset:dnsOffset+dnsLen], query, config)
+
+	binary.BigEndian.PutUint16(out[udpOffset+6:udpOffset+8], udpChecksum(ip4.dst, ip4.src, out[udpOffset:udpOffset+udpLen]))
+
+	return out
+}
+
+func writeDNSSinkholePayload(out []byte, query dnsQuery, config DNSSinkholeConfig) {
+	binary.BigEndian.PutUint16(out[0:2], query.id)
+	binary.BigEndian.PutUint16(out[2:4], dnsFlagQR|query.preserve)
+	binary.BigEndian.PutUint16(out[4:6], 1)
+	binary.BigEndian.PutUint16(out[6:8], 1)
+	copy(out[dnsHeaderLen:dnsHeaderLen+len(query.question)], query.question)
+
+	answerOffset := dnsHeaderLen + len(query.question)
+	copy(out[answerOffset:answerOffset+len(query.name)], query.name)
+	answerOffset += len(query.name)
+
+	binary.BigEndian.PutUint16(out[answerOffset:answerOffset+2], dnsTypeA)
+	binary.BigEndian.PutUint16(out[answerOffset+2:answerOffset+4], dnsClassIN)
+	binary.BigEndian.PutUint32(out[answerOffset+4:answerOffset+8], config.TTL)
+	binary.BigEndian.PutUint16(out[answerOffset+8:answerOffset+10], 4)
+	ipv4 := config.Address.As4()
+	copy(out[answerOffset+10:answerOffset+14], ipv4[:])
 }
 
 func reserveFastpktBuffer(dst []byte, size int) []byte {

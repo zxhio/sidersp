@@ -223,6 +223,8 @@ func encodeAction(action string) (uint16, error) {
 		return actionUDPEchoReply, nil
 	case "dns_refused":
 		return actionDNSRefused, nil
+	case "dns_sinkhole":
+		return actionDNSSinkhole, nil
 	default:
 		return 0, fmt.Errorf("unsupported action %q", action)
 	}

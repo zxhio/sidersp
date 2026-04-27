@@ -935,7 +935,8 @@ int xdp_sidersp(struct xdp_md *xdp)
     case ACTION_ARP_REPLY:
     case ACTION_TCP_SYN_ACK:
     case ACTION_UDP_ECHO_REPLY:
-    case ACTION_DNS_REFUSED: {
+    case ACTION_DNS_REFUSED:
+    case ACTION_DNS_SINKHOLE: {
         int redir;
         if (best_rule.action == ACTION_TCP_SYN_ACK && !can_tcp_syn_ack(&ctx))
             return ingress_failure_verdict(cfg);

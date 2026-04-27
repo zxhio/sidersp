@@ -21,6 +21,7 @@ in `RULES.md`.
 | `dns_refused` | `8` | XSK RX + user-space TX | active | Redirect the original packet to XSK; user space returns a UDP DNS response with `RCODE=REFUSED` and the original question copied back |
 | `icmp_host_unreachable` | `9` | BPF kernel TX | active | Build ICMP destination-unreachable / host-unreachable in BPF and send by same-interface `XDP_TX` or configured egress-interface `XDP_REDIRECT` |
 | `icmp_admin_prohibited` | `10` | BPF kernel TX | active | Build ICMP destination-unreachable / administratively-prohibited in BPF and send by same-interface `XDP_TX` or configured egress-interface `XDP_REDIRECT` |
+| `dns_sinkhole` | `11` | XSK RX + user-space TX | active | Redirect the original packet to XSK; user space returns a UDP DNS response with `RCODE=NOERROR` and one fixed A answer from `response.params.address` |
 
 Action names are stable snake-case API values. Numeric codes are the dataplane
 ABI and must stay synchronized with BPF definitions.
@@ -72,7 +73,7 @@ configured failure verdict: `XDP_PASS` or `XDP_DROP`.
 
 ### XSK RX + User-Space TX
 
-Used by `icmp_echo_reply`, `arp_reply`, `tcp_syn_ack`, `udp_echo_reply`, and `dns_refused`.
+Used by `icmp_echo_reply`, `arp_reply`, `tcp_syn_ack`, `udp_echo_reply`, `dns_refused`, and `dns_sinkhole`.
 
 ```text
 packet -> BPF parse/match -> write xsk_meta into XDP metadata -> XDP_REDIRECT to XSK
@@ -115,6 +116,16 @@ IPv4 and UDP checksums on the swapped tuple.
 query with exactly one question, returns `QR=1` and `RCODE=REFUSED`, copies the
 question section back unchanged, and clears answer, authority, and additional
 sections. EDNS OPT and other additional records are not preserved in v1.
+
+`dns_sinkhole` v1 also supports IPv4 UDP DNS queries only. It requires a
+standard query with exactly one question, `QTYPE=A`, and `QCLASS=IN`. The
+response keeps the request ID and `RD`, copies the question section unchanged,
+sets `QR=1`, `RCODE=NOERROR`, clears authority and additional sections, and
+returns exactly one A answer with the IPv4 address from
+`response.params.address`. TTL defaults to `60` when `response.params.ttl` is
+omitted; when present, `ttl` must be an integer in `0..2147483647`, matching
+the DNS TTL limit clarified by RFC 2181 section 8. Unsupported DNS requests
+fail response building and do not fall back to `dns_refused`.
 
 ## XSK Metadata
 

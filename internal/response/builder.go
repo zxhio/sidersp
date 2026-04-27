@@ -15,11 +15,13 @@ const (
 	ActionTCPSynAck     = rule.ActionTCPSynAck
 	ActionUDPEchoReply  = rule.ActionUDPEchoReply
 	ActionDNSRefused    = rule.ActionDNSRefused
+	ActionDNSSinkhole   = rule.ActionDNSSinkhole
 )
 
 type BuildOptions struct {
 	HardwareAddr net.HardwareAddr
 	TCPSeq       uint32
+	RuleConfigs  *RuleConfigStore
 }
 
 var errResponseRequiresEthernetFraming = errors.New("response requires ethernet framing")
@@ -44,6 +46,8 @@ func BuildResponseFrameToBuffer(meta XSKMetadata, frame []byte, opts BuildOption
 		return buildUDPEchoReplyToBuffer(frame, dst)
 	case ActionDNSRefused:
 		return buildDNSRefusedToBuffer(frame, dst)
+	case ActionDNSSinkhole:
+		return buildDNSSinkholeToBuffer(meta.RuleID, frame, opts.RuleConfigs, dst)
 	default:
 		return nil, fmt.Errorf("build response: unsupported action %d", meta.Action)
 	}
@@ -59,6 +63,8 @@ func BuildResponseIPv4PacketToBuffer(meta XSKMetadata, frame []byte, opts BuildO
 		return buildUDPEchoReplyIPv4ToBuffer(frame, dst)
 	case ActionDNSRefused:
 		return buildDNSRefusedIPv4ToBuffer(frame, dst)
+	case ActionDNSSinkhole:
+		return buildDNSSinkholeIPv4ToBuffer(meta.RuleID, frame, opts.RuleConfigs, dst)
 	case ActionARPReply:
 		return nil, fmt.Errorf("build response ipv4 packet: %w for action %d", errResponseRequiresEthernetFraming, meta.Action)
 	default:
@@ -190,7 +196,7 @@ func buildDNSRefusedToBuffer(frame []byte, dst []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	query, err := parseDNSRefusedQuery(udp.payload)
+	query, err := parseDNSQuery(udp.payload, "build dns refused")
 	if err != nil {
 		return nil, err
 	}
@@ -204,7 +210,7 @@ func buildDNSRefusedIPv4ToBuffer(frame []byte, dst []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	query, err := parseDNSRefusedQuery(udp.payload)
+	query, err := parseDNSQuery(udp.payload, "build dns refused")
 	if err != nil {
 		return nil, err
 	}
@@ -212,69 +218,137 @@ func buildDNSRefusedIPv4ToBuffer(frame []byte, dst []byte) ([]byte, error) {
 	return buildDNSRefusedIPv4PacketToBuffer(dst, ip4, udp, query), nil
 }
 
+func buildDNSSinkholeToBuffer(ruleID uint32, frame []byte, configs *RuleConfigStore, dst []byte) ([]byte, error) {
+	eth, ip4, udp, err := parseUDPEthernetFrame(frame, "build dns sinkhole")
+	if err != nil {
+		return nil, err
+	}
+
+	query, err := parseDNSSinkholeQuery(udp.payload)
+	if err != nil {
+		return nil, err
+	}
+
+	config, err := lookupDNSSinkholeConfig(ruleID, configs)
+	if err != nil {
+		return nil, err
+	}
+
+	return buildDNSSinkholeFrameToBuffer(dst, eth, ip4, udp, query, config), nil
+}
+
+func buildDNSSinkholeIPv4ToBuffer(ruleID uint32, frame []byte, configs *RuleConfigStore, dst []byte) ([]byte, error) {
+	_, ip4, udp, err := parseUDPEthernetFrame(frame, "build dns sinkhole")
+	if err != nil {
+		return nil, err
+	}
+
+	query, err := parseDNSSinkholeQuery(udp.payload)
+	if err != nil {
+		return nil, err
+	}
+
+	config, err := lookupDNSSinkholeConfig(ruleID, configs)
+	if err != nil {
+		return nil, err
+	}
+
+	return buildDNSSinkholeIPv4PacketToBuffer(dst, ip4, udp, query, config), nil
+}
+
 const (
 	dnsHeaderLen      = 12
 	dnsFlagQR         = 1 << 15
 	dnsFlagOpcodeMask = 0x7800
 	dnsFlagRD         = 1 << 8
+	dnsTypeA          = 1
+	dnsClassIN        = 1
 	dnsRCodeRefused   = 5
 )
 
-type dnsRefusedQuery struct {
+type dnsQuery struct {
 	id       uint16
 	preserve uint16
+	name     []byte
 	question []byte
+	qtype    uint16
+	qclass   uint16
 }
 
-func parseDNSRefusedQuery(payload []byte) (dnsRefusedQuery, error) {
+func parseDNSQuery(payload []byte, context string) (dnsQuery, error) {
 	if len(payload) < dnsHeaderLen {
-		return dnsRefusedQuery{}, fmt.Errorf("build dns refused: dns header missing")
+		return dnsQuery{}, fmt.Errorf("%s: dns header missing", context)
 	}
 
 	flags := binary.BigEndian.Uint16(payload[2:4])
 	if flags&dnsFlagQR != 0 {
-		return dnsRefusedQuery{}, fmt.Errorf("build dns refused: packet is not dns query")
+		return dnsQuery{}, fmt.Errorf("%s: packet is not dns query", context)
 	}
 	if flags&dnsFlagOpcodeMask != 0 {
-		return dnsRefusedQuery{}, fmt.Errorf("build dns refused: only standard dns queries are supported")
+		return dnsQuery{}, fmt.Errorf("%s: only standard dns queries are supported", context)
 	}
 
 	if questions := binary.BigEndian.Uint16(payload[4:6]); questions != 1 {
-		return dnsRefusedQuery{}, fmt.Errorf("build dns refused: exactly one dns question is required")
+		return dnsQuery{}, fmt.Errorf("%s: exactly one dns question is required", context)
 	}
 
-	questionEnd, err := scanDNSQuestion(payload, dnsHeaderLen)
+	nameEnd, questionEnd, err := scanDNSQuestion(payload, dnsHeaderLen)
 	if err != nil {
-		return dnsRefusedQuery{}, fmt.Errorf("build dns refused: %w", err)
+		return dnsQuery{}, fmt.Errorf("%s: %w", context, err)
 	}
 
-	return dnsRefusedQuery{
+	return dnsQuery{
 		id:       binary.BigEndian.Uint16(payload[0:2]),
 		preserve: flags & dnsFlagRD,
+		name:     append([]byte(nil), payload[dnsHeaderLen:nameEnd]...),
 		question: append([]byte(nil), payload[dnsHeaderLen:questionEnd]...),
+		qtype:    binary.BigEndian.Uint16(payload[questionEnd-4 : questionEnd-2]),
+		qclass:   binary.BigEndian.Uint16(payload[questionEnd-2 : questionEnd]),
 	}, nil
 }
 
-func scanDNSQuestion(payload []byte, offset int) (int, error) {
+func parseDNSSinkholeQuery(payload []byte) (dnsQuery, error) {
+	query, err := parseDNSQuery(payload, "build dns sinkhole")
+	if err != nil {
+		return dnsQuery{}, err
+	}
+	if query.qtype != dnsTypeA {
+		return dnsQuery{}, fmt.Errorf("build dns sinkhole: only dns A queries are supported")
+	}
+	if query.qclass != dnsClassIN {
+		return dnsQuery{}, fmt.Errorf("build dns sinkhole: only dns class IN queries are supported")
+	}
+	return query, nil
+}
+
+func lookupDNSSinkholeConfig(ruleID uint32, configs *RuleConfigStore) (DNSSinkholeConfig, error) {
+	config, ok := configs.DNSSinkholeConfig(ruleID)
+	if !ok {
+		return DNSSinkholeConfig{}, fmt.Errorf("build dns sinkhole: rule %d dns sinkhole config is not configured", ruleID)
+	}
+	return config, nil
+}
+
+func scanDNSQuestion(payload []byte, offset int) (int, int, error) {
 	idx := offset
 	for {
 		if idx >= len(payload) {
-			return 0, fmt.Errorf("dns question is truncated")
+			return 0, 0, fmt.Errorf("dns question is truncated")
 		}
 		labelLen := int(payload[idx])
 		idx++
 		switch {
 		case labelLen == 0:
 			if idx+4 > len(payload) {
-				return 0, fmt.Errorf("dns question is truncated")
+				return 0, 0, fmt.Errorf("dns question is truncated")
 			}
-			return idx + 4, nil
+			return idx, idx + 4, nil
 		case labelLen&0xc0 != 0:
-			return 0, fmt.Errorf("compressed dns names are not supported")
+			return 0, 0, fmt.Errorf("compressed dns names are not supported")
 		case labelLen > 63:
-			return 0, fmt.Errorf("dns label length %d out of range", labelLen)
+			return 0, 0, fmt.Errorf("dns label length %d out of range", labelLen)
 		case idx+labelLen > len(payload):
-			return 0, fmt.Errorf("dns question is truncated")
+			return 0, 0, fmt.Errorf("dns question is truncated")
 		default:
 			idx += labelLen
 		}
