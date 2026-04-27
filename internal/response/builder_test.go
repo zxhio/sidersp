@@ -65,6 +65,37 @@ func TestBuildICMPEchoReplyIPv4(t *testing.T) {
 	}
 }
 
+func TestBuildResponseIPv4Packet(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		meta      XSKMetadata
+		request   []byte
+		wantProto layers.IPProtocol
+	}{
+		{name: "icmp", meta: XSKMetadata{Action: ActionICMPEchoReply}, request: buildTestICMPEchoRequest(t), wantProto: layers.IPProtocolICMPv4},
+		{name: "tcp", meta: XSKMetadata{Action: ActionTCPSynAck}, request: buildTestTCPSyn(t), wantProto: layers.IPProtocolTCP},
+		{name: "udp", meta: XSKMetadata{Action: ActionUDPEchoReply}, request: buildTestUDPDatagram(t, 12345, 5353, []byte("udp-payload")), wantProto: layers.IPProtocolUDP},
+		{name: "dns", meta: XSKMetadata{Action: ActionDNSRefused}, request: buildTestDNSQuery(t, "example.org"), wantProto: layers.IPProtocolUDP},
+	}
+
+	for _, tc := range tests {
+		packetBytes, err := BuildResponseIPv4Packet(tc.meta, tc.request, BuildOptions{TCPSeq: 1000})
+		if err != nil {
+			t.Fatalf("%s: BuildResponseIPv4Packet() error = %v", tc.name, err)
+		}
+		packet := gopacket.NewPacket(packetBytes, layers.LayerTypeIPv4, gopacket.Default)
+		ip4 := packet.Layer(layers.LayerTypeIPv4).(*layers.IPv4)
+		if ip4.Protocol != tc.wantProto {
+			t.Fatalf("%s: ip protocol = %v, want %v", tc.name, ip4.Protocol, tc.wantProto)
+		}
+		if ip4.SrcIP.String() != "10.0.0.2" || ip4.DstIP.String() != "10.0.0.1" {
+			t.Fatalf("%s: ip = %s -> %s, want swapped", tc.name, ip4.SrcIP, ip4.DstIP)
+		}
+	}
+}
+
 func TestBuildARPReply(t *testing.T) {
 	t.Parallel()
 

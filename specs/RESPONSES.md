@@ -95,8 +95,11 @@ modes:
 - `AF_XDP`: default mode when `egress.interface: ""`; the worker transmits
   built Ethernet frames through the queue-local AF_XDP socket
 - `AF_PACKET`: enabled when `egress.interface` is non-empty; the worker still
-  receives and parses packets from ingress XSK, but transmits built Ethernet
-  frames through an AF_PACKET socket bound to the configured interface
+  receives and parses packets from ingress XSK. IPv4 response actions transmit
+  through a raw IPv4 socket bound to the configured interface so the kernel can
+  resolve next-hop routing and L2 neighbors on that egress path. Non-IP
+  actions such as `arp_reply` continue to transmit raw Ethernet frames through
+  an AF_PACKET socket bound to the configured interface.
 
 The current same-interface response builders reject VLAN-tagged frames until
 VLAN tag preservation is implemented for user-space TX. The `tcp_syn_ack`

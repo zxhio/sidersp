@@ -2,6 +2,7 @@ package response
 
 import (
 	"context"
+	"errors"
 	"sync"
 )
 
@@ -14,6 +15,10 @@ type responseSender interface {
 // synchronously and will not retain the slice after return.
 type borrowedFrameSender interface {
 	SendBorrowedFrame(context.Context, []byte) error
+}
+
+type borrowedIPv4PacketSender interface {
+	SendBorrowedIPv4Packet(context.Context, []byte) error
 }
 
 type afxdpSender struct {
@@ -69,6 +74,20 @@ func (s *afpacketSender) Backend() TXBackend {
 }
 
 func sendResponseFrame(ctx context.Context, out frameSender, meta XSKMetadata, frame []byte, buildOpts BuildOptions) error {
+	if borrowedIPv4, ok := out.(borrowedIPv4PacketSender); ok {
+		buf := acquireResponseFrameBuffer()
+		defer releaseResponseFrameBuffer(buf)
+
+		responsePacket, err := BuildResponseIPv4PacketToBuffer(meta, frame, buildOpts, buf.buf)
+		if err == nil {
+			buf.buf = responsePacket
+			return borrowedIPv4.SendBorrowedIPv4Packet(ctx, responsePacket)
+		}
+		if !errors.Is(err, errResponseRequiresEthernetFraming) {
+			return err
+		}
+	}
+
 	if borrowed, ok := out.(borrowedFrameSender); ok {
 		buf := acquireResponseFrameBuffer()
 		defer releaseResponseFrameBuffer(buf)

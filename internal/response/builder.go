@@ -2,6 +2,7 @@ package response
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"net"
 
@@ -21,8 +22,14 @@ type BuildOptions struct {
 	TCPSeq       uint32
 }
 
+var errResponseRequiresEthernetFraming = errors.New("response requires ethernet framing")
+
 func BuildResponseFrame(meta XSKMetadata, frame []byte, opts BuildOptions) ([]byte, error) {
 	return BuildResponseFrameToBuffer(meta, frame, opts, nil)
+}
+
+func BuildResponseIPv4Packet(meta XSKMetadata, frame []byte, opts BuildOptions) ([]byte, error) {
+	return BuildResponseIPv4PacketToBuffer(meta, frame, opts, nil)
 }
 
 func BuildResponseFrameToBuffer(meta XSKMetadata, frame []byte, opts BuildOptions, dst []byte) ([]byte, error) {
@@ -39,6 +46,23 @@ func BuildResponseFrameToBuffer(meta XSKMetadata, frame []byte, opts BuildOption
 		return buildDNSRefusedToBuffer(frame, dst)
 	default:
 		return nil, fmt.Errorf("build response: unsupported action %d", meta.Action)
+	}
+}
+
+func BuildResponseIPv4PacketToBuffer(meta XSKMetadata, frame []byte, opts BuildOptions, dst []byte) ([]byte, error) {
+	switch meta.Action {
+	case ActionICMPEchoReply:
+		return BuildICMPEchoReplyIPv4ToBuffer(frame, dst)
+	case ActionTCPSynAck:
+		return buildTCPSynAckIPv4ToBuffer(frame, opts.TCPSeq, dst)
+	case ActionUDPEchoReply:
+		return buildUDPEchoReplyIPv4ToBuffer(frame, dst)
+	case ActionDNSRefused:
+		return buildDNSRefusedIPv4ToBuffer(frame, dst)
+	case ActionARPReply:
+		return nil, fmt.Errorf("build response ipv4 packet: %w for action %d", errResponseRequiresEthernetFraming, meta.Action)
+	default:
+		return nil, fmt.Errorf("build response ipv4 packet: unsupported action %d", meta.Action)
 	}
 }
 
@@ -116,6 +140,24 @@ func buildTCPSynAckToBuffer(frame []byte, seq uint32, dst []byte) ([]byte, error
 	return buildTCPSynAckFrameToBuffer(dst, eth, ip4, tcp, seq), nil
 }
 
+func buildTCPSynAckIPv4ToBuffer(frame []byte, seq uint32, dst []byte) ([]byte, error) {
+	_, ip4, tcp, err := parseTCPEthernetFrame(frame, "build tcp syn ack")
+	if err != nil {
+		return nil, err
+	}
+	if tcp.flags&fastpktTCPSyn == 0 || tcp.flags&(fastpktTCPAck|fastpktTCPRst|fastpktTCPFin) != 0 {
+		return nil, fmt.Errorf("build tcp syn ack: packet is not initial syn")
+	}
+	if len(tcp.payload) > 0 {
+		return nil, fmt.Errorf("build tcp syn ack: syn payload is not supported")
+	}
+	if seq == 0 {
+		seq = 1
+	}
+
+	return buildTCPSynAckIPv4PacketToBuffer(dst, ip4, tcp, seq), nil
+}
+
 func buildUDPEchoReply(frame []byte) ([]byte, error) {
 	return buildUDPEchoReplyToBuffer(frame, nil)
 }
@@ -127,6 +169,15 @@ func buildUDPEchoReplyToBuffer(frame []byte, dst []byte) ([]byte, error) {
 	}
 
 	return buildUDPEchoReplyFrameToBuffer(dst, eth, ip4, udp), nil
+}
+
+func buildUDPEchoReplyIPv4ToBuffer(frame []byte, dst []byte) ([]byte, error) {
+	_, ip4, udp, err := parseUDPEthernetFrame(frame, "build udp echo reply")
+	if err != nil {
+		return nil, err
+	}
+
+	return buildUDPEchoReplyIPv4PacketToBuffer(dst, ip4, udp), nil
 }
 
 func buildDNSRefused(frame []byte) ([]byte, error) {
@@ -145,6 +196,20 @@ func buildDNSRefusedToBuffer(frame []byte, dst []byte) ([]byte, error) {
 	}
 
 	return buildDNSRefusedFrameToBuffer(dst, eth, ip4, udp, query), nil
+}
+
+func buildDNSRefusedIPv4ToBuffer(frame []byte, dst []byte) ([]byte, error) {
+	_, ip4, udp, err := parseUDPEthernetFrame(frame, "build dns refused")
+	if err != nil {
+		return nil, err
+	}
+
+	query, err := parseDNSRefusedQuery(udp.payload)
+	if err != nil {
+		return nil, err
+	}
+
+	return buildDNSRefusedIPv4PacketToBuffer(dst, ip4, udp, query), nil
 }
 
 const (

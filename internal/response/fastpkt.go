@@ -394,6 +394,27 @@ func buildTCPSynAckFrameToBuffer(dst []byte, eth fastpktEthernetFrame, ip4 fastp
 	return out
 }
 
+func buildTCPSynAckIPv4PacketToBuffer(dst []byte, ip4 fastpktIPv4Packet, tcp fastpktTCPPacket, seq uint32) []byte {
+	ipLen := fastpktIPv4HeaderMinLen + fastpktTCPHeaderMinLen
+	out := reserveFastpktBuffer(dst, ipLen)
+
+	writeIPv4Header(out[:fastpktIPv4HeaderMinLen], ip4.dst, ip4.src, ip4.id, fastpktIPProtoTCP, ipLen)
+
+	tcpOffset := fastpktIPv4HeaderMinLen
+	binary.BigEndian.PutUint16(out[tcpOffset:tcpOffset+2], tcp.dstPort)
+	binary.BigEndian.PutUint16(out[tcpOffset+2:tcpOffset+4], tcp.srcPort)
+	binary.BigEndian.PutUint32(out[tcpOffset+4:tcpOffset+8], seq)
+	binary.BigEndian.PutUint32(out[tcpOffset+8:tcpOffset+12], tcp.seq+1)
+	out[tcpOffset+12] = 5 << 4
+	out[tcpOffset+13] = fastpktTCPSyn | fastpktTCPAck
+	binary.BigEndian.PutUint16(out[tcpOffset+14:tcpOffset+16], 65535)
+	binary.BigEndian.PutUint16(out[tcpOffset+16:tcpOffset+18], 0)
+	binary.BigEndian.PutUint16(out[tcpOffset+18:tcpOffset+20], 0)
+	binary.BigEndian.PutUint16(out[tcpOffset+16:tcpOffset+18], tcpChecksum(ip4.dst, ip4.src, out[tcpOffset:tcpOffset+fastpktTCPHeaderMinLen]))
+
+	return out
+}
+
 func buildUDPEchoReplyFrameToBuffer(dst []byte, eth fastpktEthernetFrame, ip4 fastpktIPv4Packet, udp fastpktUDPPacket) []byte {
 	udpLen := fastpktUDPHeaderLen + len(udp.payload)
 	ipLen := fastpktIPv4HeaderMinLen + udpLen
@@ -407,6 +428,21 @@ func buildUDPEchoReplyFrameToBuffer(dst []byte, eth fastpktEthernetFrame, ip4 fa
 	writeIPv4Header(out[ipOffset:ipOffset+fastpktIPv4HeaderMinLen], ip4.dst, ip4.src, ip4.id, fastpktIPProtoUDP, ipLen)
 
 	udpOffset := ipOffset + fastpktIPv4HeaderMinLen
+	writeUDPHeader(out[udpOffset:udpOffset+fastpktUDPHeaderLen], udp.dstPort, udp.srcPort, udpLen)
+	copy(out[udpOffset+fastpktUDPHeaderLen:], udp.payload)
+	binary.BigEndian.PutUint16(out[udpOffset+6:udpOffset+8], udpChecksum(ip4.dst, ip4.src, out[udpOffset:udpOffset+udpLen]))
+
+	return out
+}
+
+func buildUDPEchoReplyIPv4PacketToBuffer(dst []byte, ip4 fastpktIPv4Packet, udp fastpktUDPPacket) []byte {
+	udpLen := fastpktUDPHeaderLen + len(udp.payload)
+	ipLen := fastpktIPv4HeaderMinLen + udpLen
+	out := reserveFastpktBuffer(dst, ipLen)
+
+	writeIPv4Header(out[:fastpktIPv4HeaderMinLen], ip4.dst, ip4.src, ip4.id, fastpktIPProtoUDP, ipLen)
+
+	udpOffset := fastpktIPv4HeaderMinLen
 	writeUDPHeader(out[udpOffset:udpOffset+fastpktUDPHeaderLen], udp.dstPort, udp.srcPort, udpLen)
 	copy(out[udpOffset+fastpktUDPHeaderLen:], udp.payload)
 	binary.BigEndian.PutUint16(out[udpOffset+6:udpOffset+8], udpChecksum(ip4.dst, ip4.src, out[udpOffset:udpOffset+udpLen]))
@@ -428,6 +464,28 @@ func buildDNSRefusedFrameToBuffer(dst []byte, eth fastpktEthernetFrame, ip4 fast
 	writeIPv4Header(out[ipOffset:ipOffset+fastpktIPv4HeaderMinLen], ip4.dst, ip4.src, ip4.id, fastpktIPProtoUDP, ipLen)
 
 	udpOffset := ipOffset + fastpktIPv4HeaderMinLen
+	writeUDPHeader(out[udpOffset:udpOffset+fastpktUDPHeaderLen], udp.dstPort, udp.srcPort, udpLen)
+
+	dnsOffset := udpOffset + fastpktUDPHeaderLen
+	binary.BigEndian.PutUint16(out[dnsOffset:dnsOffset+2], query.id)
+	binary.BigEndian.PutUint16(out[dnsOffset+2:dnsOffset+4], dnsFlagQR|query.preserve|dnsRCodeRefused)
+	binary.BigEndian.PutUint16(out[dnsOffset+4:dnsOffset+6], 1)
+	copy(out[dnsOffset+dnsHeaderLen:], query.question)
+
+	binary.BigEndian.PutUint16(out[udpOffset+6:udpOffset+8], udpChecksum(ip4.dst, ip4.src, out[udpOffset:udpOffset+udpLen]))
+
+	return out
+}
+
+func buildDNSRefusedIPv4PacketToBuffer(dst []byte, ip4 fastpktIPv4Packet, udp fastpktUDPPacket, query dnsRefusedQuery) []byte {
+	dnsLen := dnsHeaderLen + len(query.question)
+	udpLen := fastpktUDPHeaderLen + dnsLen
+	ipLen := fastpktIPv4HeaderMinLen + udpLen
+	out := reserveFastpktBuffer(dst, ipLen)
+
+	writeIPv4Header(out[:fastpktIPv4HeaderMinLen], ip4.dst, ip4.src, ip4.id, fastpktIPProtoUDP, ipLen)
+
+	udpOffset := fastpktIPv4HeaderMinLen
 	writeUDPHeader(out[udpOffset:udpOffset+fastpktUDPHeaderLen], udp.dstPort, udp.srcPort, udpLen)
 
 	dnsOffset := udpOffset + fastpktUDPHeaderLen

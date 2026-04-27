@@ -36,6 +36,26 @@ func (s *retainingFrameSender) SendFrame(_ context.Context, frame []byte) error 
 	return nil
 }
 
+type stubMixedSender struct {
+	frames      [][]byte
+	ipv4Packets [][]byte
+}
+
+func (s *stubMixedSender) SendFrame(_ context.Context, frame []byte) error {
+	s.frames = append(s.frames, append([]byte(nil), frame...))
+	return nil
+}
+
+func (s *stubMixedSender) SendBorrowedFrame(_ context.Context, frame []byte) error {
+	s.frames = append(s.frames, append([]byte(nil), frame...))
+	return nil
+}
+
+func (s *stubMixedSender) SendBorrowedIPv4Packet(_ context.Context, packet []byte) error {
+	s.ipv4Packets = append(s.ipv4Packets, append([]byte(nil), packet...))
+	return nil
+}
+
 func TestAFXDPSenderBuildsAndSendsFrame(t *testing.T) {
 	t.Parallel()
 
@@ -103,6 +123,48 @@ func TestAFPacketSenderUsesARPBuildOptions(t *testing.T) {
 	}
 	if len(out.frames) != 1 {
 		t.Fatalf("frames = %d, want 1", len(out.frames))
+	}
+}
+
+func TestAFPacketSenderUsesIPv4PacketPathForICMPEchoReply(t *testing.T) {
+	t.Parallel()
+
+	out := &stubMixedSender{}
+	sender := &afpacketSender{
+		out:       out,
+		buildOpts: BuildOptions{},
+	}
+
+	if err := sender.Send(context.Background(), XSKMetadata{Action: ActionICMPEchoReply}, buildTestICMPEchoRequest(t)); err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+	if len(out.ipv4Packets) != 1 {
+		t.Fatalf("ipv4 packets = %d, want 1", len(out.ipv4Packets))
+	}
+	if len(out.frames) != 0 {
+		t.Fatalf("frames = %d, want 0", len(out.frames))
+	}
+}
+
+func TestAFPacketSenderFallsBackToFramePathForARPReply(t *testing.T) {
+	t.Parallel()
+
+	out := &stubMixedSender{}
+	sender := &afpacketSender{
+		out: out,
+		buildOpts: BuildOptions{
+			HardwareAddr: testHWAddr,
+		},
+	}
+
+	if err := sender.Send(context.Background(), XSKMetadata{Action: ActionARPReply}, buildTestARPRequest(t)); err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+	if len(out.frames) != 1 {
+		t.Fatalf("frames = %d, want 1", len(out.frames))
+	}
+	if len(out.ipv4Packets) != 0 {
+		t.Fatalf("ipv4 packets = %d, want 0", len(out.ipv4Packets))
 	}
 }
 
