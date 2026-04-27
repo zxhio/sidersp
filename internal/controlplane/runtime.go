@@ -29,6 +29,7 @@ type EventStreamer interface {
 
 type StatsReader interface {
 	ReadStats() (model.RuntimeStats, error)
+	ResetStats() error
 }
 
 type Runtime struct {
@@ -158,6 +159,18 @@ func (r *Runtime) Stats(rangeSeconds int) (Stats, error) {
 	current.StageHistories = stageHistory
 
 	return current, nil
+}
+
+func (r *Runtime) ResetStats() error {
+	if err := r.stats.ResetStats(); err != nil {
+		return fmt.Errorf("reset runtime stats: %w", err)
+	}
+
+	r.mu.Lock()
+	r.history = nil
+	r.mu.Unlock()
+
+	return nil
 }
 
 func (r *Runtime) RuleMatchCounts() (map[int]uint64, error) {

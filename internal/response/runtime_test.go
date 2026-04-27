@@ -188,3 +188,25 @@ func TestRuntimeReadStatsReturnsResponseCounters(t *testing.T) {
 		t.Fatalf("ReadStats() = %+v, want afpacket counters = 1/1", got)
 	}
 }
+
+func TestRuntimeResetStatsClearsResponseCounters(t *testing.T) {
+	t.Parallel()
+
+	runtime, err := NewRuntime(RuntimeConfig{
+		Registrar: &runtimeStubRegistrar{},
+		NewXSK:    (&stubBackendFactory{}).newFunc(),
+	})
+	if err != nil {
+		t.Fatalf("NewRuntime() error = %v", err)
+	}
+
+	runtime.stats.recordSent(TXBackendAFXDP)
+	runtime.stats.recordFailed(TXBackendAFPacket)
+
+	if err := runtime.ResetStats(); err != nil {
+		t.Fatalf("ResetStats() error = %v", err)
+	}
+	if got := runtime.ReadStats(); got != (model.ResponseStats{}) {
+		t.Fatalf("ReadStats() after reset = %+v, want zero response stats", got)
+	}
+}

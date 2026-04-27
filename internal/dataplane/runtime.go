@@ -351,6 +351,26 @@ func (r *Runtime) ReadStats() (model.DataplaneStats, error) {
 	}, nil
 }
 
+func (r *Runtime) ResetStats() error {
+	possibleCPUs, err := ebpf.PossibleCPU()
+	if err != nil {
+		return fmt.Errorf("detect possible cpus: %w", err)
+	}
+
+	zeros := make([]uint64, possibleCPUs)
+	for idx := uint32(0); idx < statCount; idx++ {
+		if err := r.objs.StatsMap.Put(idx, zeros); err != nil {
+			return fmt.Errorf("reset stats_map[%d]: %w", idx, err)
+		}
+	}
+
+	r.matchMu.Lock()
+	r.matchCounts = make(map[uint32]uint64)
+	r.matchMu.Unlock()
+
+	return nil
+}
+
 // resetMaps clears BPF maps before ReplaceRules writes the next full snapshot.
 // During this transient window the BPF program sees empty config and passes
 // traffic, which is acceptable for mirrored-traffic deployments.

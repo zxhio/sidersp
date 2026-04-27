@@ -58,6 +58,8 @@ const (
 	statFibLookupFailed
 )
 
+const statCount = statFibLookupFailed + 1
+
 const (
 	tcpResetTXModeTX uint32 = iota
 	tcpResetTXModeRedirect

@@ -109,12 +109,22 @@ The stats query is request-driven:
 GET /api/v1/stats?range_seconds=86400
 ```
 
+Stats reset is explicit:
+
+```text
+DELETE /api/v1/stats
+```
+
 Rules:
 
 - `range_seconds` defaults to `600`
 - `range_seconds` must be a positive multiple of `600`
 - `range_seconds` must not exceed `retention`
 - history points are aggregated on demand from retained raw samples
+- `DELETE /api/v1/stats` clears retained raw history and resets the current
+  dataplane, response, and per-rule match counters to a new zero baseline
+- `DELETE /api/v1/stats` does not change rule configuration or management-plane
+  counts such as `total_rules` and `enabled_rules`
 
 ## Recommended Troubleshooting Order
 

@@ -19,6 +19,7 @@ import (
 type RuleService interface {
 	Status() controlplane.Status
 	Stats(rangeSeconds int) (controlplane.Stats, error)
+	ResetStats() error
 	ListRules() []rule.Rule
 	RuleMatchCounts() (map[int]uint64, error)
 	GetRule(id int) (rule.Rule, error)
@@ -95,6 +96,7 @@ func (s *Server) newRouter() *gin.Engine {
 	v1.GET("/logging/levels", handler.getLogLevels)
 	v1.PUT("/logging/levels", handler.setLogLevels)
 	v1.GET("/stats", handler.getStats)
+	v1.DELETE("/stats", handler.resetStats)
 	v1.GET("/rules", handler.listRules)
 	v1.POST("/rules", handler.createRule)
 	v1.GET("/rules/:id", handler.getRule)

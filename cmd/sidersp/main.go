@@ -125,10 +125,12 @@ func main() {
 
 type dataplaneStatsReader interface {
 	ReadStats() (model.DataplaneStats, error)
+	ResetStats() error
 }
 
 type responseStatsReader interface {
 	ReadStats() model.ResponseStats
+	ResetStats() error
 }
 
 type runtimeStatsReader struct {
@@ -151,6 +153,20 @@ func (r runtimeStatsReader) ReadStats() (model.RuntimeStats, error) {
 		Dataplane: dataplaneStats,
 		Response:  responseStats,
 	}, nil
+}
+
+func (r runtimeStatsReader) ResetStats() error {
+	if err := r.dataplane.ResetStats(); err != nil {
+		return err
+	}
+
+	if r.response != nil {
+		if err := r.response.ResetStats(); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func buildXDPResponseOptions(cfg config.EgressConfig) (dataplane.XDPResponseOptions, error) {

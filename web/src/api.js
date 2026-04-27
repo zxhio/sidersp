@@ -75,3 +75,7 @@ export async function getStats(rangeSeconds = 600) {
   const res = await request(`/stats${query}`)
   return res.data
 }
+
+export async function resetStats() {
+  await request('/stats', { method: 'DELETE' })
+}

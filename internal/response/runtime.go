@@ -204,6 +204,14 @@ func (r *Runtime) ReadStats() model.ResponseStats {
 	return r.stats.snapshot()
 }
 
+func (r *Runtime) ResetStats() error {
+	if r == nil {
+		return nil
+	}
+	r.stats.reset()
+	return nil
+}
+
 func closeBackends(backends []XSKBackend) {
 	for _, backend := range backends {
 		_ = backend.Close()

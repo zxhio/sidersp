@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { getStats } from '../api'
+import { getStats, resetStats } from '../api'
 import Sparkline from '../components/Sparkline'
 
 const DEFAULT_RANGES = [
@@ -101,10 +101,42 @@ function findMetricHistory(stageHistory, metricKey) {
   return stageHistory.metrics.find(metric => metric.key === metricKey) || null
 }
 
+function ConfirmDialog({ title, message, hint, confirmLabel, busy, onConfirm, onCancel }) {
+  return (
+    <div className="modal-overlay" onClick={busy ? undefined : onCancel}>
+      <div className="modal" style={{ width: 420 }} onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <h3>{title}</h3>
+          <button type="button" className="modal-close" onClick={onCancel} disabled={busy}>&times;</button>
+        </div>
+        <div className="confirm-body">
+          <p>{message}</p>
+          {hint && <p className="confirm-hint">{hint}</p>}
+        </div>
+        <div className="confirm-footer">
+          <button type="button" className="btn" onClick={onCancel} disabled={busy}>取消</button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            style={{ background: 'var(--c-danger)', borderColor: 'var(--c-danger)' }}
+            onClick={onConfirm}
+            disabled={busy}
+          >
+            {busy ? '清零中...' : confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function StatsPage() {
   const [stats, setStats] = useState(null)
   const [error, setError] = useState('')
+  const [actionError, setActionError] = useState('')
   const [rangeSeconds, setRangeSeconds] = useState(DEFAULT_RANGES[0].seconds)
+  const [confirmResetOpen, setConfirmResetOpen] = useState(false)
+  const [resetting, setResetting] = useState(false)
 
   const load = useCallback((nextRangeSeconds) => {
     setError('')
@@ -150,6 +182,21 @@ export default function StatsPage() {
   const activeRangeSeconds = rangeSeconds || stats.range_seconds
   const displayStepLabel = formatDurationFromSeconds(stats.display_step_seconds)
 
+  async function handleResetStats() {
+    setResetting(true)
+    setActionError('')
+    try {
+      await resetStats()
+      const nextStats = await getStats(activeRangeSeconds)
+      setStats(nextStats)
+      setConfirmResetOpen(false)
+    } catch (err) {
+      setActionError(err.message)
+    } finally {
+      setResetting(false)
+    }
+  }
+
   return (
     <>
       <div className="page-header">
@@ -157,6 +204,10 @@ export default function StatsPage() {
         <p>按排查阶段查看数据面诊断状态与趋势</p>
       </div>
       <div className="page-body">
+        {actionError && (
+          <div className="error-block" style={{ marginBottom: 16 }}>操作失败：{actionError}</div>
+        )}
+
         <div className="status-cards diagnostic-overview" style={{ marginBottom: 24 }}>
           <div className="status-card">
             <div className="status-card-label">总收包</div>
@@ -176,6 +227,17 @@ export default function StatsPage() {
               {formatValue(overview.matched_rules ?? stats.matched_rules)}
             </div>
           </div>
+        </div>
+
+        <div className="overview-actions" style={{ marginBottom: 16 }}>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => setConfirmResetOpen(true)}
+            disabled={resetting}
+          >
+            {resetting ? '清零中...' : '计数清零'}
+          </button>
         </div>
 
         <div className="window-selector">
@@ -245,6 +307,18 @@ export default function StatsPage() {
           })}
         </div>
       </div>
+
+      {confirmResetOpen && (
+        <ConfirmDialog
+          title="计数清零确认"
+          message="确认要清空当前统计计数吗？"
+          hint="这会同时清空统计历史、数据面计数、响应发送计数和规则命中计数。规则配置本身不会变。"
+          confirmLabel="确认清零"
+          busy={resetting}
+          onConfirm={handleResetStats}
+          onCancel={() => setConfirmResetOpen(false)}
+        />
+      )}
     </>
   )
 }

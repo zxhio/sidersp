@@ -61,3 +61,16 @@ func (c *responseStatsCounters) snapshot() model.ResponseStats {
 		AFPacketTXFailed: c.afpacketTXFailed.Load(),
 	}
 }
+
+func (c *responseStatsCounters) reset() {
+	if c == nil {
+		return
+	}
+
+	c.responseSent.Store(0)
+	c.responseFailed.Store(0)
+	c.afxdpTX.Store(0)
+	c.afxdpTXFailed.Store(0)
+	c.afpacketTX.Store(0)
+	c.afpacketTXFailed.Store(0)
+}

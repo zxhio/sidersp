@@ -100,6 +100,15 @@ func (h Handler) getStats(c *gin.Context) {
 	c.JSON(http.StatusOK, dataEnvelope{Data: newStatsResponse(item)})
 }
 
+func (h Handler) resetStats(c *gin.Context) {
+	if err := h.service.ResetStats(); err != nil {
+		h.writeServiceError(c, err)
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
 func (h Handler) listRules(c *gin.Context) {
 	page, pageSize, err := parsePage(c)
 	if err != nil {

@@ -27,10 +27,18 @@ type testStreamer struct{}
 func (testStreamer) RunEventStream(context.Context) error { return nil }
 
 type testStatsReader struct {
-	stats model.RuntimeStats
+	stats      model.RuntimeStats
+	resetErr   error
+	resetCalls *int
 }
 
 func (s testStatsReader) ReadStats() (model.RuntimeStats, error) { return s.stats, nil }
+func (s testStatsReader) ResetStats() error {
+	if s.resetCalls != nil {
+		*s.resetCalls = *s.resetCalls + 1
+	}
+	return s.resetErr
+}
 
 func TestSetRuleEnabledSyncsEnabledRulesOnly(t *testing.T) {
 	t.Parallel()
@@ -368,6 +376,26 @@ func TestStatsRejectsInvalidRange(t *testing.T) {
 	_, err := r.Stats(601)
 	if !errors.Is(err, ErrStatsRangeInvalid) {
 		t.Fatalf("Stats() error = %v, want %v", err, ErrStatsRangeInvalid)
+	}
+}
+
+func TestResetStatsClearsHistoryAndCallsReader(t *testing.T) {
+	t.Parallel()
+
+	resetCalls := 0
+	r := NewRuntime(config.Config{}, &testSyncer{}, testStreamer{}, testStatsReader{
+		resetCalls: &resetCalls,
+	})
+	r.history = []StatsPoint{{Timestamp: time.Now().UTC(), RXPackets: 9}}
+
+	if err := r.ResetStats(); err != nil {
+		t.Fatalf("ResetStats() error = %v", err)
+	}
+	if resetCalls != 1 {
+		t.Fatalf("reset calls = %d, want 1", resetCalls)
+	}
+	if len(r.history) != 0 {
+		t.Fatalf("history len = %d, want 0", len(r.history))
 	}
 }
 

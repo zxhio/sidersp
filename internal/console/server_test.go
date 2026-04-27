@@ -14,12 +14,14 @@ import (
 )
 
 type stubService struct {
-	status     controlplane.Status
-	stats      controlplane.Stats
-	statsByKey map[int]controlplane.Stats
-	ruleCounts map[int]uint64
-	lastRange  int
-	rules      []rule.Rule
+	status         controlplane.Status
+	stats          controlplane.Stats
+	statsByKey     map[int]controlplane.Stats
+	ruleCounts     map[int]uint64
+	lastRange      int
+	resetStatsErr  error
+	resetStatsCall int
+	rules          []rule.Rule
 }
 
 func (s *stubService) Status() controlplane.Status { return s.status }
@@ -33,6 +35,10 @@ func (s *stubService) Stats(rangeSeconds int) (controlplane.Stats, error) {
 		return item, nil
 	}
 	return s.stats, nil
+}
+func (s *stubService) ResetStats() error {
+	s.resetStatsCall++
+	return s.resetStatsErr
 }
 func (s *stubService) RuleMatchCounts() (map[int]uint64, error) {
 	return mapsClone(s.ruleCounts), nil
@@ -547,6 +553,24 @@ func TestGetStats(t *testing.T) {
 	}
 	if body.Data.Histories[0].Points[0].TotalRules == nil || *body.Data.Histories[0].Points[0].TotalRules != 2 {
 		t.Fatalf("point = %+v, want legacy totals in history response", body.Data.Histories[0].Points[0])
+	}
+}
+
+func TestResetStats(t *testing.T) {
+	t.Parallel()
+
+	service := &stubService{}
+	server := NewServer("127.0.0.1:0", service)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/stats", nil)
+	rec := httptest.NewRecorder()
+	server.newRouter().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNoContent)
+	}
+	if service.resetStatsCall != 1 {
+		t.Fatalf("reset stats calls = %d, want 1", service.resetStatsCall)
 	}
 }
 
