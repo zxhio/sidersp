@@ -33,10 +33,11 @@ type Runtime struct {
 }
 
 type Options struct {
-	Interface      string
-	AttachMode     string
-	IngressVerdict string
-	XDPResponse    XDPResponseOptions
+	Interface        string
+	AttachMode       string
+	CombinedChannels int
+	IngressVerdict   string
+	XDPResponse      XDPResponseOptions
 }
 
 type XDPResponseOptions struct {
@@ -48,6 +49,9 @@ type XDPResponseOptions struct {
 func Open(opts Options) (*Runtime, error) {
 	if err := rlimit.RemoveMemlock(); err != nil {
 		return nil, fmt.Errorf("remove memlock limit: %w", err)
+	}
+	if err := configureInterfaceCombinedChannels(opts.Interface, opts.CombinedChannels); err != nil {
+		return nil, err
 	}
 
 	var objs siderspObjects

@@ -437,6 +437,9 @@ func TestResponseConfigDefaults(t *testing.T) {
 	if next := cfg.WorkerQueues(); next[0] != 0 {
 		t.Fatalf("WorkerQueues() returned mutable default, got %+v", next)
 	}
+	if got := cfg.WorkerQueuesWithDefault(4); len(got) != 4 || got[0] != 0 || got[3] != 3 {
+		t.Fatalf("WorkerQueuesWithDefault(4) = %+v, want [0 1 2 3]", got)
+	}
 	if cfg.ResultBufferCapacity() != 1024 {
 		t.Fatalf("ResultBufferCapacity() = %d, want 1024", cfg.ResultBufferCapacity())
 	}
@@ -473,6 +476,9 @@ func TestDataplaneConfigDefaults(t *testing.T) {
 	if got := cfg.NormalizedIngressVerdict(); got != "pass" {
 		t.Fatalf("NormalizedIngressVerdict() = %q, want pass", got)
 	}
+	if got := cfg.CombinedChannelCount(); got != 0 {
+		t.Fatalf("CombinedChannelCount() = %d, want 0", got)
+	}
 }
 
 func TestLoadRejectsInvalidResponseConfig(t *testing.T) {
@@ -483,6 +489,11 @@ func TestLoadRejectsInvalidResponseConfig(t *testing.T) {
 		body string
 		want string
 	}{
+		{
+			name: "negative combined channels",
+			body: "combined_channels: -1",
+			want: "dataplane.combined_channels must be >= 0",
+		},
 		{
 			name: "negative queue",
 			body: "runtime:\n    queues: [-1]",
@@ -535,14 +546,22 @@ func TestLoadRejectsInvalidResponseConfig(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			path := writeConfigFile(t, `controlplane:
+			prefix := `controlplane:
   rules_path: configs/rules.example.yaml
 
 dataplane:
   interface: eth0
+`
+			responseBody := tc.body
+			if tc.name == "negative combined channels" {
+				prefix += "  " + tc.body + "\n"
+				responseBody = ""
+			}
+
+			path := writeConfigFile(t, prefix+`
 
 response:
-  `+tc.body+`
+  `+responseBody+`
 
 console:
   listen_addr: 127.0.0.1:8080

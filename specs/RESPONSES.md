@@ -213,10 +213,17 @@ is not part of the current `/stats` contract.
 The config layer parses a top-level `egress` block plus the nested
 `response.runtime` and `response.actions` blocks. User-space response execution
 remains disabled unless `response.runtime.enabled` is true. Worker queues
-default to queue `0` when omitted, and the local result buffer defaults to
-capacity `1024` when `response.runtime.result_buffer_size` is omitted or zero.
+default to queue `0` when omitted. If `dataplane.combined_channels` is configured
+to a positive value and `response.runtime.queues` is omitted, the runtime
+derives sequential worker queues `0..combined_channels-1`. The local result
+buffer defaults to capacity `1024` when
+`response.runtime.result_buffer_size` is omitted or zero.
 
 ```yaml
+dataplane:
+  interface: eth0
+  combined_channels: 0
+
 egress:
   interface: ""
   vlan_mode: preserve
@@ -250,6 +257,9 @@ response:
   consumed by kernel TX or XSK redirect. `pass` preserves current host-stack
   delivery behavior. `drop` is recommended for dedicated mirror-port
   deployments.
+- `combined_channels`: optional NIC combined-channel target applied by the
+  service at startup on the ingress interface. `0` keeps the host's current
+  queue layout.
 - `interface`: shared TX egress policy. `""` keeps same-interface TX. For
   `tcp_reset`, a non-empty interface name enables BPF redirect TX. For
   user-space actions, a non-empty interface name enables AF_PACKET TX after the

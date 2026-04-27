@@ -27,9 +27,10 @@ type ControlPlaneConfig struct {
 }
 
 type DataplaneConfig struct {
-	Interface      string `yaml:"interface"`
-	AttachMode     string `yaml:"attach_mode"`
-	IngressVerdict string `yaml:"ingress_verdict"`
+	Interface        string `yaml:"interface"`
+	AttachMode       string `yaml:"attach_mode"`
+	CombinedChannels int    `yaml:"combined_channels"`
+	IngressVerdict   string `yaml:"ingress_verdict"`
 }
 
 type ConsoleConfig struct {
@@ -194,7 +195,17 @@ func (c DataplaneConfig) NormalizedIngressVerdict() string {
 	return verdict
 }
 
+func (c DataplaneConfig) CombinedChannelCount() int {
+	if c.CombinedChannels <= 0 {
+		return 0
+	}
+	return c.CombinedChannels
+}
+
 func (c DataplaneConfig) validate() error {
+	if c.CombinedChannels < 0 {
+		return fmt.Errorf("dataplane.combined_channels must be >= 0")
+	}
 	switch c.NormalizedIngressVerdict() {
 	case "pass", "drop":
 		return nil
@@ -231,6 +242,21 @@ func (c ResponseRuntimeConfig) WorkerQueues() []int {
 		return []int{0}
 	}
 	return append([]int(nil), c.Queues...)
+}
+
+func (c ResponseRuntimeConfig) WorkerQueuesWithDefault(defaultQueueCount int) []int {
+	if len(c.Queues) != 0 {
+		return append([]int(nil), c.Queues...)
+	}
+	if defaultQueueCount <= 0 {
+		return []int{0}
+	}
+
+	queues := make([]int, defaultQueueCount)
+	for i := 0; i < defaultQueueCount; i++ {
+		queues[i] = i
+	}
+	return queues
 }
 
 func (c ResponseRuntimeConfig) ResultBufferCapacity() int {

@@ -63,10 +63,11 @@ func main() {
 	}
 
 	dp, err := dataplane.Open(dataplane.Options{
-		Interface:      cfg.Dataplane.Interface,
-		AttachMode:     cfg.Dataplane.AttachMode,
-		IngressVerdict: cfg.Dataplane.NormalizedIngressVerdict(),
-		XDPResponse:    xdpResponse,
+		Interface:        cfg.Dataplane.Interface,
+		AttachMode:       cfg.Dataplane.AttachMode,
+		CombinedChannels: cfg.Dataplane.CombinedChannelCount(),
+		IngressVerdict:   cfg.Dataplane.NormalizedIngressVerdict(),
+		XDPResponse:      xdpResponse,
 	})
 	if err != nil {
 		logs.App().WithError(err).Fatal("Fail to open dataplane")
@@ -212,7 +213,7 @@ func buildResponseRuntime(cfg config.Config, registrar response.XSKRegistrar) (*
 
 	return response.NewRuntime(response.RuntimeConfig{
 		IfIndex:              iface.Index,
-		Queues:               cfg.Response.Runtime.WorkerQueues(),
+		Queues:               cfg.Response.Runtime.WorkerQueuesWithDefault(cfg.Dataplane.CombinedChannelCount()),
 		ResultBufferCapacity: cfg.Response.Runtime.ResultBufferCapacity(),
 		HardwareAddr:         hardwareAddr,
 		TCPSeq:               cfg.Response.Actions.TCPSynAck.TCPSeq,
