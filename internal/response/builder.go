@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 
 	"sidersp/internal/rule"
 )
@@ -20,7 +21,6 @@ const (
 
 type BuildOptions struct {
 	HardwareAddr net.HardwareAddr
-	TCPSeq       uint32
 	RuleConfigs  *RuleConfigStore
 }
 
@@ -39,15 +39,15 @@ func BuildResponseFrameToBuffer(meta XSKMetadata, frame []byte, opts BuildOption
 	case ActionICMPEchoReply:
 		return buildICMPEchoReplyToBuffer(frame, dst)
 	case ActionARPReply:
-		return buildARPReplyToBuffer(frame, opts.HardwareAddr, dst)
+		return buildARPReplyToBuffer(meta.RuleID, frame, opts.HardwareAddr, opts.RuleConfigs, dst)
 	case ActionTCPSynAck:
-		return buildTCPSynAckToBuffer(frame, opts.TCPSeq, dst)
+		return buildTCPSynAckToBuffer(meta.RuleID, frame, opts.RuleConfigs, dst)
 	case ActionUDPEchoReply:
 		return buildUDPEchoReplyToBuffer(frame, dst)
 	case ActionDNSRefused:
-		return buildDNSRefusedToBuffer(frame, dst)
+		return buildDNSResponseToBuffer(meta.RuleID, frame, opts.RuleConfigs, "build dns refused", dst)
 	case ActionDNSSinkhole:
-		return buildDNSSinkholeToBuffer(meta.RuleID, frame, opts.RuleConfigs, dst)
+		return buildDNSResponseToBuffer(meta.RuleID, frame, opts.RuleConfigs, "build dns sinkhole", dst)
 	default:
 		return nil, fmt.Errorf("build response: unsupported action %d", meta.Action)
 	}
@@ -58,13 +58,13 @@ func BuildResponseIPv4PacketToBuffer(meta XSKMetadata, frame []byte, opts BuildO
 	case ActionICMPEchoReply:
 		return BuildICMPEchoReplyIPv4ToBuffer(frame, dst)
 	case ActionTCPSynAck:
-		return buildTCPSynAckIPv4ToBuffer(frame, opts.TCPSeq, dst)
+		return buildTCPSynAckIPv4ToBuffer(meta.RuleID, frame, opts.RuleConfigs, dst)
 	case ActionUDPEchoReply:
 		return buildUDPEchoReplyIPv4ToBuffer(frame, dst)
 	case ActionDNSRefused:
-		return buildDNSRefusedIPv4ToBuffer(frame, dst)
+		return buildDNSResponseIPv4ToBuffer(meta.RuleID, frame, opts.RuleConfigs, "build dns refused", dst)
 	case ActionDNSSinkhole:
-		return buildDNSSinkholeIPv4ToBuffer(meta.RuleID, frame, opts.RuleConfigs, dst)
+		return buildDNSResponseIPv4ToBuffer(meta.RuleID, frame, opts.RuleConfigs, "build dns sinkhole", dst)
 	case ActionARPReply:
 		return nil, fmt.Errorf("build response ipv4 packet: %w for action %d", errResponseRequiresEthernetFraming, meta.Action)
 	default:
@@ -105,14 +105,10 @@ func buildICMPEchoReplyToBuffer(frame []byte, dst []byte) ([]byte, error) {
 }
 
 func buildARPReply(frame []byte, hardwareAddr net.HardwareAddr) ([]byte, error) {
-	return buildARPReplyToBuffer(frame, hardwareAddr, nil)
+	return buildARPReplyToBuffer(0, frame, hardwareAddr, nil, nil)
 }
 
-func buildARPReplyToBuffer(frame []byte, hardwareAddr net.HardwareAddr, dst []byte) ([]byte, error) {
-	if len(hardwareAddr) != 6 {
-		return nil, fmt.Errorf("build arp reply: hardware address is required")
-	}
-
+func buildARPReplyToBuffer(ruleID uint32, frame []byte, defaultHardwareAddr net.HardwareAddr, configs *RuleConfigStore, dst []byte) ([]byte, error) {
 	eth, arp, err := parseARPEthernetFrame(frame, "build arp reply")
 	if err != nil {
 		return nil, err
@@ -121,14 +117,19 @@ func buildARPReplyToBuffer(frame []byte, hardwareAddr net.HardwareAddr, dst []by
 		return nil, fmt.Errorf("build arp reply: packet is not arp request")
 	}
 
-	return buildARPReplyFrameToBuffer(dst, eth, arp, hardwareAddr), nil
+	config, err := lookupARPReplyConfig(ruleID, defaultHardwareAddr, configs)
+	if err != nil {
+		return nil, err
+	}
+
+	return buildARPReplyFrameToBuffer(dst, eth, arp, config.HardwareAddr, config.SenderIPv4, config.HasSenderIPv4()), nil
 }
 
-func buildTCPSynAck(frame []byte, seq uint32) ([]byte, error) {
-	return buildTCPSynAckToBuffer(frame, seq, nil)
+func buildTCPSynAck(frame []byte) ([]byte, error) {
+	return buildTCPSynAckToBuffer(0, frame, nil, nil)
 }
 
-func buildTCPSynAckToBuffer(frame []byte, seq uint32, dst []byte) ([]byte, error) {
+func buildTCPSynAckToBuffer(ruleID uint32, frame []byte, configs *RuleConfigStore, dst []byte) ([]byte, error) {
 	eth, ip4, tcp, err := parseTCPEthernetFrame(frame, "build tcp syn ack")
 	if err != nil {
 		return nil, err
@@ -139,14 +140,13 @@ func buildTCPSynAckToBuffer(frame []byte, seq uint32, dst []byte) ([]byte, error
 	if len(tcp.payload) > 0 {
 		return nil, fmt.Errorf("build tcp syn ack: syn payload is not supported")
 	}
-	if seq == 0 {
-		seq = 1
-	}
+
+	seq := lookupTCPSynAckSeq(ruleID, configs)
 
 	return buildTCPSynAckFrameToBuffer(dst, eth, ip4, tcp, seq), nil
 }
 
-func buildTCPSynAckIPv4ToBuffer(frame []byte, seq uint32, dst []byte) ([]byte, error) {
+func buildTCPSynAckIPv4ToBuffer(ruleID uint32, frame []byte, configs *RuleConfigStore, dst []byte) ([]byte, error) {
 	_, ip4, tcp, err := parseTCPEthernetFrame(frame, "build tcp syn ack")
 	if err != nil {
 		return nil, err
@@ -157,9 +157,8 @@ func buildTCPSynAckIPv4ToBuffer(frame []byte, seq uint32, dst []byte) ([]byte, e
 	if len(tcp.payload) > 0 {
 		return nil, fmt.Errorf("build tcp syn ack: syn payload is not supported")
 	}
-	if seq == 0 {
-		seq = 1
-	}
+
+	seq := lookupTCPSynAckSeq(ruleID, configs)
 
 	return buildTCPSynAckIPv4PacketToBuffer(dst, ip4, tcp, seq), nil
 }
@@ -187,73 +186,55 @@ func buildUDPEchoReplyIPv4ToBuffer(frame []byte, dst []byte) ([]byte, error) {
 }
 
 func buildDNSRefused(frame []byte) ([]byte, error) {
-	return buildDNSRefusedToBuffer(frame, nil)
+	return buildDNSResponseToBuffer(0, frame, nil, "build dns refused", nil)
 }
 
-func buildDNSRefusedToBuffer(frame []byte, dst []byte) ([]byte, error) {
-	eth, ip4, udp, err := parseUDPEthernetFrame(frame, "build dns refused")
+func buildDNSResponseToBuffer(ruleID uint32, frame []byte, configs *RuleConfigStore, context string, dst []byte) ([]byte, error) {
+	eth, ip4, udp, err := parseUDPEthernetFrame(frame, context)
 	if err != nil {
 		return nil, err
 	}
 
-	query, err := parseDNSQuery(udp.payload, "build dns refused")
+	query, err := parseDNSQuery(udp.payload, context)
 	if err != nil {
 		return nil, err
 	}
 
-	return buildDNSRefusedFrameToBuffer(dst, eth, ip4, udp, query), nil
+	config, err := lookupDNSResponseConfig(ruleID, configs, context)
+	if err != nil {
+		return nil, err
+	}
+
+	answerType, answers, err := selectDNSResponseAnswers(query, config, context)
+	if err != nil {
+		return nil, err
+	}
+
+	return buildDNSResponseFrameToBuffer(dst, eth, ip4, udp, query, config, answerType, answers), nil
 }
 
-func buildDNSRefusedIPv4ToBuffer(frame []byte, dst []byte) ([]byte, error) {
-	_, ip4, udp, err := parseUDPEthernetFrame(frame, "build dns refused")
+func buildDNSResponseIPv4ToBuffer(ruleID uint32, frame []byte, configs *RuleConfigStore, context string, dst []byte) ([]byte, error) {
+	_, ip4, udp, err := parseUDPEthernetFrame(frame, context)
 	if err != nil {
 		return nil, err
 	}
 
-	query, err := parseDNSQuery(udp.payload, "build dns refused")
+	query, err := parseDNSQuery(udp.payload, context)
 	if err != nil {
 		return nil, err
 	}
 
-	return buildDNSRefusedIPv4PacketToBuffer(dst, ip4, udp, query), nil
-}
-
-func buildDNSSinkholeToBuffer(ruleID uint32, frame []byte, configs *RuleConfigStore, dst []byte) ([]byte, error) {
-	eth, ip4, udp, err := parseUDPEthernetFrame(frame, "build dns sinkhole")
+	config, err := lookupDNSResponseConfig(ruleID, configs, context)
 	if err != nil {
 		return nil, err
 	}
 
-	query, err := parseDNSSinkholeQuery(udp.payload)
+	answerType, answers, err := selectDNSResponseAnswers(query, config, context)
 	if err != nil {
 		return nil, err
 	}
 
-	config, err := lookupDNSSinkholeConfig(ruleID, configs)
-	if err != nil {
-		return nil, err
-	}
-
-	return buildDNSSinkholeFrameToBuffer(dst, eth, ip4, udp, query, config), nil
-}
-
-func buildDNSSinkholeIPv4ToBuffer(ruleID uint32, frame []byte, configs *RuleConfigStore, dst []byte) ([]byte, error) {
-	_, ip4, udp, err := parseUDPEthernetFrame(frame, "build dns sinkhole")
-	if err != nil {
-		return nil, err
-	}
-
-	query, err := parseDNSSinkholeQuery(udp.payload)
-	if err != nil {
-		return nil, err
-	}
-
-	config, err := lookupDNSSinkholeConfig(ruleID, configs)
-	if err != nil {
-		return nil, err
-	}
-
-	return buildDNSSinkholeIPv4PacketToBuffer(dst, ip4, udp, query, config), nil
+	return buildDNSResponseIPv4PacketToBuffer(dst, ip4, udp, query, config, answerType, answers), nil
 }
 
 const (
@@ -261,9 +242,12 @@ const (
 	dnsFlagQR         = 1 << 15
 	dnsFlagOpcodeMask = 0x7800
 	dnsFlagRD         = 1 << 8
-	dnsTypeA          = 1
-	dnsClassIN        = 1
+	dnsRCodeServFail  = 2
+	dnsRCodeNXDomain  = 3
 	dnsRCodeRefused   = 5
+	dnsTypeA          = 1
+	dnsTypeAAAA       = 28
+	dnsClassIN        = 1
 )
 
 type dnsQuery struct {
@@ -307,26 +291,63 @@ func parseDNSQuery(payload []byte, context string) (dnsQuery, error) {
 	}, nil
 }
 
-func parseDNSSinkholeQuery(payload []byte) (dnsQuery, error) {
-	query, err := parseDNSQuery(payload, "build dns sinkhole")
-	if err != nil {
-		return dnsQuery{}, err
-	}
-	if query.qtype != dnsTypeA {
-		return dnsQuery{}, fmt.Errorf("build dns sinkhole: only dns A queries are supported")
-	}
-	if query.qclass != dnsClassIN {
-		return dnsQuery{}, fmt.Errorf("build dns sinkhole: only dns class IN queries are supported")
-	}
-	return query, nil
-}
-
-func lookupDNSSinkholeConfig(ruleID uint32, configs *RuleConfigStore) (DNSSinkholeConfig, error) {
-	config, ok := configs.DNSSinkholeConfig(ruleID)
+func lookupDNSResponseConfig(ruleID uint32, configs *RuleConfigStore, context string) (DNSResponseConfig, error) {
+	config, ok := configs.DNSResponseConfig(ruleID)
 	if !ok {
-		return DNSSinkholeConfig{}, fmt.Errorf("build dns sinkhole: rule %d dns sinkhole config is not configured", ruleID)
+		return DNSResponseConfig{}, fmt.Errorf("%s: rule %d dns response config is not configured", context, ruleID)
 	}
 	return config, nil
+}
+
+func selectDNSResponseAnswers(query dnsQuery, config DNSResponseConfig, context string) (uint16, []netip.Addr, error) {
+	if len(config.AnswersV4) == 0 && len(config.AnswersV6) == 0 {
+		return 0, nil, nil
+	}
+	if query.qclass != dnsClassIN {
+		return 0, nil, fmt.Errorf("%s: only dns class IN queries are supported", context)
+	}
+
+	switch query.qtype {
+	case dnsTypeA:
+		if len(config.AnswersV4) == 0 {
+			return 0, nil, fmt.Errorf("%s: dns A query has no configured answers", context)
+		}
+		return dnsTypeA, config.AnswersV4, nil
+	case dnsTypeAAAA:
+		if len(config.AnswersV6) == 0 {
+			return 0, nil, fmt.Errorf("%s: dns AAAA query has no configured answers", context)
+		}
+		return dnsTypeAAAA, config.AnswersV6, nil
+	default:
+		return 0, nil, fmt.Errorf("%s: only dns A and AAAA queries are supported", context)
+	}
+}
+
+func lookupARPReplyConfig(ruleID uint32, defaultHardwareAddr net.HardwareAddr, configs *RuleConfigStore) (ARPReplyConfig, error) {
+	config := ARPReplyConfig{}
+	if configs != nil {
+		if override, ok := configs.ARPReplyConfig(ruleID); ok {
+			config = override
+		}
+	}
+
+	if !config.HasHardwareAddr() {
+		if len(defaultHardwareAddr) != 6 {
+			return ARPReplyConfig{}, fmt.Errorf("build arp reply: hardware address is required")
+		}
+		config.HardwareAddr = append(net.HardwareAddr(nil), defaultHardwareAddr...)
+	}
+
+	return config, nil
+}
+
+func lookupTCPSynAckSeq(ruleID uint32, configs *RuleConfigStore) uint32 {
+	if configs != nil {
+		if config, ok := configs.TCPSynAckConfig(ruleID); ok && config.TCPSeq != 0 {
+			return config.TCPSeq
+		}
+	}
+	return 1
 }
 
 func scanDNSQuestion(payload []byte, offset int) (int, int, error) {

@@ -3,6 +3,7 @@ package response
 import (
 	"context"
 	"errors"
+	"net"
 	"testing"
 
 	"sidersp/internal/config"
@@ -85,7 +86,6 @@ func TestNewRuntimeBuildsWorkersForQueues(t *testing.T) {
 		IfIndex:      7,
 		Queues:       []int{0, 1},
 		HardwareAddr: testHWAddr,
-		TCPSeq:       1000,
 		Registrar:    registrar,
 		NewXSK:       factory.newFunc(),
 	}))
@@ -143,6 +143,23 @@ func TestNewOptionsDisabledReturnsDisabledOptions(t *testing.T) {
 	}
 	if opts.Enabled {
 		t.Fatalf("NewOptions() = %+v, want disabled options", opts)
+	}
+}
+
+func TestResolveTXHardwareAddrUsesInterfaceDefault(t *testing.T) {
+	t.Parallel()
+
+	txIface := net.Interface{
+		Name:         "eth-test0",
+		HardwareAddr: testHWAddr,
+	}
+
+	defaulted, err := resolveTXHardwareAddr(txIface)
+	if err != nil {
+		t.Fatalf("resolveTXHardwareAddr() error = %v", err)
+	}
+	if got := defaulted.String(); got != testHWAddr.String() {
+		t.Fatalf("default hardware addr = %s, want %s", got, testHWAddr)
 	}
 }
 

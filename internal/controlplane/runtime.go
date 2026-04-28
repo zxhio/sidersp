@@ -202,12 +202,13 @@ func newRuleStatus(opts Options, rules rule.RuleSet) RuleStatus {
 }
 
 type Status struct {
-	RulesPath   string `json:"rules_path"`
-	ListenAddr  string `json:"listen_addr"`
-	Interface   string `json:"interface"`
-	TXInterface string `json:"tx_interface"`
-	TotalRules  int    `json:"total_rules"`
-	Enabled     int    `json:"enabled_rules"`
+	RulesPath      string `json:"rules_path"`
+	ListenAddr     string `json:"listen_addr"`
+	Interface      string `json:"interface"`
+	TXInterface    string `json:"tx_interface"`
+	TXHardwareAddr string `json:"tx_hardware_addr"`
+	TotalRules     int    `json:"total_rules"`
+	Enabled        int    `json:"enabled_rules"`
 }
 
 func (r *Runtime) ListRules() []rule.Rule {

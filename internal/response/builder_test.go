@@ -78,9 +78,9 @@ func TestBuildResponseIPv4Packet(t *testing.T) {
 		wantProto layers.IPProtocol
 	}{
 		{name: "icmp", meta: XSKMetadata{Action: ActionICMPEchoReply}, request: buildTestICMPEchoRequest(t), wantProto: layers.IPProtocolICMPv4},
-		{name: "tcp", meta: XSKMetadata{Action: ActionTCPSynAck}, request: buildTestTCPSyn(t), opts: BuildOptions{TCPSeq: 1000}, wantProto: layers.IPProtocolTCP},
+		{name: "tcp", meta: XSKMetadata{RuleID: 6001, Action: ActionTCPSynAck}, request: buildTestTCPSyn(t), opts: testTCPSynAckBuildOptions(t, 6001, 1000), wantProto: layers.IPProtocolTCP},
 		{name: "udp", meta: XSKMetadata{Action: ActionUDPEchoReply}, request: buildTestUDPDatagram(t, 12345, 5353, []byte("udp-payload")), wantProto: layers.IPProtocolUDP},
-		{name: "dns refused", meta: XSKMetadata{Action: ActionDNSRefused}, request: buildTestDNSQuery(t, "example.org"), wantProto: layers.IPProtocolUDP},
+		{name: "dns refused", meta: XSKMetadata{RuleID: 7000, Action: ActionDNSRefused}, request: buildTestDNSQuery(t, "example.org"), opts: testDNSRefusedBuildOptions(t, 7000), wantProto: layers.IPProtocolUDP},
 		{
 			name:      "dns sinkhole",
 			meta:      XSKMetadata{RuleID: 7001, Action: ActionDNSSinkhole},
@@ -133,11 +133,38 @@ func TestBuildARPReply(t *testing.T) {
 	}
 }
 
+func TestBuildARPReplyRuleOverride(t *testing.T) {
+	t.Parallel()
+
+	const ruleID = 7010
+
+	request := buildTestARPRequest(t)
+	reply, err := BuildResponseFrame(
+		XSKMetadata{RuleID: ruleID, Action: ActionARPReply},
+		request,
+		testARPReplyBuildOptions(t, ruleID, map[string]interface{}{
+			"sender_ipv4": "192.0.2.20",
+		}),
+	)
+	if err != nil {
+		t.Fatalf("BuildResponseFrame() error = %v", err)
+	}
+
+	packet := parseTestPacket(t, reply)
+	arp := packet.Layer(layers.LayerTypeARP).(*layers.ARP)
+	if got := net.IP(arp.SourceProtAddress).String(); got != "192.0.2.20" {
+		t.Fatalf("arp sender ipv4 = %s, want 192.0.2.20", got)
+	}
+	if !sameMAC(arp.SourceHwAddress, testHWAddr) {
+		t.Fatalf("arp source hw = %x, want %x", arp.SourceHwAddress, []byte(testHWAddr))
+	}
+}
+
 func TestBuildTCPSynAck(t *testing.T) {
 	t.Parallel()
 
 	request := buildTestTCPSyn(t)
-	reply, err := BuildResponseFrame(XSKMetadata{Action: ActionTCPSynAck}, request, BuildOptions{TCPSeq: 1000})
+	reply, err := BuildResponseFrame(XSKMetadata{RuleID: 6002, Action: ActionTCPSynAck}, request, testTCPSynAckBuildOptions(t, 6002, 1000))
 	if err != nil {
 		t.Fatalf("BuildResponseFrame() error = %v", err)
 	}
@@ -155,6 +182,22 @@ func TestBuildTCPSynAck(t *testing.T) {
 	}
 	if tcp.SrcPort != 80 || tcp.DstPort != 12345 || !tcp.SYN || !tcp.ACK || tcp.Seq != 1000 || tcp.Ack != 43 {
 		t.Fatalf("tcp = %+v, want 80->12345 syn-ack seq=1000 ack=43", tcp)
+	}
+}
+
+func TestBuildTCPSynAckDefaultSeq(t *testing.T) {
+	t.Parallel()
+
+	request := buildTestTCPSyn(t)
+	reply, err := BuildResponseFrame(XSKMetadata{Action: ActionTCPSynAck}, request, BuildOptions{})
+	if err != nil {
+		t.Fatalf("BuildResponseFrame() error = %v", err)
+	}
+
+	packet := parseTestPacket(t, reply)
+	tcp := packet.Layer(layers.LayerTypeTCP).(*layers.TCP)
+	if tcp.Seq != 1 {
+		t.Fatalf("tcp seq = %d, want default 1", tcp.Seq)
 	}
 }
 
@@ -191,7 +234,7 @@ func TestBuildDNSRefused(t *testing.T) {
 	t.Parallel()
 
 	request := buildTestDNSQuery(t, "example.org")
-	reply, err := BuildResponseFrame(XSKMetadata{Action: ActionDNSRefused}, request, BuildOptions{})
+	reply, err := BuildResponseFrame(XSKMetadata{RuleID: 7004, Action: ActionDNSRefused}, request, testDNSRefusedBuildOptions(t, 7004))
 	if err != nil {
 		t.Fatalf("BuildResponseFrame() error = %v", err)
 	}
@@ -222,6 +265,22 @@ func TestBuildDNSRefused(t *testing.T) {
 	}
 	if len(dns.Answers) != 0 || len(dns.Authorities) != 0 || len(dns.Additionals) != 0 {
 		t.Fatalf("dns records = answers:%d authorities:%d additionals:%d, want 0/0/0", len(dns.Answers), len(dns.Authorities), len(dns.Additionals))
+	}
+}
+
+func TestBuildDNSRefusedCustomRCode(t *testing.T) {
+	t.Parallel()
+
+	request := buildTestDNSQuery(t, "example.org")
+	reply, err := BuildResponseFrame(XSKMetadata{RuleID: 7005, Action: ActionDNSRefused}, request, testDNSRefusedBuildOptions(t, 7005, "nxdomain"))
+	if err != nil {
+		t.Fatalf("BuildResponseFrame() error = %v", err)
+	}
+
+	packet := parseTestPacket(t, reply)
+	dns := packet.Layer(layers.LayerTypeDNS).(*layers.DNS)
+	if dns.ResponseCode != layers.DNSResponseCodeNXDomain {
+		t.Fatalf("dns rcode = %v, want nxdomain", dns.ResponseCode)
 	}
 }
 
@@ -294,6 +353,36 @@ func TestBuildDNSSinkholeCustomTTL(t *testing.T) {
 	dns := packet.Layer(layers.LayerTypeDNS).(*layers.DNS)
 	if len(dns.Answers) != 1 || dns.Answers[0].TTL != 300 {
 		t.Fatalf("dns answers = %+v, want ttl 300", dns.Answers)
+	}
+}
+
+func TestBuildDNSSinkholeAAAA(t *testing.T) {
+	t.Parallel()
+
+	const ruleID = 7006
+
+	request := buildTestDNSQueryWithTypeClass(t, "example.org", layers.DNSTypeAAAA, layers.DNSClassIN)
+	reply, err := BuildResponseFrame(
+		XSKMetadata{RuleID: ruleID, Action: ActionDNSSinkhole},
+		request,
+		testDNSSinkholeBuildOptionsWithParams(t, ruleID, map[string]interface{}{
+			"family":     "ipv6",
+			"answers_v6": []string{"2001:db8::10", "2001:db8::11"},
+		}),
+	)
+	if err != nil {
+		t.Fatalf("BuildResponseFrame() error = %v", err)
+	}
+
+	packet := parseTestPacket(t, reply)
+	dns := packet.Layer(layers.LayerTypeDNS).(*layers.DNS)
+	if len(dns.Answers) != 2 {
+		t.Fatalf("dns answers = %d, want 2", len(dns.Answers))
+	}
+	for _, answer := range dns.Answers {
+		if answer.Type != layers.DNSTypeAAAA {
+			t.Fatalf("dns answer type = %v, want AAAA", answer.Type)
+		}
 	}
 }
 
@@ -374,17 +463,17 @@ func TestBuildResponseFrameRejectsIncompatiblePackets(t *testing.T) {
 			want:  "compressed dns names are not supported",
 		},
 		{
-			name:  "dns sinkhole requires configured address",
+			name:  "dns sinkhole requires configured response config",
 			meta:  XSKMetadata{RuleID: 7100, Action: ActionDNSSinkhole},
 			frame: buildTestDNSQuery(t, "example.org"),
-			want:  "dns sinkhole config is not configured",
+			want:  "dns response config is not configured",
 		},
 		{
-			name:  "dns sinkhole rejects non A query",
+			name:  "dns sinkhole rejects unconfigured AAAA query",
 			meta:  XSKMetadata{RuleID: 7101, Action: ActionDNSSinkhole},
 			frame: buildTestDNSQueryWithTypeClass(t, "example.org", layers.DNSTypeAAAA, layers.DNSClassIN),
 			opts:  testDNSSinkholeBuildOptions(t, 7101, "192.0.2.10"),
-			want:  "only dns A queries are supported",
+			want:  "dns AAAA query has no configured answers",
 		},
 		{
 			name:  "dns sinkhole rejects multi question query",
@@ -722,10 +811,18 @@ func sameMAC(a, b []byte) bool {
 func testDNSSinkholeBuildOptions(t testing.TB, ruleID uint32, address string, ttl ...int) BuildOptions {
 	t.Helper()
 
-	params := map[string]interface{}{"address": address}
+	params := map[string]interface{}{
+		"family":     "ipv4",
+		"answers_v4": []string{address},
+	}
 	if len(ttl) > 0 {
 		params["ttl"] = ttl[0]
 	}
+	return testDNSSinkholeBuildOptionsWithParams(t, ruleID, params)
+}
+
+func testDNSSinkholeBuildOptionsWithParams(t testing.TB, ruleID uint32, params map[string]interface{}) BuildOptions {
+	t.Helper()
 
 	store := NewRuleConfigStore()
 	if err := store.ReplaceRules(rule.RuleSet{
@@ -735,6 +832,79 @@ func testDNSSinkholeBuildOptions(t testing.TB, ruleID uint32, address string, tt
 				Response: rule.RuleResponse{
 					Action: "dns_sinkhole",
 					Params: params,
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("ReplaceRules() error = %v", err)
+	}
+
+	return BuildOptions{RuleConfigs: store}
+}
+
+func testDNSRefusedBuildOptions(t testing.TB, ruleID uint32, rcode ...string) BuildOptions {
+	t.Helper()
+
+	params := map[string]interface{}{"rcode": "refused"}
+	if len(rcode) > 0 {
+		params["rcode"] = rcode[0]
+	}
+
+	store := NewRuleConfigStore()
+	if err := store.ReplaceRules(rule.RuleSet{
+		Rules: []rule.Rule{
+			{
+				ID: int(ruleID),
+				Response: rule.RuleResponse{
+					Action: "dns_refused",
+					Params: params,
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("ReplaceRules() error = %v", err)
+	}
+
+	return BuildOptions{RuleConfigs: store}
+}
+
+func testARPReplyBuildOptions(t testing.TB, ruleID uint32, params map[string]interface{}) BuildOptions {
+	t.Helper()
+
+	store := NewRuleConfigStore()
+	if err := store.ReplaceRules(rule.RuleSet{
+		Rules: []rule.Rule{
+			{
+				ID: int(ruleID),
+				Response: rule.RuleResponse{
+					Action: "arp_reply",
+					Params: params,
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("ReplaceRules() error = %v", err)
+	}
+
+	return BuildOptions{
+		HardwareAddr: testHWAddr,
+		RuleConfigs:  store,
+	}
+}
+
+func testTCPSynAckBuildOptions(t testing.TB, ruleID uint32, seq uint32) BuildOptions {
+	t.Helper()
+
+	store := NewRuleConfigStore()
+	if err := store.ReplaceRules(rule.RuleSet{
+		Rules: []rule.Rule{
+			{
+				ID: int(ruleID),
+				Response: rule.RuleResponse{
+					Action: "tcp_syn_ack",
+					Params: map[string]interface{}{
+						"tcp_seq": seq,
+					},
 				},
 			},
 		},

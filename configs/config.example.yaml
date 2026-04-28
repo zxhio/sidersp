@@ -34,11 +34,6 @@ response:
       rx_ring_size: 2048
       tx_ring_size: 2048
       tx_frame_reserve: 256
-  actions:
-    arp_reply:
-      hardware_addr: ""
-    tcp_syn_ack:
-      tcp_seq: 1
 
 logging:
   app:

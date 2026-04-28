@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -183,11 +184,12 @@ func TestGetStatus(t *testing.T) {
 
 	server := NewServer("127.0.0.1:0", &stubService{
 		status: controlplane.Status{
-			ListenAddr:  "127.0.0.1:8080",
-			Interface:   "enp1s0",
-			TXInterface: "eth1",
-			TotalRules:  13,
-			Enabled:     1,
+			ListenAddr:     "127.0.0.1:8080",
+			Interface:      "enp1s0",
+			TXInterface:    "eth1",
+			TXHardwareAddr: "02:aa:bb:cc:dd:ee",
+			TotalRules:     13,
+			Enabled:        1,
 		},
 	})
 
@@ -205,7 +207,7 @@ func TestGetStatus(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
-	if body.Data.Interface != "enp1s0" || body.Data.TXInterface != "eth1" {
+	if body.Data.Interface != "enp1s0" || body.Data.TXInterface != "eth1" || body.Data.TXHardwareAddr != "02:aa:bb:cc:dd:ee" {
 		t.Fatalf("status body = %+v, want interface and tx interface", body.Data)
 	}
 	if body.Data.Enabled != 1 || body.Data.TotalRules != 13 {
@@ -849,7 +851,7 @@ func TestCreateRulePreservesResponseParams(t *testing.T) {
 	t.Parallel()
 
 	server := NewServer("127.0.0.1:0", &stubService{})
-	body := []byte(`{"name":"sinkhole","enabled":true,"priority":30,"match":{"protocol":"udp","dst_ports":[53]},"response":{"action":"dns_sinkhole","params":{"address":"192.0.2.10","ttl":300}}}`)
+	body := []byte(`{"name":"sinkhole","enabled":true,"priority":30,"match":{"protocol":"udp","dst_ports":[53]},"response":{"action":"dns_sinkhole","params":{"family":"dual","answers_v4":["192.0.2.10"],"answers_v6":["2001:db8::10"],"ttl":300}}}`)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/rules", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -866,11 +868,17 @@ func TestCreateRulePreservesResponseParams(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
-	if got := payload.Data.Response.Params["address"]; got != "192.0.2.10" {
-		t.Fatalf("response.params.address = %v, want 192.0.2.10", got)
+	if got := payload.Data.Response.Params["family"]; got != "dual" {
+		t.Fatalf("response.params.family = %v, want dual", got)
 	}
 	if got := payload.Data.Response.Params["ttl"]; got != float64(300) {
 		t.Fatalf("response.params.ttl = %v, want 300", got)
+	}
+	if got := payload.Data.Response.Params["answers_v4"]; !reflect.DeepEqual(got, []interface{}{"192.0.2.10"}) {
+		t.Fatalf("response.params.answers_v4 = %#v, want [192.0.2.10]", got)
+	}
+	if got := payload.Data.Response.Params["answers_v6"]; !reflect.DeepEqual(got, []interface{}{"2001:db8::10"}) {
+		t.Fatalf("response.params.answers_v6 = %#v, want [2001:db8::10]", got)
 	}
 }
 

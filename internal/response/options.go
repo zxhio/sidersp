@@ -17,7 +17,6 @@ type Options struct {
 	Queues           []int
 	ResultBufferSize int
 	HardwareAddr     net.HardwareAddr
-	TCPSeq           uint32
 	EgressInterface  string
 	Registrar        XSKRegistrar
 	NewXSK           NewXSKFunc
@@ -27,7 +26,6 @@ func NewOptions(dataplaneCfg config.DataplaneConfig, egressCfg config.EgressConf
 	interfaceName := strings.TrimSpace(dataplaneCfg.Interface)
 	opts := Options{
 		Enabled:         responseCfg.Runtime.Enabled,
-		TCPSeq:          responseCfg.Actions.TCPSynAck.TCPSeq,
 		EgressInterface: strings.TrimSpace(egressCfg.Interface),
 		Registrar:       registrar,
 	}
@@ -42,17 +40,22 @@ func NewOptions(dataplaneCfg config.DataplaneConfig, egressCfg config.EgressConf
 	if err != nil {
 		return Options{}, fmt.Errorf("lookup response interface: %w", err)
 	}
+	txIface := iface
+	if opts.EgressInterface != "" {
+		txIface, err = net.InterfaceByName(opts.EgressInterface)
+		if err != nil {
+			return Options{}, fmt.Errorf("lookup response tx interface: %w", err)
+		}
+	}
 	opts.IfIndex = iface.Index
 	opts.Queues = normalizedWorkerQueues(responseCfg.Runtime.Queues, dataplaneCfg.CombinedChannels)
 	opts.ResultBufferSize = normalizedResultBufferSize(responseCfg.Runtime.ResultBufferSize)
 
-	if rawHWAddr := strings.TrimSpace(responseCfg.Actions.ARPReply.HardwareAddr); rawHWAddr != "" {
-		hardwareAddr, err := net.ParseMAC(rawHWAddr)
-		if err != nil {
-			return Options{}, fmt.Errorf("parse response hardware address: %w", err)
-		}
-		opts.HardwareAddr = hardwareAddr
+	hardwareAddr, err := resolveTXHardwareAddr(*txIface)
+	if err != nil {
+		return Options{}, err
 	}
+	opts.HardwareAddr = hardwareAddr
 
 	afxdpCfg := newAFXDPConfig(responseCfg.Runtime.AFXDP, iface.Index)
 	if err := afxdpCfg.Validate(); err != nil {
@@ -63,6 +66,13 @@ func NewOptions(dataplaneCfg config.DataplaneConfig, egressCfg config.EgressConf
 	}
 
 	return normalizeOptions(opts), nil
+}
+
+func resolveTXHardwareAddr(txIface net.Interface) (net.HardwareAddr, error) {
+	if len(txIface.HardwareAddr) != 6 {
+		return nil, fmt.Errorf("response tx interface %q must have a 6-byte ethernet hardware address", txIface.Name)
+	}
+	return append(net.HardwareAddr(nil), txIface.HardwareAddr...), nil
 }
 
 func normalizedWorkerQueues(raw []int, defaultQueueCount int) []int {

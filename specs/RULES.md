@@ -90,14 +90,14 @@ Parameter schema:
 | `alert` | forbidden |
 | `tcp_reset` | forbidden |
 | `icmp_echo_reply` | forbidden |
-| `arp_reply` | forbidden |
-| `tcp_syn_ack` | forbidden |
+| `arp_reply` | optional `hardware_addr` string containing one Ethernet MAC address; optional `sender_ipv4` string containing one IPv4 address |
+| `tcp_syn_ack` | optional `tcp_seq` integer in `0..4294967295`; omitted defaults to `1` |
 | `icmp_port_unreachable` | forbidden |
 | `icmp_host_unreachable` | forbidden |
 | `icmp_admin_prohibited` | forbidden |
 | `udp_echo_reply` | forbidden |
-| `dns_refused` | forbidden |
-| `dns_sinkhole` | required `address` string containing one IPv4 address; optional `ttl` integer in `0..2147483647` |
+| `dns_refused` | optional `rcode` string: `refused`, `nxdomain`, or `servfail`; omitted defaults to `refused` |
+| `dns_sinkhole` | required `family` string: `ipv4`, `ipv6`, or `dual`; `answers_v4` is required for `ipv4` and `dual`; `answers_v6` is required for `ipv6` and `dual`; optional `ttl` integer in `0..2147483647`, omitted defaults to `60` |
 
 Execution path is not exposed as a rule field. The control plane validates `response.action`; dataplane compilation encodes it into the numeric action code. Dataplane and response modules own the configured execution path for each action. For kernel TX actions such as `tcp_reset` and `icmp_port_unreachable`, local runtime config selects same-interface `XDP_TX` or egress-interface redirect for all rules.
 
@@ -109,14 +109,14 @@ Execution path is not exposed as a rule field. The control plane validates `resp
 | `alert` | `1` | dataplane | Emit an observation event; final host-stack disposition follows runtime `dataplane.ingress_verdict` |
 | `tcp_reset` | `2` | dataplane kernel TX | Build TCP RST in BPF and send by configured same-interface or egress-interface TX mode |
 | `icmp_echo_reply` | `3` | XSK RX + user-space TX | Redirect original packet to XSK; user space builds ICMP echo reply and transmits through same-interface XSK TX or configured shared TX egress |
-| `arp_reply` | `4` | XSK RX + user-space TX | Redirect original packet to XSK; user space builds ARP reply and transmits through same-interface XSK TX or configured shared TX egress |
-| `tcp_syn_ack` | `5` | XSK RX + user-space TX | Redirect original packet to XSK; user space builds TCP SYN-ACK |
+| `arp_reply` | `4` | XSK RX + user-space TX | Redirect original packet to XSK; user space builds ARP reply and transmits through same-interface XSK TX or configured shared TX egress, with optional per-rule sender MAC / sender IPv4 override |
+| `tcp_syn_ack` | `5` | XSK RX + user-space TX | Redirect original packet to XSK; user space builds TCP SYN-ACK, with optional per-rule `response.params.tcp_seq` override |
 | `icmp_port_unreachable` | `6` | dataplane kernel TX | Build ICMP destination-unreachable / port-unreachable in BPF and send by configured same-interface or egress-interface TX mode |
 | `udp_echo_reply` | `7` | XSK RX + user-space TX | Redirect original packet to XSK; user space swaps the UDP tuple and echoes the original payload |
-| `dns_refused` | `8` | XSK RX + user-space TX | Redirect original packet to XSK; user space returns a DNS `REFUSED` response for a compatible UDP DNS query |
+| `dns_refused` | `8` | XSK RX + user-space TX | Redirect original packet to XSK; user space returns a DNS refusal-style response for a compatible UDP DNS query, with `rcode` chosen from `refused`, `nxdomain`, or `servfail` |
 | `icmp_host_unreachable` | `9` | dataplane kernel TX | Build ICMP destination-unreachable / host-unreachable in BPF and send by configured same-interface or egress-interface TX mode |
 | `icmp_admin_prohibited` | `10` | dataplane kernel TX | Build ICMP destination-unreachable / administratively-prohibited in BPF and send by configured same-interface or egress-interface TX mode |
-| `dns_sinkhole` | `11` | XSK RX + user-space TX | Redirect original packet to XSK; user space returns a DNS `NOERROR` response with one fixed A answer from `response.params.address` and optional `response.params.ttl` |
+| `dns_sinkhole` | `11` | XSK RX + user-space TX | Redirect original packet to XSK; user space returns a DNS `NOERROR` response with A and/or AAAA answers selected from `response.params` by query type |
 
 External rules must not expose implementation details such as `xdp`, `xsk`, or `user_space` as fields.
 `dataplane.ingress_verdict` is a runtime dataplane setting, not a per-rule field.
@@ -138,13 +138,9 @@ packet type required to construct the response:
 | `dns_refused` | `protocol: udp` |
 | `dns_sinkhole` | `protocol: udp` |
 
-`dns_refused` v1 supports IPv4 UDP DNS queries only. Rules should usually also
-limit `dst_ports` to `53`, but the control plane does not hard-require that
-port in v1.
-
-`dns_sinkhole` v1 also supports IPv4 UDP DNS queries only. Rules should usually
-also limit `dst_ports` to `53`, but the control plane does not hard-require
-that port in v1.
+`dns_refused` and `dns_sinkhole` v1 support IPv4 UDP DNS queries only. Rules
+should usually also limit `dst_ports` to `53`, but the control plane does not
+hard-require that port in v1.
 
 ## Match Semantics
 

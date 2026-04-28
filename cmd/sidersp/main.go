@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
 	"strings"
@@ -165,9 +166,10 @@ func newConsoleService(runtime *controlplane.Runtime, cfg config.Config) *consol
 	return &consoleService{
 		Runtime: runtime,
 		status: controlplane.Status{
-			ListenAddr:  cfg.Console.ListenAddr,
-			Interface:   strings.TrimSpace(cfg.Dataplane.Interface),
-			TXInterface: txInterface(cfg.Dataplane.Interface, cfg.Egress.Interface),
+			ListenAddr:     cfg.Console.ListenAddr,
+			Interface:      strings.TrimSpace(cfg.Dataplane.Interface),
+			TXInterface:    txInterface(cfg.Dataplane.Interface, cfg.Egress.Interface),
+			TXHardwareAddr: txHardwareAddr(cfg.Dataplane.Interface, cfg.Egress.Interface),
 		},
 	}
 }
@@ -217,6 +219,18 @@ func txInterface(dataplaneInterface string, egressInterface string) string {
 		return iface
 	}
 	return strings.TrimSpace(dataplaneInterface)
+}
+
+func txHardwareAddr(dataplaneInterface string, egressInterface string) string {
+	ifaceName := txInterface(dataplaneInterface, egressInterface)
+	if ifaceName == "" {
+		return ""
+	}
+	iface, err := net.InterfaceByName(ifaceName)
+	if err != nil || len(iface.HardwareAddr) != 6 {
+		return ""
+	}
+	return iface.HardwareAddr.String()
 }
 
 type ruleSyncFanout struct {

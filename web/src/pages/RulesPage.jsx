@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { listRules, createRule, updateRule, deleteRule, enableRule, disableRule } from '../api'
+import { listRules, createRule, updateRule, deleteRule, enableRule, disableRule, getStatus } from '../api'
 import RuleForm from '../components/RuleForm'
 import { useResizableColumns } from '../components/ResizableTable'
 
@@ -87,6 +87,7 @@ export default function RulesPage() {
   const [error, setError] = useState('')
   const [formState, setFormState] = useState(null) // null | 'create' | rule object
   const [deleteTarget, setDeleteTarget] = useState(null) // null | rule object
+  const [defaultARPHardwareAddr, setDefaultARPHardwareAddr] = useState('')
   const { colStyle, onResizeStart } = useResizableColumns(DEFAULT_COL)
 
   const load = useCallback(async (p) => {
@@ -105,6 +106,12 @@ export default function RulesPage() {
   }, [])
 
   useEffect(() => { load(page) }, [load, page])
+
+  useEffect(() => {
+    getStatus()
+      .then(status => setDefaultARPHardwareAddr(status.tx_hardware_addr || ''))
+      .catch(() => {})
+  }, [])
 
   const totalPages = Math.ceil(total / PAGE_SIZE)
 
@@ -272,6 +279,7 @@ export default function RulesPage() {
         {formState !== null && (
           <RuleForm
             rule={formState === 'create' ? null : formState}
+            defaultARPHardwareAddr={defaultARPHardwareAddr}
             onSubmit={handleFormSubmit}
             onCancel={() => setFormState(null)}
           />

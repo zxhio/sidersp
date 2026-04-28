@@ -3,6 +3,7 @@ package response
 import (
 	"encoding/binary"
 	"fmt"
+	"net/netip"
 )
 
 const (
@@ -340,10 +341,10 @@ func buildICMPEchoReplyIPv4PacketToBuffer(dst []byte, ip4 fastpktIPv4Packet, icm
 }
 
 func buildARPReplyFrame(eth fastpktEthernetFrame, arp fastpktARPPacket, hardwareAddr []byte) []byte {
-	return buildARPReplyFrameToBuffer(nil, eth, arp, hardwareAddr)
+	return buildARPReplyFrameToBuffer(nil, eth, arp, hardwareAddr, netip.Addr{}, false)
 }
 
-func buildARPReplyFrameToBuffer(dst []byte, eth fastpktEthernetFrame, arp fastpktARPPacket, hardwareAddr []byte) []byte {
+func buildARPReplyFrameToBuffer(dst []byte, eth fastpktEthernetFrame, arp fastpktARPPacket, hardwareAddr []byte, senderIPv4 netip.Addr, hasSenderIPv4 bool) []byte {
 	out := reserveFastpktBuffer(dst, fastpktEthernetHeaderLen+fastpktARPHeaderLen)
 
 	copy(out[0:6], eth.srcMAC[:])
@@ -357,7 +358,12 @@ func buildARPReplyFrameToBuffer(dst []byte, eth fastpktEthernetFrame, arp fastpk
 	out[arpOffset+5] = 4
 	binary.BigEndian.PutUint16(out[arpOffset+6:arpOffset+8], fastpktARPReply)
 	copy(out[arpOffset+8:arpOffset+14], hardwareAddr)
-	copy(out[arpOffset+14:arpOffset+18], arp.dstProt[:])
+	if hasSenderIPv4 {
+		ipv4 := senderIPv4.As4()
+		copy(out[arpOffset+14:arpOffset+18], ipv4[:])
+	} else {
+		copy(out[arpOffset+14:arpOffset+18], arp.dstProt[:])
+	}
 	copy(out[arpOffset+18:arpOffset+24], arp.srcHW[:])
 	copy(out[arpOffset+24:arpOffset+28], arp.srcProt[:])
 
@@ -450,8 +456,8 @@ func buildUDPEchoReplyIPv4PacketToBuffer(dst []byte, ip4 fastpktIPv4Packet, udp 
 	return out
 }
 
-func buildDNSRefusedFrameToBuffer(dst []byte, eth fastpktEthernetFrame, ip4 fastpktIPv4Packet, udp fastpktUDPPacket, query dnsQuery) []byte {
-	dnsLen := dnsHeaderLen + len(query.question)
+func buildDNSResponseFrameToBuffer(dst []byte, eth fastpktEthernetFrame, ip4 fastpktIPv4Packet, udp fastpktUDPPacket, query dnsQuery, config DNSResponseConfig, answerType uint16, answers []netip.Addr) []byte {
+	dnsLen := dnsResponsePayloadLen(query, answerType, answers)
 	udpLen := fastpktUDPHeaderLen + dnsLen
 	ipLen := fastpktIPv4HeaderMinLen + udpLen
 	out := reserveFastpktBuffer(dst, fastpktEthernetHeaderLen+ipLen)
@@ -467,18 +473,15 @@ func buildDNSRefusedFrameToBuffer(dst []byte, eth fastpktEthernetFrame, ip4 fast
 	writeUDPHeader(out[udpOffset:udpOffset+fastpktUDPHeaderLen], udp.dstPort, udp.srcPort, udpLen)
 
 	dnsOffset := udpOffset + fastpktUDPHeaderLen
-	binary.BigEndian.PutUint16(out[dnsOffset:dnsOffset+2], query.id)
-	binary.BigEndian.PutUint16(out[dnsOffset+2:dnsOffset+4], dnsFlagQR|query.preserve|dnsRCodeRefused)
-	binary.BigEndian.PutUint16(out[dnsOffset+4:dnsOffset+6], 1)
-	copy(out[dnsOffset+dnsHeaderLen:], query.question)
+	writeDNSResponsePayload(out[dnsOffset:dnsOffset+dnsLen], query, config, answerType, answers)
 
 	binary.BigEndian.PutUint16(out[udpOffset+6:udpOffset+8], udpChecksum(ip4.dst, ip4.src, out[udpOffset:udpOffset+udpLen]))
 
 	return out
 }
 
-func buildDNSRefusedIPv4PacketToBuffer(dst []byte, ip4 fastpktIPv4Packet, udp fastpktUDPPacket, query dnsQuery) []byte {
-	dnsLen := dnsHeaderLen + len(query.question)
+func buildDNSResponseIPv4PacketToBuffer(dst []byte, ip4 fastpktIPv4Packet, udp fastpktUDPPacket, query dnsQuery, config DNSResponseConfig, answerType uint16, answers []netip.Addr) []byte {
+	dnsLen := dnsResponsePayloadLen(query, answerType, answers)
 	udpLen := fastpktUDPHeaderLen + dnsLen
 	ipLen := fastpktIPv4HeaderMinLen + udpLen
 	out := reserveFastpktBuffer(dst, ipLen)
@@ -489,76 +492,58 @@ func buildDNSRefusedIPv4PacketToBuffer(dst []byte, ip4 fastpktIPv4Packet, udp fa
 	writeUDPHeader(out[udpOffset:udpOffset+fastpktUDPHeaderLen], udp.dstPort, udp.srcPort, udpLen)
 
 	dnsOffset := udpOffset + fastpktUDPHeaderLen
-	binary.BigEndian.PutUint16(out[dnsOffset:dnsOffset+2], query.id)
-	binary.BigEndian.PutUint16(out[dnsOffset+2:dnsOffset+4], dnsFlagQR|query.preserve|dnsRCodeRefused)
-	binary.BigEndian.PutUint16(out[dnsOffset+4:dnsOffset+6], 1)
-	copy(out[dnsOffset+dnsHeaderLen:], query.question)
+	writeDNSResponsePayload(out[dnsOffset:dnsOffset+dnsLen], query, config, answerType, answers)
 
 	binary.BigEndian.PutUint16(out[udpOffset+6:udpOffset+8], udpChecksum(ip4.dst, ip4.src, out[udpOffset:udpOffset+udpLen]))
 
 	return out
 }
 
-func buildDNSSinkholeFrameToBuffer(dst []byte, eth fastpktEthernetFrame, ip4 fastpktIPv4Packet, udp fastpktUDPPacket, query dnsQuery, config DNSSinkholeConfig) []byte {
-	dnsLen := dnsHeaderLen + len(query.question) + len(query.name) + 14
-	udpLen := fastpktUDPHeaderLen + dnsLen
-	ipLen := fastpktIPv4HeaderMinLen + udpLen
-	out := reserveFastpktBuffer(dst, fastpktEthernetHeaderLen+ipLen)
-
-	copy(out[0:6], eth.srcMAC[:])
-	copy(out[6:12], eth.dstMAC[:])
-	binary.BigEndian.PutUint16(out[12:14], fastpktEtherTypeIPv4)
-
-	ipOffset := fastpktEthernetHeaderLen
-	writeIPv4Header(out[ipOffset:ipOffset+fastpktIPv4HeaderMinLen], ip4.dst, ip4.src, ip4.id, fastpktIPProtoUDP, ipLen)
-
-	udpOffset := ipOffset + fastpktIPv4HeaderMinLen
-	writeUDPHeader(out[udpOffset:udpOffset+fastpktUDPHeaderLen], udp.dstPort, udp.srcPort, udpLen)
-
-	dnsOffset := udpOffset + fastpktUDPHeaderLen
-	writeDNSSinkholePayload(out[dnsOffset:dnsOffset+dnsLen], query, config)
-
-	binary.BigEndian.PutUint16(out[udpOffset+6:udpOffset+8], udpChecksum(ip4.dst, ip4.src, out[udpOffset:udpOffset+udpLen]))
-
-	return out
+func dnsResponsePayloadLen(query dnsQuery, answerType uint16, answers []netip.Addr) int {
+	size := dnsHeaderLen + len(query.question)
+	for _, answer := range answers {
+		size += len(query.name) + 10 + dnsAnswerDataLen(answerType, answer)
+	}
+	return size
 }
 
-func buildDNSSinkholeIPv4PacketToBuffer(dst []byte, ip4 fastpktIPv4Packet, udp fastpktUDPPacket, query dnsQuery, config DNSSinkholeConfig) []byte {
-	dnsLen := dnsHeaderLen + len(query.question) + len(query.name) + 14
-	udpLen := fastpktUDPHeaderLen + dnsLen
-	ipLen := fastpktIPv4HeaderMinLen + udpLen
-	out := reserveFastpktBuffer(dst, ipLen)
-
-	writeIPv4Header(out[:fastpktIPv4HeaderMinLen], ip4.dst, ip4.src, ip4.id, fastpktIPProtoUDP, ipLen)
-
-	udpOffset := fastpktIPv4HeaderMinLen
-	writeUDPHeader(out[udpOffset:udpOffset+fastpktUDPHeaderLen], udp.dstPort, udp.srcPort, udpLen)
-
-	dnsOffset := udpOffset + fastpktUDPHeaderLen
-	writeDNSSinkholePayload(out[dnsOffset:dnsOffset+dnsLen], query, config)
-
-	binary.BigEndian.PutUint16(out[udpOffset+6:udpOffset+8], udpChecksum(ip4.dst, ip4.src, out[udpOffset:udpOffset+udpLen]))
-
-	return out
-}
-
-func writeDNSSinkholePayload(out []byte, query dnsQuery, config DNSSinkholeConfig) {
+func writeDNSResponsePayload(out []byte, query dnsQuery, config DNSResponseConfig, answerType uint16, answers []netip.Addr) {
 	binary.BigEndian.PutUint16(out[0:2], query.id)
-	binary.BigEndian.PutUint16(out[2:4], dnsFlagQR|query.preserve)
+	binary.BigEndian.PutUint16(out[2:4], dnsFlagQR|query.preserve|uint16(config.RCode))
 	binary.BigEndian.PutUint16(out[4:6], 1)
-	binary.BigEndian.PutUint16(out[6:8], 1)
+	binary.BigEndian.PutUint16(out[6:8], uint16(len(answers)))
 	copy(out[dnsHeaderLen:dnsHeaderLen+len(query.question)], query.question)
 
 	answerOffset := dnsHeaderLen + len(query.question)
-	copy(out[answerOffset:answerOffset+len(query.name)], query.name)
-	answerOffset += len(query.name)
+	for _, answer := range answers {
+		copy(out[answerOffset:answerOffset+len(query.name)], query.name)
+		answerOffset += len(query.name)
 
-	binary.BigEndian.PutUint16(out[answerOffset:answerOffset+2], dnsTypeA)
-	binary.BigEndian.PutUint16(out[answerOffset+2:answerOffset+4], dnsClassIN)
-	binary.BigEndian.PutUint32(out[answerOffset+4:answerOffset+8], config.TTL)
-	binary.BigEndian.PutUint16(out[answerOffset+8:answerOffset+10], 4)
-	ipv4 := config.Address.As4()
-	copy(out[answerOffset+10:answerOffset+14], ipv4[:])
+		binary.BigEndian.PutUint16(out[answerOffset:answerOffset+2], answerType)
+		binary.BigEndian.PutUint16(out[answerOffset+2:answerOffset+4], dnsClassIN)
+		binary.BigEndian.PutUint32(out[answerOffset+4:answerOffset+8], config.TTL)
+		dataLen := dnsAnswerDataLen(answerType, answer)
+		binary.BigEndian.PutUint16(out[answerOffset+8:answerOffset+10], uint16(dataLen))
+		writeDNSAnswerData(out[answerOffset+10:answerOffset+10+dataLen], answerType, answer)
+		answerOffset += 10 + dataLen
+	}
+}
+
+func dnsAnswerDataLen(answerType uint16, _ netip.Addr) int {
+	if answerType == dnsTypeAAAA {
+		return 16
+	}
+	return 4
+}
+
+func writeDNSAnswerData(dst []byte, answerType uint16, answer netip.Addr) {
+	if answerType == dnsTypeAAAA {
+		ipv6 := answer.As16()
+		copy(dst, ipv6[:])
+		return
+	}
+	ipv4 := answer.As4()
+	copy(dst, ipv4[:])
 }
 
 func reserveFastpktBuffer(dst []byte, size int) []byte {

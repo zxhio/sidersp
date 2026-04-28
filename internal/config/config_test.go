@@ -233,11 +233,6 @@ response:
     afxdp:
       frame_size: 4096
       tx_frame_reserve: 256
-  actions:
-    arp_reply:
-      hardware_addr: 02:aa:bb:cc:dd:ee
-    tcp_syn_ack:
-      tcp_seq: 1000
 
 console:
   listen_addr: 127.0.0.1:8080
@@ -256,9 +251,6 @@ console:
 	}
 	if cfg.Response.Runtime.ResultBufferSize != 2048 {
 		t.Fatalf("Response.Runtime.ResultBufferSize = %d, want 2048", cfg.Response.Runtime.ResultBufferSize)
-	}
-	if cfg.Response.Actions.ARPReply.HardwareAddr != "02:aa:bb:cc:dd:ee" || cfg.Response.Actions.TCPSynAck.TCPSeq != 1000 {
-		t.Fatalf("Response = %+v, want arp_reply/tcp_syn_ack populated", cfg.Response)
 	}
 	if cfg.Egress.Interface != "eth1" ||
 		normalizeVLANMode(cfg.Egress.VLANMode) != "access" ||
@@ -426,15 +418,6 @@ console:
 	}
 }
 
-func TestResponseActionsConfigDefaults(t *testing.T) {
-	t.Parallel()
-
-	cfg := ResponseActionsConfig{}
-	if cfg.TCPSynAck.TCPSeq != 0 {
-		t.Fatalf("tcp_syn_ack.tcp_seq = %d, want 0 zero-value", cfg.TCPSynAck.TCPSeq)
-	}
-}
-
 func TestLoadRejectsInvalidResponseConfig(t *testing.T) {
 	t.Parallel()
 
@@ -464,14 +447,9 @@ func TestLoadRejectsInvalidResponseConfig(t *testing.T) {
 			want: "response: runtime: result_buffer_size must be >= 0",
 		},
 		{
-			name: "invalid hardware address",
+			name: "reject old actions block",
 			body: "actions:\n    arp_reply:\n      hardware_addr: nope",
-			want: "response: actions: hardware_addr",
-		},
-		{
-			name: "non ethernet hardware address",
-			body: "actions:\n    arp_reply:\n      hardware_addr: 02:aa:bb:cc:dd:ee:ff:00",
-			want: "response: actions: hardware_addr must be a 6-byte ethernet address",
+			want: "field actions not found",
 		},
 		{
 			name: "reject old response tx block",

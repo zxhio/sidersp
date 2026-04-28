@@ -328,12 +328,13 @@ func parseRangeSecondsQuery(raw string) (int, error) {
 
 func newStatusResponse(item controlplane.Status) StatusResponse {
 	return StatusResponse{
-		RulesPath:   item.RulesPath,
-		ListenAddr:  item.ListenAddr,
-		Interface:   item.Interface,
-		TXInterface: item.TXInterface,
-		TotalRules:  item.TotalRules,
-		Enabled:     item.Enabled,
+		RulesPath:      item.RulesPath,
+		ListenAddr:     item.ListenAddr,
+		Interface:      item.Interface,
+		TXInterface:    item.TXInterface,
+		TXHardwareAddr: item.TXHardwareAddr,
+		TotalRules:     item.TotalRules,
+		Enabled:        item.Enabled,
 	}
 }
 

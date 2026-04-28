@@ -14,14 +14,14 @@ in `RULES.md`.
 | `alert` | `1` | dataplane observe | active | Emit an observation event; final original-packet disposition is `XDP_PASS` or `XDP_DROP` by `dataplane.ingress_verdict` |
 | `tcp_reset` | `2` | BPF kernel TX | active | Build TCP RST in BPF and send by same-interface `XDP_TX` or configured egress-interface `XDP_REDIRECT` |
 | `icmp_echo_reply` | `3` | XSK RX + user-space TX | active | Redirect the original packet to XSK; user space builds ICMP echo reply and transmits through AF_XDP by default or AF_PACKET when egress is configured |
-| `arp_reply` | `4` | XSK RX + user-space TX | active | Redirect the original packet to XSK; user space builds ARP reply and transmits through AF_XDP by default or AF_PACKET when egress is configured |
-| `tcp_syn_ack` | `5` | XSK RX + user-space TX | Linux AF_XDP socket implemented, integration pending | Redirect the original packet to XSK; user space builds TCP SYN-ACK and transmits through AF_XDP by default or AF_PACKET when egress is configured |
+| `arp_reply` | `4` | XSK RX + user-space TX | active | Redirect the original packet to XSK; user space builds ARP reply and transmits through AF_XDP by default or AF_PACKET when egress is configured, with optional per-rule sender MAC / sender IPv4 override |
+| `tcp_syn_ack` | `5` | XSK RX + user-space TX | Linux AF_XDP socket implemented, integration pending | Redirect the original packet to XSK; user space builds TCP SYN-ACK and transmits through AF_XDP by default or AF_PACKET when egress is configured, with optional per-rule `response.params.tcp_seq` override |
 | `icmp_port_unreachable` | `6` | BPF kernel TX | active | Build ICMP destination-unreachable / port-unreachable in BPF and send by same-interface `XDP_TX` or configured egress-interface `XDP_REDIRECT` |
 | `udp_echo_reply` | `7` | XSK RX + user-space TX | active | Redirect the original packet to XSK; user space swaps Ethernet/IP/UDP source and destination fields and echoes the UDP payload |
-| `dns_refused` | `8` | XSK RX + user-space TX | active | Redirect the original packet to XSK; user space returns a UDP DNS response with `RCODE=REFUSED` and the original question copied back |
+| `dns_refused` | `8` | XSK RX + user-space TX | active | Redirect the original packet to XSK; user space returns a UDP DNS response with the configured refusal-style `RCODE` and the original question copied back |
 | `icmp_host_unreachable` | `9` | BPF kernel TX | active | Build ICMP destination-unreachable / host-unreachable in BPF and send by same-interface `XDP_TX` or configured egress-interface `XDP_REDIRECT` |
 | `icmp_admin_prohibited` | `10` | BPF kernel TX | active | Build ICMP destination-unreachable / administratively-prohibited in BPF and send by same-interface `XDP_TX` or configured egress-interface `XDP_REDIRECT` |
-| `dns_sinkhole` | `11` | XSK RX + user-space TX | active | Redirect the original packet to XSK; user space returns a UDP DNS response with `RCODE=NOERROR` and one fixed A answer from `response.params.address` |
+| `dns_sinkhole` | `11` | XSK RX + user-space TX | active | Redirect the original packet to XSK; user space returns a UDP DNS response with `RCODE=NOERROR` and A and/or AAAA answers selected from `response.params` by query type |
 
 Action names are stable snake-case API values. Numeric codes are the dataplane
 ABI and must stay synchronized with BPF definitions.
@@ -113,19 +113,29 @@ semantics are implemented.
 IPv4 and UDP checksums on the swapped tuple.
 
 `dns_refused` v1 supports IPv4 UDP DNS queries only. It requires a standard
-query with exactly one question, returns `QR=1` and `RCODE=REFUSED`, copies the
-question section back unchanged, and clears answer, authority, and additional
-sections. EDNS OPT and other additional records are not preserved in v1.
+query with exactly one question, returns `QR=1`, copies the question section
+back unchanged, clears answer, authority, and additional sections, and uses
+`response.params.rcode` to select one of `REFUSED`, `NXDOMAIN`, or
+`SERVFAIL`. When `response.params.rcode` is omitted, the control plane
+normalizes it to `refused`. EDNS OPT and other additional records are not
+preserved in v1.
 
 `dns_sinkhole` v1 also supports IPv4 UDP DNS queries only. It requires a
-standard query with exactly one question, `QTYPE=A`, and `QCLASS=IN`. The
-response keeps the request ID and `RD`, copies the question section unchanged,
-sets `QR=1`, `RCODE=NOERROR`, clears authority and additional sections, and
-returns exactly one A answer with the IPv4 address from
-`response.params.address`. TTL defaults to `60` when `response.params.ttl` is
-omitted; when present, `ttl` must be an integer in `0..2147483647`, matching
-the DNS TTL limit clarified by RFC 2181 section 8. Unsupported DNS requests
-fail response building and do not fall back to `dns_refused`.
+standard query with exactly one question and `QCLASS=IN`. The response keeps
+the request ID and `RD`, copies the question section unchanged, sets `QR=1`
+and `RCODE=NOERROR`, clears authority and additional sections, and selects the
+configured answer set by query type:
+
+- `QTYPE=A` uses `response.params.answers_v4`
+- `QTYPE=AAAA` uses `response.params.answers_v6`
+- `response.params.family=dual` allows one rule to answer both A and AAAA
+  queries, but each response still returns only the answer family requested by
+  the query
+
+TTL defaults to `60` when `response.params.ttl` is omitted; when present,
+`ttl` must be an integer in `0..2147483647`, matching the DNS TTL limit
+clarified by RFC 2181 section 8. Unsupported DNS requests fail response
+building and do not fall back to `dns_refused`.
 
 ## XSK Metadata
 
@@ -227,8 +237,8 @@ is not part of the current `/stats` contract.
 ## Runtime Configuration
 
 The config layer parses a top-level `egress` block plus the nested
-`response.runtime` and `response.actions` blocks. User-space response execution
-remains disabled unless `response.runtime.enabled` is true. Worker queues
+`response.runtime` block. User-space response execution remains disabled unless
+`response.runtime.enabled` is true. Worker queues
 default to queue `0` when omitted. If `dataplane.combined_channels` is configured
 to a positive value and `response.runtime.queues` is omitted, the runtime
 derives sequential worker queues `0..combined_channels-1`. The local result
@@ -258,11 +268,6 @@ response:
       rx_ring_size: 2048
       tx_ring_size: 2048
       tx_frame_reserve: 256
-  actions:
-    arp_reply:
-      hardware_addr: ""
-    tcp_syn_ack:
-      tcp_seq: 1
 ```
 
 `egress` config fields:
@@ -287,5 +292,12 @@ response:
   alternate egress transmission, starting with `tcp_reset`,
   `icmp_port_unreachable`, `icmp_echo_reply`, and `arp_reply`.
 
-`response.actions.arp_reply.hardware_addr` selects the ARP reply source
-hardware address when configured.
+The runtime resolves the default ARP reply source hardware address from the
+actual TX interface: `egress.interface` when shared egress is enabled,
+otherwise `dataplane.interface`. Per-rule `response.params.hardware_addr`
+overrides this runtime default; per-rule `response.params.sender_ipv4`
+overrides the ARP sender protocol address while omitted `sender_ipv4` keeps the
+current request target protocol address.
+
+`tcp_syn_ack` optionally accepts per-rule `response.params.tcp_seq`. When
+omitted, the response builder uses the default sequence number `1`.

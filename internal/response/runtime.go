@@ -47,7 +47,6 @@ func NewRuntime(opts Options) (*Runtime, error) {
 	ruleConfigs := NewRuleConfigStore()
 	buildOpts := BuildOptions{
 		HardwareAddr: append(net.HardwareAddr(nil), opts.HardwareAddr...),
-		TCPSeq:       opts.TCPSeq,
 		RuleConfigs:  ruleConfigs,
 	}
 	afpacketOut, err := openAFPacketFrameSender(opts.EgressInterface)

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 const ACTION_GROUPS = [
   {
@@ -48,16 +48,19 @@ const PROTOCOL_OPTIONS = [
   { value: 'icmp', label: 'ICMP' },
   { value: 'arp', label: 'ARP' },
 ]
+
 const ICMP_TYPE_OPTIONS = [
   { value: '', label: '不限' },
   { value: 'echo_request', label: 'Echo Request' },
   { value: 'echo_reply', label: 'Echo Reply' },
 ]
+
 const ARP_OPERATION_OPTIONS = [
   { value: '', label: '不限' },
   { value: 'request', label: 'Request' },
   { value: 'reply', label: 'Reply' },
 ]
+
 const TCP_FLAG_FIELDS = [
   { key: 'syn', label: 'SYN' },
   { key: 'ack', label: 'ACK' },
@@ -65,7 +68,9 @@ const TCP_FLAG_FIELDS = [
   { key: 'fin', label: 'FIN' },
   { key: 'psh', label: 'PSH' },
 ]
+
 const TCP_RESET_FLAG_FIELDS = TCP_FLAG_FIELDS.filter(field => field.key !== 'rst')
+
 const UDP_ONLY_ACTIONS = new Set([
   'icmp_port_unreachable',
   'icmp_host_unreachable',
@@ -74,8 +79,116 @@ const UDP_ONLY_ACTIONS = new Set([
   'dns_refused',
   'dns_sinkhole',
 ])
+
 const DNS_TTL_DEFAULT = 60
 const DNS_TTL_MAX = 2147483647
+
+const DNS_FAMILY_OPTIONS = [
+  { value: 'ipv4', label: 'IPv4' },
+  { value: 'ipv6', label: 'IPv6' },
+  { value: 'dual', label: 'Dual' },
+]
+
+const DNS_REFUSED_RCODE_OPTIONS = [
+  { value: 'refused', label: 'REFUSED' },
+  { value: 'nxdomain', label: 'NXDOMAIN' },
+  { value: 'servfail', label: 'SERVFAIL' },
+]
+
+const ACTION_PARAM_SCHEMAS = {
+  dns_refused: {
+    note: 'v1 建议额外限制目标端口为 53。',
+    defaults: {
+      rcode: 'refused',
+    },
+    fields: [
+      {
+        key: 'rcode',
+        label: 'RCODE',
+        type: 'select',
+        options: DNS_REFUSED_RCODE_OPTIONS,
+      },
+    ],
+  },
+  dns_sinkhole: {
+    note: 'v1 仅支持 IPv4 UDP DNS A/AAAA 查询，按 QTYPE 返回对应地址集。',
+    defaults: {
+      family: 'ipv4',
+      answers_v4: '',
+      answers_v6: '',
+      ttl: String(DNS_TTL_DEFAULT),
+    },
+    fields: [
+      {
+        key: 'family',
+        label: 'Family',
+        type: 'select',
+        options: DNS_FAMILY_OPTIONS,
+      },
+      {
+        key: 'answers_v4',
+        label: 'IPv4 Answers',
+        type: 'text',
+        placeholder: '如 192.0.2.10, 192.0.2.11',
+        description: '多个地址使用英文逗号分隔。',
+        visible: params => params.family === 'ipv4' || params.family === 'dual',
+      },
+      {
+        key: 'answers_v6',
+        label: 'IPv6 Answers',
+        type: 'text',
+        placeholder: '如 2001:db8::10, 2001:db8::11',
+        description: '多个地址使用英文逗号分隔。',
+        visible: params => params.family === 'ipv6' || params.family === 'dual',
+      },
+      {
+        key: 'ttl',
+        label: 'TTL',
+        type: 'number',
+        min: '0',
+        max: String(DNS_TTL_MAX),
+        placeholder: `默认 ${DNS_TTL_DEFAULT}`,
+        description: '可选，范围 0 到 2147483647。',
+      },
+    ],
+  },
+  arp_reply: {
+    note: '默认填入当前 TX 网卡 MAC；留空时回退到 runtime 默认 MAC 和请求里的 target protocol address。',
+    defaults: {
+      hardware_addr: '',
+      sender_ipv4: '',
+    },
+    fields: [
+      {
+        key: 'hardware_addr',
+        label: 'Hardware Address',
+        type: 'text',
+        placeholder: '如 02:aa:bb:cc:dd:ee',
+      },
+      {
+        key: 'sender_ipv4',
+        label: 'Sender IPv4',
+        type: 'text',
+        placeholder: '如 192.0.2.10',
+      },
+    ],
+  },
+  tcp_syn_ack: {
+    note: '可选配置回复序列号；省略时默认 1。',
+    defaults: {
+      tcp_seq: '1',
+    },
+    fields: [
+      {
+        key: 'tcp_seq',
+        label: 'TCP Seq',
+        type: 'number',
+        min: '0',
+        placeholder: '默认 1',
+      },
+    ],
+  },
+}
 
 const EMPTY_RULE = {
   name: '',
@@ -107,6 +220,14 @@ function splitNumArr(str) {
   return str.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n))
 }
 
+function chunk(items, size = 2) {
+  const rows = []
+  for (let i = 0; i < items.length; i += size) {
+    rows.push(items.slice(i, i + size))
+  }
+  return rows
+}
+
 function isKnownProtocol(protocol) {
   return PROTOCOL_OPTIONS.some(option => option.value === protocol)
 }
@@ -121,24 +242,56 @@ function normalizePrefixesInput(str) {
   return splitArr(str).map(normalizePrefixValue)
 }
 
-function normalizeResponseParams(action, params) {
-  if (action !== 'dns_sinkhole') {
-    return {}
+function actionParamDefaults(action, defaultARPHardwareAddr = '') {
+  const defaults = ACTION_PARAM_SCHEMAS[action]?.defaults
+  if (!defaults) return {}
+  const next = { ...defaults }
+  if (action === 'arp_reply' && defaultARPHardwareAddr) {
+    next.hardware_addr = defaultARPHardwareAddr
   }
+  return next
+}
 
-  return {
-    address: typeof params?.address === 'string' ? params.address : '',
-    ttl: params?.ttl !== undefined && params?.ttl !== null ? String(params.ttl) : String(DNS_TTL_DEFAULT),
+function normalizeActionParams(action, params, defaultARPHardwareAddr = '') {
+  switch (action) {
+    case 'dns_refused':
+      return {
+        rcode: typeof params?.rcode === 'string' ? params.rcode : 'refused',
+      }
+    case 'dns_sinkhole': {
+      const family = typeof params?.family === 'string' && ['ipv4', 'ipv6', 'dual'].includes(params.family)
+        ? params.family
+        : 'ipv4'
+      return {
+        family,
+        answers_v4: Array.isArray(params?.answers_v4) ? params.answers_v4.join(', ') : '',
+        answers_v6: Array.isArray(params?.answers_v6) ? params.answers_v6.join(', ') : '',
+        ttl: params?.ttl !== undefined && params?.ttl !== null ? String(params.ttl) : String(DNS_TTL_DEFAULT),
+      }
+    }
+    case 'arp_reply':
+      return {
+        hardware_addr: typeof params?.hardware_addr === 'string' && params.hardware_addr
+          ? params.hardware_addr
+          : defaultARPHardwareAddr,
+        sender_ipv4: typeof params?.sender_ipv4 === 'string' ? params.sender_ipv4 : '',
+      }
+    case 'tcp_syn_ack':
+      return {
+        tcp_seq: params?.tcp_seq !== undefined && params?.tcp_seq !== null ? String(params.tcp_seq) : '1',
+      }
+    default:
+      return {}
   }
 }
 
-function normalizeRule(rule) {
+function normalizeRule(rule, defaultARPHardwareAddr = '') {
   if (!rule) return EMPTY_RULE
 
   const action = getActionOption(rule.response?.action).value
   const rawProtocol = isKnownProtocol(rule.match?.protocol) ? rule.match.protocol : 'tcp'
   const protocol = getProtocolForAction(action, rawProtocol)
-  const responseParams = normalizeResponseParams(action, rule.response?.params)
+  const responseParams = normalizeActionParams(action, rule.response?.params, defaultARPHardwareAddr)
   const tcpFlags = { ...(rule.match?.tcp_flags || {}) }
   const icmpType = rule.match?.icmp?.type || ''
   const arpOperation = rule.match?.arp?.operation || ''
@@ -211,14 +364,6 @@ function isProtocolSelectable(action) {
   return action === 'alert' || action === 'none'
 }
 
-function isUDPOnlyResponseAction(action) {
-  return UDP_ONLY_ACTIONS.has(action)
-}
-
-function usesDNSSinkholeParams(action) {
-  return action === 'dns_sinkhole'
-}
-
 function buildTCPFlags(form) {
   return TCP_FLAG_FIELDS.reduce((flags, field) => {
     if (form[`tcp_flag_${field.key}`]) {
@@ -249,6 +394,14 @@ function isBasicIPv4Address(value) {
   return parts.every(part => /^\d{1,3}$/.test(part) && Number(part) >= 0 && Number(part) <= 255)
 }
 
+function isBasicIPv6Address(value) {
+  return value.includes(':') && /^[0-9a-fA-F:]+$/.test(value)
+}
+
+function isBasicMACAddress(value) {
+  return /^(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$/.test(value)
+}
+
 function clearTCPFlagsState(form) {
   form.tcp_flag_syn = false
   form.tcp_flag_ack = false
@@ -257,9 +410,79 @@ function clearTCPFlagsState(form) {
   form.tcp_flag_psh = false
 }
 
-export default function RuleForm({ rule, onSubmit, onCancel }) {
+function buildResponseParams(action, params) {
+  switch (action) {
+    case 'dns_refused':
+      return {
+        rcode: params.rcode || 'refused',
+      }
+    case 'dns_sinkhole': {
+      const family = params.family || 'ipv4'
+      const responseParams = {
+        family,
+        ttl: params.ttl ? Number(params.ttl) : DNS_TTL_DEFAULT,
+      }
+      if (family === 'ipv4' || family === 'dual') {
+        responseParams.answers_v4 = splitArr(params.answers_v4 || '')
+      }
+      if (family === 'ipv6' || family === 'dual') {
+        responseParams.answers_v6 = splitArr(params.answers_v6 || '')
+      }
+      return responseParams
+    }
+    case 'arp_reply': {
+      const responseParams = {}
+      if (params.hardware_addr?.trim()) {
+        responseParams.hardware_addr = params.hardware_addr.trim()
+      }
+      if (params.sender_ipv4?.trim()) {
+        responseParams.sender_ipv4 = params.sender_ipv4.trim()
+      }
+      return responseParams
+    }
+    case 'tcp_syn_ack':
+      return {
+        tcp_seq: params.tcp_seq?.trim() ? Number(params.tcp_seq) : 1,
+      }
+    default:
+      return {}
+  }
+}
+
+function renderParamField(field, params, setParam) {
+  const value = params[field.key] ?? ''
+
+  return (
+    <div className="form-group" key={field.key}>
+      <label>{field.label}</label>
+      {field.type === 'select' ? (
+        <select value={value} onChange={e => setParam(field.key, e.target.value)}>
+          {field.options.map(option => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <input
+          type={field.type || 'text'}
+          value={value}
+          min={field.min}
+          max={field.max}
+          placeholder={field.placeholder}
+          onChange={e => setParam(field.key, e.target.value)}
+        />
+      )}
+      {field.description && (
+        <div className="form-section-desc">{field.description}</div>
+      )}
+    </div>
+  )
+}
+
+export default function RuleForm({ rule, defaultARPHardwareAddr = '', onSubmit, onCancel }) {
   const isNew = !rule
-  const initial = normalizeRule(rule)
+  const initial = normalizeRule(rule, defaultARPHardwareAddr)
 
   const [form, setForm] = useState({
     name: initial.name,
@@ -278,40 +501,60 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
     tcp_flag_psh: Boolean(initial.match.tcp_flags.psh),
     icmp_type: initial.match.icmp?.type || '',
     arp_operation: initial.match.arp?.operation || '',
-    response_address: initial.response.params.address || '',
-    response_ttl: initial.response.params.ttl ?? '',
+    response_params: initial.response.params,
     action: initial.response.action,
   })
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  const isProtocolEditable = isProtocolSelectable(form.action)
+
+  useEffect(() => {
+    if (!defaultARPHardwareAddr) {
+      return
+    }
+    setForm(current => {
+      if (current.action !== 'arp_reply') {
+        return current
+      }
+      if (current.response_params?.hardware_addr?.trim()) {
+        return current
+      }
+      return {
+        ...current,
+        response_params: {
+          ...current.response_params,
+          hardware_addr: defaultARPHardwareAddr,
+        },
+      }
+    })
+  }, [defaultARPHardwareAddr])
+
   const protocol = form.protocol
+  const isProtocolEditable = isProtocolSelectable(form.action)
   const isTCPProtocol = protocol === 'tcp'
   const isUDPProtocol = protocol === 'udp'
   const isPortProtocol = isTCPProtocol || isUDPProtocol
   const isICMPProtocol = protocol === 'icmp'
   const isARPProtocol = protocol === 'arp'
   const isTCPResetAction = form.action === 'tcp_reset'
-  const isICMPPortUnreachableAction = form.action === 'icmp_port_unreachable'
-  const isICMPHostUnreachableAction = form.action === 'icmp_host_unreachable'
-  const isICMPAdminProhibitedAction = form.action === 'icmp_admin_prohibited'
-  const isUDPEchoReplyAction = form.action === 'udp_echo_reply'
-  const isDNSRefusedAction = form.action === 'dns_refused'
-  const isDNSSinkholeAction = form.action === 'dns_sinkhole'
-  const isUDPOnlyAction = isUDPOnlyResponseAction(form.action)
   const isTCPSynAckAction = form.action === 'tcp_syn_ack'
   const isICMPEchoReplyAction = form.action === 'icmp_echo_reply'
   const isARPReplyAction = form.action === 'arp_reply'
+  const isUDPOnlyAction = UDP_ONLY_ACTIONS.has(form.action)
+  const actionParamSchema = ACTION_PARAM_SCHEMAS[form.action] || null
+  const actionParamFields = actionParamSchema
+    ? actionParamSchema.fields.filter(field => !field.visible || field.visible(form.response_params))
+    : []
   const visibleTCPFlagFields = isTCPSynAckAction ? [{ key: 'syn', label: 'SYN' }] : isTCPResetAction ? TCP_RESET_FLAG_FIELDS : TCP_FLAG_FIELDS
 
   function set(key, value) {
-    setForm(f => {
+    setForm(current => {
       if (key === 'action') {
-        const nextProtocol = getProtocolForAction(value, f.protocol)
+        const nextProtocol = getProtocolForAction(value, current.protocol)
         const next = {
-          ...f,
+          ...current,
           action: value,
           protocol: nextProtocol,
+          response_params: actionParamDefaults(value, defaultARPHardwareAddr),
         }
 
         if (nextProtocol !== 'tcp') {
@@ -331,7 +574,7 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
           next.arp_operation = ''
         }
 
-        if (isUDPOnlyResponseAction(value)) {
+        if (UDP_ONLY_ACTIONS.has(value)) {
           next.icmp_type = ''
           next.arp_operation = ''
           clearTCPFlagsState(next)
@@ -358,45 +601,46 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
           }
         }
 
-        if (!usesDNSSinkholeParams(value)) {
-          next.response_address = ''
-          next.response_ttl = ''
-        } else if (!next.response_ttl) {
-          next.response_ttl = String(DNS_TTL_DEFAULT)
-        }
-
         return next
       }
 
       if (key !== 'protocol') {
-        if (key === 'tcp_flag_rst' && f.action === 'tcp_reset') {
-          return f
+        if (key === 'tcp_flag_rst' && current.action === 'tcp_reset') {
+          return current
         }
-        if ((key === 'tcp_flag_ack' || key === 'tcp_flag_rst' || key === 'tcp_flag_fin' || key === 'tcp_flag_psh') && f.action === 'tcp_syn_ack') {
-          return f
+        if ((key === 'tcp_flag_ack' || key === 'tcp_flag_rst' || key === 'tcp_flag_fin' || key === 'tcp_flag_psh') && current.action === 'tcp_syn_ack') {
+          return current
         }
-        return { ...f, [key]: value }
+        return { ...current, [key]: value }
       }
 
       const next = {
-        ...f,
+        ...current,
         protocol: value,
       }
 
       if (value !== 'tcp') {
         clearTCPFlagsState(next)
       }
-
       if (value !== 'icmp') {
         next.icmp_type = ''
       }
-
       if (value !== 'arp') {
         next.arp_operation = ''
       }
 
       return next
     })
+  }
+
+  function setResponseParam(key, value) {
+    setForm(current => ({
+      ...current,
+      response_params: {
+        ...current.response_params,
+        [key]: value,
+      },
+    }))
   }
 
   async function handleSubmit(e) {
@@ -407,6 +651,7 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
       setError('规则名称不能为空')
       return
     }
+
     const priority = parseInt(form.priority, 10)
     if (isNaN(priority) || priority < 0) {
       setError('优先级必须为大于等于 0 的整数')
@@ -417,10 +662,9 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
     const srcPorts = splitNumArr(form.src_ports)
     const dstPorts = splitNumArr(form.dst_ports)
     const tcpFlags = isTCPProtocol ? buildTCPFlags(form) : {}
-    const protocol = form.protocol.trim()
+    const protocolValue = form.protocol.trim()
     const action = form.action.trim()
-    const responseAddress = form.response_address.trim()
-    const responseTTL = form.response_ttl.trim()
+    const responseParams = form.response_params || {}
 
     const vlanError = validateNumberList(vlans, 0, 4095, 'VLAN')
     if (vlanError) {
@@ -446,7 +690,7 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
     }
 
     if (action === 'icmp_echo_reply') {
-      if (protocol !== 'icmp') {
+      if (protocolValue !== 'icmp') {
         setError('`icmp_echo_reply` 要求协议为 icmp')
         return
       }
@@ -457,7 +701,7 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
     }
 
     if (action === 'arp_reply') {
-      if (protocol !== 'arp') {
+      if (protocolValue !== 'arp') {
         setError('`arp_reply` 要求协议为 arp')
         return
       }
@@ -465,10 +709,18 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
         setError('`arp_reply` 要求 ARP 操作为 request')
         return
       }
+      if (responseParams.hardware_addr?.trim() && !isBasicMACAddress(responseParams.hardware_addr.trim())) {
+        setError('`arp_reply` 的 hardware_addr 必须是 MAC 地址')
+        return
+      }
+      if (responseParams.sender_ipv4?.trim() && !isBasicIPv4Address(responseParams.sender_ipv4.trim())) {
+        setError('`arp_reply` 的 sender_ipv4 必须是 IPv4 地址')
+        return
+      }
     }
 
     if (action === 'tcp_syn_ack') {
-      if (protocol !== 'tcp') {
+      if (protocolValue !== 'tcp') {
         setError('`tcp_syn_ack` 要求协议为 tcp')
         return
       }
@@ -480,6 +732,13 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
         setError('`tcp_syn_ack` 仅允许初始 SYN 匹配，不允许 ACK/RST/FIN/PSH')
         return
       }
+      if (responseParams.tcp_seq?.trim()) {
+        const tcpSeq = Number(responseParams.tcp_seq)
+        if (!Number.isInteger(tcpSeq) || tcpSeq < 0 || tcpSeq > 4294967295) {
+          setError('`tcp_syn_ack` 的 tcp_seq 必须是 0 到 4294967295 的整数')
+          return
+        }
+      }
     }
 
     if (action === 'tcp_reset' && tcpFlags.rst) {
@@ -487,24 +746,48 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
       return
     }
 
-    if (isUDPOnlyResponseAction(action)) {
-      if (protocol !== 'udp') {
-        setError(`\`${action}\` 要求协议为 udp`)
+    if (UDP_ONLY_ACTIONS.has(action) && protocolValue !== 'udp') {
+      setError(`\`${action}\` 要求协议为 udp`)
+      return
+    }
+
+    if (action === 'dns_refused') {
+      if (!['refused', 'nxdomain', 'servfail'].includes(responseParams.rcode || 'refused')) {
+        setError('`dns_refused` 的 rcode 仅支持 refused、nxdomain、servfail')
         return
       }
     }
 
-    if (usesDNSSinkholeParams(action)) {
-      if (!responseAddress) {
-        setError('`dns_sinkhole` 要求填写 address')
+    if (action === 'dns_sinkhole') {
+      const family = responseParams.family?.trim()
+      const answersV4 = splitArr(responseParams.answers_v4 || '')
+      const answersV6 = splitArr(responseParams.answers_v6 || '')
+      const ttlValue = responseParams.ttl?.trim()
+
+      if (!['ipv4', 'ipv6', 'dual'].includes(family)) {
+        setError('`dns_sinkhole` 的 family 必须是 ipv4、ipv6 或 dual')
         return
       }
-      if (!isBasicIPv4Address(responseAddress)) {
-        setError('`dns_sinkhole` 的 address 必须是 IPv4 地址')
+      if ((family === 'ipv4' || family === 'dual') && answersV4.length === 0) {
+        setError('`dns_sinkhole` 在 ipv4/dual 模式下要求填写 answers_v4')
         return
       }
-      if (responseTTL) {
-        const ttl = Number(responseTTL)
+      if ((family === 'ipv6' || family === 'dual') && answersV6.length === 0) {
+        setError('`dns_sinkhole` 在 ipv6/dual 模式下要求填写 answers_v6')
+        return
+      }
+      const invalidV4 = answersV4.find(value => !isBasicIPv4Address(value))
+      if (invalidV4) {
+        setError('`dns_sinkhole` 的 answers_v4 必须是 IPv4 地址列表')
+        return
+      }
+      const invalidV6 = answersV6.find(value => !isBasicIPv6Address(value))
+      if (invalidV6) {
+        setError('`dns_sinkhole` 的 answers_v6 必须是 IPv6 地址列表')
+        return
+      }
+      if (ttlValue) {
+        const ttl = Number(ttlValue)
         if (!Number.isInteger(ttl) || ttl < 0 || ttl > DNS_TTL_MAX) {
           setError('`dns_sinkhole` 的 ttl 必须是 0 到 2147483647 的整数')
           return
@@ -513,7 +796,7 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
     }
 
     const match = {
-      protocol,
+      protocol: protocolValue,
       vlans,
       src_prefixes: normalizePrefixesInput(form.src_prefixes),
       dst_prefixes: normalizePrefixesInput(form.dst_prefixes),
@@ -535,11 +818,9 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
     )
 
     const response = { action }
-    if (usesDNSSinkholeParams(action)) {
-      response.params = { address: responseAddress }
-      if (responseTTL) {
-        response.params.ttl = Number(responseTTL)
-      }
+    const builtResponseParams = buildResponseParams(action, responseParams)
+    if (Object.keys(builtResponseParams).length > 0) {
+      response.params = builtResponseParams
     }
 
     const payload = {
@@ -624,40 +905,20 @@ export default function RuleForm({ rule, onSubmit, onCancel }) {
               {isUDPOnlyAction && (
                 <div className="form-section-desc">该动作会自动固定为 UDP。</div>
               )}
-              {isDNSRefusedAction && (
-                <div className="form-section-desc">v1 建议额外限制目标端口为 53。</div>
-              )}
-              {isDNSSinkholeAction && (
-                <div className="form-section-desc">v1 仅支持 IPv4 UDP DNS A 查询，返回固定 A 记录。</div>
+              {actionParamSchema?.note && (
+                <div className="form-section-desc">{actionParamSchema.note}</div>
               )}
             </div>
 
-            {isDNSSinkholeAction && (
+            {actionParamFields.length > 0 && (
               <>
                 <div className="form-section-title">响应参数</div>
-                <div className="form-row">
-                  <div className="form-group">
-                    <label>IPv4 Address <span className="required">*</span></label>
-                    <input
-                      type="text"
-                      value={form.response_address}
-                      onChange={e => set('response_address', e.target.value)}
-                      placeholder="如 192.0.2.10"
-                    />
+                {chunk(actionParamFields).map((row, rowIndex) => (
+                  <div className="form-row" key={`${form.action}-params-${rowIndex}`}>
+                    {row.map(field => renderParamField(field, form.response_params, setResponseParam))}
+                    {row.length === 1 && <div />}
                   </div>
-                  <div className="form-group">
-                    <label>TTL</label>
-                    <input
-                      type="number"
-                      min="0"
-                      max={DNS_TTL_MAX}
-                      value={form.response_ttl}
-                      onChange={e => set('response_ttl', e.target.value)}
-                      placeholder={`默认 ${DNS_TTL_DEFAULT}`}
-                    />
-                    <div className="form-section-desc">可选，范围 0 到 2147483647。</div>
-                  </div>
-                </div>
+                ))}
               </>
             )}
 

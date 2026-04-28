@@ -38,9 +38,7 @@ func BenchmarkBuildARPReply(b *testing.B) {
 }
 
 func BenchmarkBuildTCPSynAck(b *testing.B) {
-	benchmarkBuildResponseFrame(b, XSKMetadata{Action: ActionTCPSynAck}, buildTestTCPSyn(b), BuildOptions{
-		TCPSeq: 1000,
-	})
+	benchmarkBuildResponseFrame(b, XSKMetadata{RuleID: 1003, Action: ActionTCPSynAck}, buildTestTCPSyn(b), testTCPSynAckBuildOptions(b, 1003, 1000))
 }
 
 func BenchmarkExecuteICMPEchoReply(b *testing.B) {
@@ -63,9 +61,7 @@ func BenchmarkExecuteTCPSynAck(b *testing.B) {
 	benchmarkExecuteResponseFrame(b, XSKMetadata{
 		RuleID: 1003,
 		Action: ActionTCPSynAck,
-	}, buildTestTCPSyn(b), BuildOptions{
-		TCPSeq: 1000,
-	})
+	}, buildTestTCPSyn(b), testTCPSynAckBuildOptions(b, 1003, 1000))
 }
 
 func benchmarkBuildResponseFrame(b *testing.B, meta XSKMetadata, request []byte, opts BuildOptions) {

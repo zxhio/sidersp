@@ -3,6 +3,7 @@ package controlplane
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -460,7 +461,8 @@ func TestLoadRulesRejectsIncompatibleXSKActions(t *testing.T) {
     response:
       action: dns_sinkhole
       params:
-        address: 192.0.2.10`,
+        family: ipv4
+        answers_v4: [192.0.2.10]`,
 			want: "requires match.protocol udp",
 		},
 	}
@@ -523,6 +525,8 @@ func TestLoadRulesAcceptsCompatibleXSKActions(t *testing.T) {
         syn: true
     response:
       action: tcp_syn_ack
+      params:
+        tcp_seq: 1000
   - id: 1004
     name: icmp-port-unreachable
     enabled: true
@@ -549,6 +553,8 @@ func TestLoadRulesAcceptsCompatibleXSKActions(t *testing.T) {
       dst_ports: [53]
     response:
       action: dns_refused
+      params:
+        rcode: servfail
   - id: 1007
     name: icmp-host-unreachable
     enabled: true
@@ -575,7 +581,9 @@ func TestLoadRulesAcceptsCompatibleXSKActions(t *testing.T) {
     response:
       action: dns_sinkhole
       params:
-        address: 192.0.2.10
+        family: dual
+        answers_v4: [192.0.2.10]
+        answers_v6: [2001:db8::10]
 `)
 
 	set, err := LoadRules(path)
@@ -596,41 +604,56 @@ func TestLoadRulesValidatesResponseParams(t *testing.T) {
 		want     string
 	}{
 		{
-			name: "dns sinkhole accepts valid address",
+			name: "dns sinkhole accepts valid ipv4 family",
 			ruleYAML: `match:
       protocol: udp
     response:
       action: dns_sinkhole
       params:
-        address: 192.0.2.10`,
+        family: ipv4
+        answers_v4: [192.0.2.10]`,
 		},
 		{
-			name: "dns sinkhole accepts valid ttl",
+			name: "dns sinkhole accepts valid dual family and ttl",
 			ruleYAML: `match:
       protocol: udp
     response:
       action: dns_sinkhole
       params:
-        address: 192.0.2.10
+        family: dual
+        answers_v4: [192.0.2.10]
+        answers_v6: [2001:db8::10]
         ttl: 300`,
 		},
 		{
-			name: "dns sinkhole rejects missing address",
+			name: "dns sinkhole rejects missing family",
 			ruleYAML: `match:
       protocol: udp
     response:
       action: dns_sinkhole`,
-			want: "response.params.address is required",
+			want: "response.params.family is required",
 		},
 		{
-			name: "dns sinkhole rejects invalid address",
+			name: "dns sinkhole rejects invalid ipv4 answer",
 			ruleYAML: `match:
       protocol: udp
     response:
       action: dns_sinkhole
       params:
-        address: 2001:db8::1`,
-			want: "response.params.address must be a single IPv4 address string",
+        family: ipv4
+        answers_v4: [2001:db8::1]`,
+			want: "response.params.answers_v4 must be a non-empty IPv4 address list",
+		},
+		{
+			name: "dns sinkhole rejects missing family answers",
+			ruleYAML: `match:
+      protocol: udp
+    response:
+      action: dns_sinkhole
+      params:
+        family: dual
+        answers_v4: [192.0.2.10]`,
+			want: "response.params.answers_v6 is required when family is dual",
 		},
 		{
 			name: "dns sinkhole rejects ttl above rfc limit",
@@ -639,7 +662,8 @@ func TestLoadRulesValidatesResponseParams(t *testing.T) {
     response:
       action: dns_sinkhole
       params:
-        address: 192.0.2.10
+        family: ipv4
+        answers_v4: [192.0.2.10]
         ttl: 2147483648`,
 			want: "response.params.ttl must be an integer in range 0..2147483647",
 		},
@@ -650,12 +674,95 @@ func TestLoadRulesValidatesResponseParams(t *testing.T) {
     response:
       action: dns_sinkhole
       params:
-        address: 192.0.2.10
+        family: ipv4
+        answers_v4: [192.0.2.10]
         foo: 1`,
 			want: "response.params.foo is not allowed",
 		},
 		{
-			name: "no param action rejects params",
+			name: "dns refused accepts default params",
+			ruleYAML: `match:
+      protocol: udp
+    response:
+      action: dns_refused`,
+		},
+		{
+			name: "dns refused accepts custom rcode",
+			ruleYAML: `match:
+      protocol: udp
+    response:
+      action: dns_refused
+      params:
+        rcode: nxdomain`,
+		},
+		{
+			name: "dns refused rejects invalid rcode",
+			ruleYAML: `match:
+      protocol: udp
+    response:
+      action: dns_refused
+      params:
+        rcode: noerror`,
+			want: "response.params.rcode must be one of refused, nxdomain, servfail",
+		},
+		{
+			name: "arp reply accepts params override",
+			ruleYAML: `match:
+      protocol: arp
+      arp:
+        operation: request
+    response:
+      action: arp_reply
+      params:
+        hardware_addr: 02:aa:bb:cc:dd:ee
+        sender_ipv4: 192.0.2.10`,
+		},
+		{
+			name: "tcp syn ack accepts default params",
+			ruleYAML: `match:
+      protocol: tcp
+      tcp_flags:
+        syn: true
+    response:
+      action: tcp_syn_ack`,
+		},
+		{
+			name: "tcp syn ack accepts custom tcp seq",
+			ruleYAML: `match:
+      protocol: tcp
+      tcp_flags:
+        syn: true
+    response:
+      action: tcp_syn_ack
+      params:
+        tcp_seq: 1000`,
+		},
+		{
+			name: "tcp syn ack rejects invalid tcp seq",
+			ruleYAML: `match:
+      protocol: tcp
+      tcp_flags:
+        syn: true
+    response:
+      action: tcp_syn_ack
+      params:
+        tcp_seq: -1`,
+			want: "response.params.tcp_seq must be an integer in range 0..4294967295",
+		},
+		{
+			name: "arp reply rejects invalid sender ipv4",
+			ruleYAML: `match:
+      protocol: arp
+      arp:
+        operation: request
+    response:
+      action: arp_reply
+      params:
+        sender_ipv4: 2001:db8::1`,
+			want: "response.params.sender_ipv4 must be a single IPv4 address string",
+		},
+		{
+			name: "dns refused rejects unknown params",
 			ruleYAML: `match:
       protocol: udp
     response:
@@ -684,12 +791,41 @@ func TestLoadRulesValidatesResponseParams(t *testing.T) {
 				if err != nil {
 					t.Fatalf("LoadRules() error = %v", err)
 				}
-				if got := set.Rules[0].Response.Params["address"]; got != "192.0.2.10" {
-					t.Fatalf("address = %v, want 192.0.2.10", got)
-				}
-				if strings.Contains(tc.name, "ttl") {
-					if got := set.Rules[0].Response.Params["ttl"]; got != 300 {
-						t.Fatalf("ttl = %v, want 300", got)
+				switch {
+				case strings.Contains(tc.name, "dns sinkhole"):
+					if got := set.Rules[0].Response.Params["family"]; got == nil {
+						t.Fatalf("family = nil, want normalized family")
+					}
+					if strings.Contains(tc.name, "ipv4 family") {
+						if got := set.Rules[0].Response.Params["answers_v4"]; !reflect.DeepEqual(got, []string{"192.0.2.10"}) {
+							t.Fatalf("answers_v4 = %#v, want [192.0.2.10]", got)
+						}
+					}
+					if strings.Contains(tc.name, "dual family") {
+						if got := set.Rules[0].Response.Params["answers_v6"]; !reflect.DeepEqual(got, []string{"2001:db8::10"}) {
+							t.Fatalf("answers_v6 = %#v, want [2001:db8::10]", got)
+						}
+						if got := set.Rules[0].Response.Params["ttl"]; got != 300 {
+							t.Fatalf("ttl = %v, want 300", got)
+						}
+					}
+				case strings.Contains(tc.name, "dns refused"):
+					if got := set.Rules[0].Response.Params["rcode"]; got == nil {
+						t.Fatalf("rcode = nil, want normalized rcode")
+					}
+				case strings.Contains(tc.name, "arp reply"):
+					if got := set.Rules[0].Response.Params["hardware_addr"]; got != "02:aa:bb:cc:dd:ee" {
+						t.Fatalf("hardware_addr = %v, want 02:aa:bb:cc:dd:ee", got)
+					}
+				case strings.Contains(tc.name, "tcp syn ack"):
+					if strings.Contains(tc.name, "custom") {
+						if got := set.Rules[0].Response.Params["tcp_seq"]; got != uint32(1000) {
+							t.Fatalf("tcp_seq = %#v, want 1000", got)
+						}
+					} else {
+						if got := set.Rules[0].Response.Params["tcp_seq"]; got != uint32(1) {
+							t.Fatalf("tcp_seq = %#v, want default 1", got)
+						}
 					}
 				}
 				return

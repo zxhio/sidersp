@@ -3,7 +3,6 @@ package config
 import (
 	"bytes"
 	"fmt"
-	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -46,7 +45,6 @@ type EgressConfig struct {
 
 type ResponseConfig struct {
 	Runtime ResponseRuntimeConfig `yaml:"runtime"`
-	Actions ResponseActionsConfig `yaml:"actions"`
 }
 
 type ResponseRuntimeConfig struct {
@@ -54,19 +52,6 @@ type ResponseRuntimeConfig struct {
 	Queues           []int       `yaml:"queues"`
 	ResultBufferSize int         `yaml:"result_buffer_size"`
 	AFXDP            AFXDPConfig `yaml:"afxdp"`
-}
-
-type ResponseActionsConfig struct {
-	ARPReply  ARPReplyConfig  `yaml:"arp_reply"`
-	TCPSynAck TCPSynAckConfig `yaml:"tcp_syn_ack"`
-}
-
-type ARPReplyConfig struct {
-	HardwareAddr string `yaml:"hardware_addr"`
-}
-
-type TCPSynAckConfig struct {
-	TCPSeq uint32 `yaml:"tcp_seq"`
 }
 
 type AFXDPConfig struct {
@@ -203,9 +188,6 @@ func (c ResponseConfig) validate() error {
 	if err := c.Runtime.validate(); err != nil {
 		return fmt.Errorf("runtime: %w", err)
 	}
-	if err := c.Actions.validate(); err != nil {
-		return fmt.Errorf("actions: %w", err)
-	}
 	return nil
 }
 
@@ -222,19 +204,6 @@ func (c ResponseRuntimeConfig) validate() error {
 			return fmt.Errorf("duplicate queue %d", queue)
 		}
 		seenQueues[queue] = struct{}{}
-	}
-	return nil
-}
-
-func (c ResponseActionsConfig) validate() error {
-	if strings.TrimSpace(c.ARPReply.HardwareAddr) != "" {
-		hw, err := net.ParseMAC(c.ARPReply.HardwareAddr)
-		if err != nil {
-			return fmt.Errorf("hardware_addr: %w", err)
-		}
-		if len(hw) != 6 {
-			return fmt.Errorf("hardware_addr must be a 6-byte ethernet address")
-		}
 	}
 	return nil
 }
