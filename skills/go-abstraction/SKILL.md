@@ -1,12 +1,14 @@
 ---
 name: go-abstraction
-description: Improve Go code structure with minimal generics, small strategy interfaces, and symmetric naming.
+description: Improve Go code structure with concrete root types, minimal generics, small strategy interfaces, and symmetric naming.
 ---
 
 ## When to use this
 
 Use when modifying or reviewing Go code that has:
 
+- unclear owner for state, dependencies, or lifecycle
+- large constructor dependency bags or optional behaviors without a clear pattern
 - repeated collection/store/helper logic
 - long if/else or switch branches for similar business actions
 - unclear type, file, method, or package names
@@ -19,13 +21,41 @@ Keep Go code explicit, small, and easy to extend.
 
 Use:
 
+- a concrete root type for workflow ownership
 - generics for structural duplication
 - interfaces for behavior variation
+- function types for single actions
+- `WithXxx(...)` options for optional behavior
 - symmetric naming for paired roles
 
 Do not abstract only to make code look clever.
 
-## 1. Generics
+## 1. Concrete owners
+
+Use a concrete root type when a component owns workflow, mutable state, shared dependencies, or lifecycle.
+
+Example:
+
+```go
+type Manager struct {
+    items  map[string]Item
+    logger *logrus.Entry
+}
+```
+
+Rules:
+
+- Start from a concrete root type.
+- Keep long-lived state, shared dependencies, and lifecycle on that type.
+- Make public lifecycle transitions explicit with names like `Start`, `Stop`, `Run`, `Serve`, `Create`, or `Destroy`.
+- Organize packages by runtime responsibility, not generic layers.
+- Keep structs flat unless nesting clarifies a real boundary.
+- Required dependencies go in constructor parameters.
+- Optional behavior goes in `WithXxx(...)` options.
+- Avoid large dependency bags and hidden lifecycle in helpers.
+- Prefer a little duplication over fake abstraction.
+
+## 2. Generics
 
 Use generics when multiple concrete types share the same structure or algorithm.
 
@@ -59,7 +89,7 @@ Rules:
 - If call sites become harder to read, keep concrete code.
 - Avoid generic names like Manager[T], Service[T], Handler[T] unless the boundary is very clear.
 
-## 2. Strategy interfaces
+## 3. Strategy interfaces
 
 Use interfaces when the same business action has multiple implementations.
 
@@ -95,6 +125,7 @@ func (d *ActionDispatcher) Dispatch(ctx context.Context, action ActionType, even
 
 Rules:
 
+- If the dependency is one action, prefer a function type over a one-method interface.
 - Use interfaces for stable extension points.
 - Prefer strategy dispatch when many branches perform the same kind of action with different implementations.
 - Keep the interface small, usually one main method.
@@ -103,7 +134,13 @@ Rules:
 - Keep simple conditions as normal if statements.
 - Do not introduce interfaces for one implementation unless the boundary is expected to grow.
 
-## 3. Symmetric naming
+Single-action example:
+
+```go
+type FindFn func(key string) (Item, bool)
+```
+
+## 4. Symmetric naming
 
 Use symmetric names for related roles.
 
@@ -153,6 +190,7 @@ Rules:
 
 Use this rule:
 
+- Unclear owner or lifecycle: start with a concrete root type.
 - Same structure, different types: consider generics.
 - Same action, different implementations: consider strategy interface.
 - Same concept group, different directions or sides: use symmetric naming.

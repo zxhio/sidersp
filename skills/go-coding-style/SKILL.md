@@ -1,57 +1,69 @@
 ---
-
 name: go-coding-style
-description: Use when adding or reviewing Go coding style rules, especially goroutine launch, config/options boundary, and practical test scope.
+description: Use when adding or reviewing Go coding style rules, especially goroutine launch visibility, config/options boundary, and practical test scope.
 ---
 
 # Go Coding Style
 
-Use this skill when adding or reviewing Go code style and small implementation rules.
+Use this skill for local Go coding rules, not broader abstraction design.
 
-Keep rules simple. Prefer explicit code over clever abstraction.
+Keep rules short. Prefer explicit code.
 
 ## Goroutine launch
 
 * Prefer `go xxx()` for existing work functions.
-* Do not hide `go` inside the called function or method.
+* Do not hide `go` inside non-blocking functions or methods.
 * Keep simple wrappers inline.
-* The call site should make concurrency visible.
+* The call site should make top-level concurrency visible.
+* Blocking orchestration functions may start child goroutines internally when they also own wait, cancel, and error propagation before return.
+* Do not start background work in a function that returns before that work is done.
+* For ownership, lifecycle, or abstraction design, use `go-abstraction`.
 
 ### Good
 
-```
+```go
 go svc.Handle(ctx, ev)
 ```
 
 ### Also OK
 
-Use this when a thin wrapper is enough.
-
-```
+```go
 go func() {
     _ = svc.Handle(ctx, ev)
 }()
+```
 
-go func() {
-    sig := <-sigCh
-    logrus.WithField("signal", sig.String()).Info("Stopped service")
-    cancel()
-}()
+### Also OK
+
+```go
+func (g *WorkerGroup) Run(ctx context.Context) error {
+    var wg sync.WaitGroup
+    for _, worker := range g.workers {
+        worker := worker
+        wg.Add(1)
+        go func() {
+            defer wg.Done()
+            _ = worker.Run(ctx)
+        }()
+    }
+    wg.Wait()
+    return nil
+}
 ```
 
 ### Do not
 
-```
+```go
 func (s *Service) Handle(ctx context.Context, ev Event) {
     go s.write(ctx, ev)
 }
 ```
 
-## Config and Options
+## Config and options
 
 * `config` only reads and parses raw config.
 * Do not let business logic consume raw config directly.
-* Convert raw config into validated module `Options` before constructing services, workers, or managers.
+* Convert raw config into validated module `Options` before constructing runtime components.
 * Defaults, normalization, and business validation belong to module `Options`.
 * Runtime checks belong to `Start`, `Run`, or the actual runtime boundary.
 
@@ -60,17 +72,15 @@ Recommended flow:
 ```
 config.Load()
     ↓
-moduleA.NewOptions(cfg.ModuleA)
-moduleB.NewOptions(cfg.ModuleB)
+module.NewOptions(cfg.Module)
     ↓
-moduleA.NewWorker(optA)
-moduleB.NewService(optB)
+module.NewService(opt)
 ```
 
 ### Keep in config
 
-* read file
-* parse YAML / JSON
+* file read
+* YAML / JSON parse
 * env override if already used
 * basic type conversion
 * basic format validation
@@ -82,46 +92,12 @@ moduleB.NewService(optB)
 * business validation
 * conditional required-field checks
 
-Example:
-
-```
-func NewOptions(cfg config.ModuleConfig) (Options, error) {
-    opt := Options{
-        Enabled:   cfg.Enabled,
-        Addr:      cfg.Addr,
-        BatchSize: defaultInt(cfg.BatchSize, 64),
-    }
-
-    if opt.Enabled && opt.Addr == "" {
-        return Options{}, fmt.Errorf("addr is required when module is enabled")
-    }
-
-    return opt, nil
-}
-```
-
-### Do not
-
-```
-func NewWorker(cfg config.ModuleConfig) *Worker {
-    batchSize := cfg.BatchSize
-    if batchSize == 0 {
-        batchSize = 64
-    }
-
-    return &Worker{
-        batchSize: batchSize,
-    }
-}
-```
-
 ## Tests
 
 * Test stable behavior, not implementation details.
-* Prefer boundary tests over small helper tests.
+* Prefer boundary tests over internal helper tests.
 * Do not add tests only for coverage.
-* For refactors, prefer updating existing tests over adding many new tests.
-* Add new tests only when they protect important behavior.
+* For refactors, prefer updating existing tests over adding many new ones.
 * Keep tests small and focused.
 
 ### Prefer testing
@@ -130,7 +106,7 @@ func NewWorker(cfg config.ModuleConfig) *Worker {
 * input-to-output mapping at boundaries
 * decision branching behavior
 * API response format
-* lifecycle boundary (start, stop, reload)
+* lifecycle boundary behavior
 * error handling at important boundaries
 
 ### Avoid testing
@@ -141,18 +117,10 @@ func NewWorker(cfg config.ModuleConfig) *Worker {
 * private tiny helpers
 * log strings
 * internal call order
-* behavior already covered by another boundary test
 
-Before adding a test, check:
+## Quick check
 
-```
-Will this fail when user-visible behavior is wrong?
-Will this survive internal refactoring when behavior is unchanged?
-```
-
-If not, avoid the test.
-
-## General rules
-
-* Keep code explicit and readable.
-* Prefer existing project style.
+* Is top-level goroutine launch visible at the call site?
+* If a blocking function starts goroutines internally, does it also wait for them and own their lifecycle?
+* Are raw config parsing and validated `Options` separated?
+* Will the test survive refactoring if behavior stays the same?
