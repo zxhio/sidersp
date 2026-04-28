@@ -10,7 +10,7 @@ This document defines the system module contract. For the short agent-facing sum
 | `controlplane` | `internal/controlplane/` | active | Rule loading, rule validation, runtime state, statistics aggregation, workflow orchestration |
 | `console` | `internal/console/`, `web/` | active | REST API, status display, statistics view, rule CRUD |
 | `config` | `internal/config/` | active | Local configuration loading and validation |
-| `logging` | `internal/logging/` | active | Runtime log output setup, file rotation, and log-level management |
+| `logging` | `internal/logs/` | active | Runtime log output setup, file rotation, and log-level management |
 | `model` | `internal/model/` | active | Shared data models used across modules |
 | `rule` | `internal/rule/` | active | Shared rule schema used by controlplane, console, and dataplane compilation |
 | `analysis` | `internal/analysis/` | planned | Deep analysis task submission and result ingestion |
