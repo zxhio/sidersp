@@ -1,6 +1,6 @@
 ---
 name: planning-with-files
-description: Inspect the current code and specs first, then write a short implementation plan file that is execution-ready and includes progress tracking.
+description: Inspect the current code and specs first, then prepare a short execution-ready implementation plan with progress tracking. Use it even in Plan Mode when the user wants a file-backed plan.
 ---
 
 ## When to use this
@@ -12,6 +12,8 @@ Use when the user wants a plan written to a file before implementation, especial
 - implementation sequencing
 - validation steps
 - progress tracking during execution
+
+Do not skip this skill just because the conversation is already in Plan Mode.
 
 ## Goal
 
@@ -66,6 +68,17 @@ Do not turn the plan file into a product brief, architecture essay, or duplicate
 5. Prefer simple structure
 
    Keep the file short unless complexity truly requires more detail.
+
+6. Respect collaboration mode
+
+   If the current mode forbids repo mutations, still use this skill to drive the plan structure and content.
+
+   In that case:
+
+   - do the same inspection work
+   - prepare the exact plan content
+   - do not write the file yet
+   - make it easy to drop into the target plan file unchanged later
 
 ## What a good plan file contains
 
@@ -211,3 +224,9 @@ When the user later asks to implement:
 - use the Progress checklist to track completion
 - keep status updates short
 - run or report the Verify steps at the end
+
+If this skill was used earlier during Plan Mode without writing the file:
+
+- use that plan content as the source of truth
+- write or update the plan file first when edits become allowed
+- then implement from it
