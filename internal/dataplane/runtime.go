@@ -102,15 +102,17 @@ func (r *Runtime) RunEventStream(ctx context.Context) error {
 		return fmt.Errorf("open event ringbuf: %w", err)
 	}
 
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	go func() {
-		<-ctx.Done()
+		<-runCtx.Done()
 		_ = reader.Close()
 	}()
 
-	go r.logKernelStats(ctx, statsLogInterval)
-	r.streamEvents(ctx, reader)
+	go r.logKernelStats(runCtx, statsLogInterval)
 
-	return nil
+	return r.streamEvents(runCtx, reader)
 }
 
 // ReplaceRules rebuilds and writes the full rule snapshot to BPF maps.
@@ -201,17 +203,14 @@ func (r *Runtime) configurePromisc() error {
 	return nil
 }
 
-func (r *Runtime) streamEvents(ctx context.Context, reader *ringbuf.Reader) {
-	defer reader.Close()
-
+func (r *Runtime) streamEvents(ctx context.Context, reader *ringbuf.Reader) error {
 	for {
 		record, err := reader.Read()
 		if err != nil {
 			if ctx.Err() != nil || err == ringbuf.ErrClosed {
-				return
+				return nil
 			}
-			logs.App().WithError(err).Error("Fail to read dataplane event")
-			return
+			return fmt.Errorf("read dataplane event: %w", err)
 		}
 
 		evt, err := decodeRuleEvent(record.RawSample)

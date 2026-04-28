@@ -40,11 +40,22 @@ func (s testStatsReader) ResetStats() error {
 	return s.resetErr
 }
 
+func newTestRuntime(t testing.TB, opts Options, syncer RuleSyncer, streamer EventStreamer, statsReader StatsReader) *Runtime {
+	t.Helper()
+
+	opts = normalizeOptions(opts)
+	runtime, err := NewRuntime(opts, syncer, streamer, statsReader)
+	if err != nil {
+		t.Fatalf("NewRuntime() error = %v", err)
+	}
+	return runtime
+}
+
 func TestSetRuleEnabledSyncsEnabledRulesOnly(t *testing.T) {
 	t.Parallel()
 
 	syncer := &testSyncer{}
-	r := NewRuntime(config.Config{}, syncer, testStreamer{}, testStatsReader{})
+	r := newTestRuntime(t, Options{}, syncer, testStreamer{}, testStatsReader{})
 	r.rules = rule.RuleSet{
 		Rules: []rule.Rule{
 			{ID: 1, Name: "one", Enabled: true, Priority: 10, Response: rule.RuleResponse{Action: "tcp_reset"}},
@@ -68,7 +79,7 @@ func TestSetRuleEnabledSyncsEnabledRulesOnly(t *testing.T) {
 func TestGetRuleReturnsNotFound(t *testing.T) {
 	t.Parallel()
 
-	r := NewRuntime(config.Config{}, &testSyncer{}, testStreamer{}, testStatsReader{})
+	r := newTestRuntime(t, Options{}, &testSyncer{}, testStreamer{}, testStatsReader{})
 	_, err := r.GetRule(99)
 	if err != ErrRuleNotFound {
 		t.Fatalf("GetRule() error = %v, want %v", err, ErrRuleNotFound)
@@ -80,9 +91,7 @@ func TestCreateRulePersistsAndSyncs(t *testing.T) {
 
 	rulesPath := filepath.Join(t.TempDir(), "rules.yaml")
 	syncer := &testSyncer{}
-	r := NewRuntime(config.Config{
-		ControlPlane: config.ControlPlaneConfig{RulesPath: rulesPath},
-	}, syncer, testStreamer{}, testStatsReader{})
+	r := newTestRuntime(t, Options{RulesPath: rulesPath}, syncer, testStreamer{}, testStatsReader{})
 	r.rules = rule.RuleSet{
 		Rules: []rule.Rule{
 			{ID: 1, Name: "one", Enabled: true, Priority: 10, Response: rule.RuleResponse{Action: "tcp_reset"}},
@@ -121,7 +130,7 @@ func TestCreateRulePersistsAndSyncs(t *testing.T) {
 func TestUpdateRuleIgnoresBodyID(t *testing.T) {
 	t.Parallel()
 
-	r := NewRuntime(config.Config{}, &testSyncer{}, testStreamer{}, testStatsReader{})
+	r := newTestRuntime(t, Options{}, &testSyncer{}, testStreamer{}, testStatsReader{})
 	r.rules = rule.RuleSet{
 		Rules: []rule.Rule{
 			{ID: 1, Name: "one", Enabled: true, Priority: 10, Response: rule.RuleResponse{Action: "tcp_reset"}},
@@ -165,9 +174,7 @@ func TestBootstrapPersistsAssignedRuleIDs(t *testing.T) {
 	}
 
 	syncer := &testSyncer{}
-	r := NewRuntime(config.Config{
-		ControlPlane: config.ControlPlaneConfig{RulesPath: rulesPath},
-	}, syncer, testStreamer{}, testStatsReader{})
+	r := newTestRuntime(t, Options{RulesPath: rulesPath}, syncer, testStreamer{}, testStatsReader{})
 
 	set, err := r.bootstrap()
 	if err != nil {
@@ -193,7 +200,7 @@ func TestDeleteRuleRemovesAndSyncs(t *testing.T) {
 	t.Parallel()
 
 	syncer := &testSyncer{}
-	r := NewRuntime(config.Config{}, syncer, testStreamer{}, testStatsReader{})
+	r := newTestRuntime(t, Options{}, syncer, testStreamer{}, testStatsReader{})
 	r.rules = rule.RuleSet{
 		Rules: []rule.Rule{
 			{ID: 1, Name: "one", Enabled: true, Priority: 10, Response: rule.RuleResponse{Action: "tcp_reset"}},
@@ -217,9 +224,7 @@ func TestSetRuleEnabledPersistsAndSyncs(t *testing.T) {
 
 	rulesPath := filepath.Join(t.TempDir(), "rules.yaml")
 	syncer := &testSyncer{}
-	r := NewRuntime(config.Config{
-		ControlPlane: config.ControlPlaneConfig{RulesPath: rulesPath},
-	}, syncer, testStreamer{}, testStatsReader{})
+	r := newTestRuntime(t, Options{RulesPath: rulesPath}, syncer, testStreamer{}, testStatsReader{})
 	r.rules = rule.RuleSet{
 		Rules: []rule.Rule{
 			{ID: 1, Name: "one", Enabled: true, Priority: 10, Response: rule.RuleResponse{Action: "tcp_reset"}},
@@ -249,7 +254,7 @@ func TestSetRuleEnabledPersistsAndSyncs(t *testing.T) {
 func TestStatsReturnsRuntimeAndDataplaneCounters(t *testing.T) {
 	t.Parallel()
 
-	r := NewRuntime(config.Config{}, &testSyncer{}, testStreamer{}, testStatsReader{
+	r := newTestRuntime(t, Options{}, &testSyncer{}, testStreamer{}, testStatsReader{
 		stats: model.RuntimeStats{
 			Dataplane: model.DataplaneStats{
 				RXPackets:            100,
@@ -348,7 +353,7 @@ func TestStatsReturnsRuntimeAndDataplaneCounters(t *testing.T) {
 func TestRuleMatchCountsReturnsPerRuleCounters(t *testing.T) {
 	t.Parallel()
 
-	r := NewRuntime(config.Config{}, &testSyncer{}, testStreamer{}, testStatsReader{
+	r := newTestRuntime(t, Options{}, &testSyncer{}, testStreamer{}, testStatsReader{
 		stats: model.RuntimeStats{
 			Dataplane: model.DataplaneStats{
 				RuleMatches: map[uint32]uint64{
@@ -371,7 +376,7 @@ func TestRuleMatchCountsReturnsPerRuleCounters(t *testing.T) {
 func TestStatsRejectsInvalidRange(t *testing.T) {
 	t.Parallel()
 
-	r := NewRuntime(config.Config{}, &testSyncer{}, testStreamer{}, testStatsReader{})
+	r := newTestRuntime(t, Options{}, &testSyncer{}, testStreamer{}, testStatsReader{})
 
 	_, err := r.Stats(601)
 	if !errors.Is(err, ErrStatsRangeInvalid) {
@@ -383,7 +388,7 @@ func TestResetStatsClearsHistoryAndCallsReader(t *testing.T) {
 	t.Parallel()
 
 	resetCalls := 0
-	r := NewRuntime(config.Config{}, &testSyncer{}, testStreamer{}, testStatsReader{
+	r := newTestRuntime(t, Options{}, &testSyncer{}, testStreamer{}, testStatsReader{
 		resetCalls: &resetCalls,
 	})
 	r.history = []StatsPoint{{Timestamp: time.Now().UTC(), RXPackets: 9}}
@@ -403,14 +408,14 @@ func TestTrimRawStatsHistoryDropsExpiredPoints(t *testing.T) {
 	t.Parallel()
 
 	now := time.Date(2026, 4, 16, 12, 0, 0, 0, time.UTC)
-	r := NewRuntime(config.Config{}, &testSyncer{}, testStreamer{}, testStatsReader{})
+	r := newTestRuntime(t, Options{}, &testSyncer{}, testStreamer{}, testStatsReader{})
 	r.history = []StatsPoint{
 		{Timestamp: now.Add(-(10 * time.Minute) - (20 * time.Second)), RXPackets: 1},
 		{Timestamp: now.Add(-time.Minute).Truncate(10 * time.Second), RXPackets: 2},
 		{Timestamp: now, RXPackets: 3},
 	}
-	r.statsKeepWindow = 10 * time.Minute
-	r.statsKeepLimit = 60
+	r.opts.StatsKeepWindow = 10 * time.Minute
+	r.opts.StatsKeepLimit = 60
 
 	r.trimRawStatsHistory(now)
 
@@ -426,9 +431,9 @@ func TestTrimRawStatsHistoryKeepsMaxCount(t *testing.T) {
 	t.Parallel()
 
 	now := time.Date(2026, 4, 16, 12, 0, 0, 0, time.UTC)
-	r := NewRuntime(config.Config{}, &testSyncer{}, testStreamer{}, testStatsReader{})
-	r.statsKeepWindow = time.Hour
-	r.statsKeepLimit = 3
+	r := newTestRuntime(t, Options{}, &testSyncer{}, testStreamer{}, testStatsReader{})
+	r.opts.StatsKeepWindow = time.Hour
+	r.opts.StatsKeepLimit = 3
 	r.history = make([]StatsPoint, 0, 5)
 	for i := 0; i < 5; i++ {
 		r.appendRawStatsPoint(StatsPoint{
@@ -449,7 +454,7 @@ func TestTrimRawStatsHistoryKeepsMaxCount(t *testing.T) {
 func TestAppendRawStatsPointMergesSameBucket(t *testing.T) {
 	t.Parallel()
 
-	r := NewRuntime(config.Config{}, &testSyncer{}, testStreamer{}, testStatsReader{})
+	r := newTestRuntime(t, Options{}, &testSyncer{}, testStreamer{}, testStatsReader{})
 	base := time.Date(2026, 4, 16, 12, 34, 56, 0, time.UTC)
 
 	r.appendRawStatsPoint(StatsPoint{Timestamp: base, RXPackets: 1})
@@ -495,5 +500,36 @@ func TestBuildStatsQueryAlignsDisplayStep(t *testing.T) {
 	}
 	if query.Limit != maxStatsDisplayPoints {
 		t.Fatalf("query.Limit = %d, want %d", query.Limit, maxStatsDisplayPoints)
+	}
+}
+
+func TestNewOptionsParsesConsoleStats(t *testing.T) {
+	t.Parallel()
+
+	opts, err := NewOptions(
+		config.ControlPlaneConfig{RulesPath: "rules.yaml"},
+		config.ConsoleConfig{
+			Stats: config.ConsoleStatsConfig{
+				CollectInterval: "15s",
+				Retention:       "7d",
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("NewOptions() error = %v", err)
+	}
+	if opts.RulesPath != "rules.yaml" {
+		t.Fatalf("NewOptions() = %+v, want rules path", opts)
+	}
+	if opts.StatsCollectStep != 15*time.Second || opts.StatsKeepWindow != 7*24*time.Hour {
+		t.Fatalf("NewOptions() = %+v, want collect 15s retention 7d", opts)
+	}
+}
+
+func TestNewRuntimeReturnsErrorForNilSyncer(t *testing.T) {
+	t.Parallel()
+
+	if _, err := NewRuntime(Options{}, nil, testStreamer{}, testStatsReader{}); err == nil {
+		t.Fatal("NewRuntime() error = nil, want validation error")
 	}
 }

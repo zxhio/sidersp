@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"sidersp/internal/config"
 	"sidersp/internal/model"
 )
 
@@ -28,8 +29,16 @@ type stubBackendFactory struct {
 	queues   []int
 }
 
+func normalizeTestOptions(opts Options) Options {
+	opts = normalizeOptions(opts)
+	if opts.IfIndex <= 0 {
+		opts.IfIndex = 7
+	}
+	return opts
+}
+
 func (s *stubBackendFactory) newFunc() NewXSKFunc {
-	return func(queueID int) (XSKBackend, error) {
+	return func(queueID int) (XSKSocket, error) {
 		s.queues = append(s.queues, queueID)
 		if s.err != nil {
 			return nil, s.err
@@ -72,14 +81,14 @@ func TestNewRuntimeBuildsWorkersForQueues(t *testing.T) {
 
 	registrar := &runtimeStubRegistrar{}
 	factory := &stubBackendFactory{}
-	runtime, err := NewRuntime(RuntimeConfig{
+	runtime, err := NewRuntime(normalizeTestOptions(Options{
 		IfIndex:      7,
 		Queues:       []int{0, 1},
 		HardwareAddr: testHWAddr,
 		TCPSeq:       1000,
 		Registrar:    registrar,
 		NewXSK:       factory.newFunc(),
-	})
+	}))
 	if err != nil {
 		t.Fatalf("NewRuntime() error = %v", err)
 	}
@@ -102,10 +111,10 @@ func TestNewRuntimeUsesDefaults(t *testing.T) {
 	t.Parallel()
 
 	factory := &stubBackendFactory{}
-	runtime, err := NewRuntime(RuntimeConfig{
+	runtime, err := NewRuntime(normalizeTestOptions(Options{
 		Registrar: &runtimeStubRegistrar{},
 		NewXSK:    factory.newFunc(),
-	})
+	}))
 	if err != nil {
 		t.Fatalf("NewRuntime() error = %v", err)
 	}
@@ -120,15 +129,32 @@ func TestNewRuntimeUsesDefaults(t *testing.T) {
 	}
 }
 
+func TestNewOptionsDisabledReturnsDisabledOptions(t *testing.T) {
+	t.Parallel()
+
+	opts, err := NewOptions(
+		config.DataplaneConfig{Interface: "eth0", CombinedChannels: 2},
+		config.EgressConfig{},
+		config.ResponseConfig{},
+		&runtimeStubRegistrar{},
+	)
+	if err != nil {
+		t.Fatalf("NewOptions() error = %v", err)
+	}
+	if opts.Enabled {
+		t.Fatalf("NewOptions() = %+v, want disabled options", opts)
+	}
+}
+
 func TestNewRuntimeReturnsBackendError(t *testing.T) {
 	t.Parallel()
 
 	wantErr := errors.New("backend failed")
-	_, err := NewRuntime(RuntimeConfig{
+	_, err := NewRuntime(normalizeTestOptions(Options{
 		Queues:    []int{3},
 		Registrar: &runtimeStubRegistrar{},
 		NewXSK:    (&stubBackendFactory{err: wantErr}).newFunc(),
-	})
+	}))
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("NewRuntime() error = %v, want %v", err, wantErr)
 	}
@@ -137,10 +163,10 @@ func TestNewRuntimeReturnsBackendError(t *testing.T) {
 func TestRuntimeResultsReturnsCopy(t *testing.T) {
 	t.Parallel()
 
-	runtime, err := NewRuntime(RuntimeConfig{
+	runtime, err := NewRuntime(normalizeTestOptions(Options{
 		Registrar: &runtimeStubRegistrar{},
 		NewXSK:    (&stubBackendFactory{}).newFunc(),
-	})
+	}))
 	if err != nil {
 		t.Fatalf("NewRuntime() error = %v", err)
 	}
@@ -164,10 +190,10 @@ func TestRuntimeResultsReturnsCopy(t *testing.T) {
 func TestRuntimeReadStatsReturnsResponseCounters(t *testing.T) {
 	t.Parallel()
 
-	runtime, err := NewRuntime(RuntimeConfig{
+	runtime, err := NewRuntime(normalizeTestOptions(Options{
 		Registrar: &runtimeStubRegistrar{},
 		NewXSK:    (&stubBackendFactory{}).newFunc(),
-	})
+	}))
 	if err != nil {
 		t.Fatalf("NewRuntime() error = %v", err)
 	}
@@ -192,10 +218,10 @@ func TestRuntimeReadStatsReturnsResponseCounters(t *testing.T) {
 func TestRuntimeResetStatsClearsResponseCounters(t *testing.T) {
 	t.Parallel()
 
-	runtime, err := NewRuntime(RuntimeConfig{
+	runtime, err := NewRuntime(normalizeTestOptions(Options{
 		Registrar: &runtimeStubRegistrar{},
 		NewXSK:    (&stubBackendFactory{}).newFunc(),
-	})
+	}))
 	if err != nil {
 		t.Fatalf("NewRuntime() error = %v", err)
 	}
@@ -208,5 +234,17 @@ func TestRuntimeResetStatsClearsResponseCounters(t *testing.T) {
 	}
 	if got := runtime.ReadStats(); got != (model.ResponseStats{}) {
 		t.Fatalf("ReadStats() after reset = %+v, want zero response stats", got)
+	}
+}
+
+func TestNewRuntimeRejectsUnnormalizedOptions(t *testing.T) {
+	t.Parallel()
+
+	_, err := NewRuntime(Options{
+		Registrar: &runtimeStubRegistrar{},
+		NewXSK:    (&stubBackendFactory{}).newFunc(),
+	})
+	if err == nil {
+		t.Fatal("NewRuntime() error = nil, want validation error")
 	}
 }

@@ -34,8 +34,8 @@ console:
 	if cfg.Dataplane.Interface != "eth0" {
 		t.Fatalf("Dataplane.Interface = %q, want %q", cfg.Dataplane.Interface, "eth0")
 	}
-	if cfg.Dataplane.NormalizedIngressVerdict() != "pass" {
-		t.Fatalf("Dataplane ingress verdict = %q, want pass", cfg.Dataplane.NormalizedIngressVerdict())
+	if got := normalizeIngressVerdict(cfg.Dataplane.IngressVerdict); got != "pass" {
+		t.Fatalf("normalizeIngressVerdict(%q) = %q, want pass", cfg.Dataplane.IngressVerdict, got)
 	}
 	stats, err := cfg.Console.ParsedStats()
 	if err != nil {
@@ -150,6 +150,8 @@ func TestLoadDataplaneIngressVerdict(t *testing.T) {
 	}{
 		{name: "pass", verdict: "pass", want: "pass"},
 		{name: "drop", verdict: "drop", want: "drop"},
+		{name: "uppercase pass", verdict: "PASS", want: "pass"},
+		{name: "spaced drop", verdict: " drop ", want: "drop"},
 		{name: "default pass", verdict: "", want: "pass"},
 	}
 
@@ -172,8 +174,8 @@ console:
 			if err != nil {
 				t.Fatalf("Load() error = %v", err)
 			}
-			if got := cfg.Dataplane.NormalizedIngressVerdict(); got != tc.want {
-				t.Fatalf("Dataplane.NormalizedIngressVerdict() = %q, want %q", got, tc.want)
+			if got := normalizeIngressVerdict(cfg.Dataplane.IngressVerdict); got != tc.want {
+				t.Fatalf("normalizeIngressVerdict(%q) = %q, want %q", cfg.Dataplane.IngressVerdict, got, tc.want)
 			}
 		})
 	}
@@ -249,19 +251,18 @@ console:
 	if !cfg.Response.Runtime.Enabled {
 		t.Fatal("Response.Runtime.Enabled = false, want true")
 	}
-	if got := cfg.Response.Runtime.WorkerQueues(); len(got) != 2 || got[0] != 0 || got[1] != 1 {
-		t.Fatalf("WorkerQueues() = %+v, want [0 1]", got)
+	if got := cfg.Response.Runtime.Queues; len(got) != 2 || got[0] != 0 || got[1] != 1 {
+		t.Fatalf("Response.Runtime.Queues = %+v, want [0 1]", got)
 	}
-	if cfg.Response.Runtime.ResultBufferCapacity() != 2048 {
-		t.Fatalf("ResultBufferCapacity() = %d, want 2048", cfg.Response.Runtime.ResultBufferCapacity())
+	if cfg.Response.Runtime.ResultBufferSize != 2048 {
+		t.Fatalf("Response.Runtime.ResultBufferSize = %d, want 2048", cfg.Response.Runtime.ResultBufferSize)
 	}
 	if cfg.Response.Actions.ARPReply.HardwareAddr != "02:aa:bb:cc:dd:ee" || cfg.Response.Actions.TCPSynAck.TCPSeq != 1000 {
 		t.Fatalf("Response = %+v, want arp_reply/tcp_syn_ack populated", cfg.Response)
 	}
-	if cfg.Egress.TXPath() != "egress-interface" ||
-		cfg.Egress.Interface != "eth1" ||
-		cfg.Egress.NormalizedVLANMode() != "access" ||
-		cfg.Egress.NormalizedFailureVerdict() != "drop" {
+	if cfg.Egress.Interface != "eth1" ||
+		normalizeVLANMode(cfg.Egress.VLANMode) != "access" ||
+		normalizeFailureVerdict(cfg.Egress.FailureVerdict) != "drop" {
 		t.Fatalf("Egress = %+v, want egress-interface/access/drop", cfg.Egress)
 	}
 	if cfg.Response.Runtime.AFXDP.FrameSize != 4096 || cfg.Response.Runtime.AFXDP.TXFrameReserve != 256 {
@@ -425,59 +426,12 @@ console:
 	}
 }
 
-func TestResponseConfigDefaults(t *testing.T) {
-	t.Parallel()
-
-	cfg := ResponseRuntimeConfig{}
-	queues := cfg.WorkerQueues()
-	if len(queues) != 1 || queues[0] != 0 {
-		t.Fatalf("WorkerQueues() = %+v, want [0]", queues)
-	}
-	queues[0] = 10
-	if next := cfg.WorkerQueues(); next[0] != 0 {
-		t.Fatalf("WorkerQueues() returned mutable default, got %+v", next)
-	}
-	if got := cfg.WorkerQueuesWithDefault(4); len(got) != 4 || got[0] != 0 || got[3] != 3 {
-		t.Fatalf("WorkerQueuesWithDefault(4) = %+v, want [0 1 2 3]", got)
-	}
-	if cfg.ResultBufferCapacity() != 1024 {
-		t.Fatalf("ResultBufferCapacity() = %d, want 1024", cfg.ResultBufferCapacity())
-	}
-}
-
-func TestEgressConfigDefaults(t *testing.T) {
-	t.Parallel()
-
-	cfg := EgressConfig{}
-	if cfg.TXPath() != "same-interface" {
-		t.Fatalf("TXPath() = %q, want same-interface", cfg.TXPath())
-	}
-	if cfg.NormalizedVLANMode() != "preserve" {
-		t.Fatalf("egress vlan mode = %q, want preserve", cfg.NormalizedVLANMode())
-	}
-	if cfg.NormalizedFailureVerdict() != "pass" {
-		t.Fatalf("egress failure verdict = %q, want pass", cfg.NormalizedFailureVerdict())
-	}
-}
-
 func TestResponseActionsConfigDefaults(t *testing.T) {
 	t.Parallel()
 
 	cfg := ResponseActionsConfig{}
 	if cfg.TCPSynAck.TCPSeq != 0 {
 		t.Fatalf("tcp_syn_ack.tcp_seq = %d, want 0 zero-value", cfg.TCPSynAck.TCPSeq)
-	}
-}
-
-func TestDataplaneConfigDefaults(t *testing.T) {
-	t.Parallel()
-
-	cfg := DataplaneConfig{}
-	if got := cfg.NormalizedIngressVerdict(); got != "pass" {
-		t.Fatalf("NormalizedIngressVerdict() = %q, want pass", got)
-	}
-	if got := cfg.CombinedChannelCount(); got != 0 {
-		t.Fatalf("CombinedChannelCount() = %d, want 0", got)
 	}
 }
 

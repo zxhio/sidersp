@@ -420,7 +420,7 @@ func counterValueByKey(counters model.RuntimeCounters, key string) uint64 {
 }
 
 func (r *Runtime) runStatsCollector(ctx context.Context) {
-	step := r.statsCollectStep
+	step := r.opts.StatsCollectStep
 	if step <= 0 {
 		return
 	}
@@ -451,7 +451,7 @@ func (r *Runtime) collectStats(now time.Time) {
 	defer r.mu.Unlock()
 
 	current := newStats(r.rules, runtimeStats)
-	point := newStatsPoint(now.Truncate(r.statsCollectStep), current)
+	point := newStatsPoint(now.Truncate(r.opts.StatsCollectStep), current)
 	r.appendRawStatsPoint(point)
 	r.trimRawStatsHistory(point.Timestamp)
 }
@@ -466,7 +466,7 @@ func (r *Runtime) appendRawStatsPoint(point StatsPoint) {
 }
 
 func (r *Runtime) trimRawStatsHistory(now time.Time) {
-	cutoff := now.Add(-r.statsKeepWindow)
+	cutoff := now.Add(-r.opts.StatsKeepWindow)
 	trimmed := make([]StatsPoint, 0, len(r.history))
 	for _, item := range r.history {
 		if item.Timestamp.Before(cutoff) {
@@ -474,8 +474,8 @@ func (r *Runtime) trimRawStatsHistory(now time.Time) {
 		}
 		trimmed = append(trimmed, item)
 	}
-	if len(trimmed) > r.statsKeepLimit {
-		trimmed = append([]StatsPoint(nil), trimmed[len(trimmed)-r.statsKeepLimit:]...)
+	if len(trimmed) > r.opts.StatsKeepLimit {
+		trimmed = append([]StatsPoint(nil), trimmed[len(trimmed)-r.opts.StatsKeepLimit:]...)
 	}
 	r.history = trimmed
 }

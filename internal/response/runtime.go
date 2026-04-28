@@ -13,32 +13,14 @@ import (
 	"sidersp/internal/rule"
 )
 
-type XSKBackend interface {
-	FD() uint32
-	Receive(context.Context) ([]byte, error)
-	frameSender
-	io.Closer
-}
-
-// NewXSKFunc creates a queue-local XSK backend for the given queue ID.
-type NewXSKFunc func(queueID int) (XSKBackend, error)
-
-type RuntimeConfig struct {
-	IfIndex              int
-	Queues               []int
-	ResultBufferCapacity int
-	HardwareAddr         net.HardwareAddr
-	TCPSeq               uint32
-	EgressInterface      string
-	Registrar            XSKRegistrar
-	NewXSK               NewXSKFunc
-}
+// NewXSKFunc creates a queue-local XSK socket for the given queue ID.
+type NewXSKFunc func(queueID int) (XSKSocket, error)
 
 type Runtime struct {
 	group           *WorkerGroup
 	results         *ResultBuffer
 	stats           *responseStatsCounters
-	backends        []XSKBackend
+	sockets         []XSKSocket
 	closers         []io.Closer
 	ruleConfigs     *RuleConfigStore
 	ifindex         int
@@ -47,38 +29,28 @@ type Runtime struct {
 	egressInterface string
 }
 
-func NewRuntime(config RuntimeConfig) (*Runtime, error) {
-	if config.Registrar == nil {
-		return nil, fmt.Errorf("create response runtime: registrar is required")
-	}
-	if config.NewXSK == nil {
-		return nil, fmt.Errorf("create response runtime: xsk backend is required")
+func NewRuntime(opts Options) (*Runtime, error) {
+	if err := validateOptions(opts); err != nil {
+		return nil, err
 	}
 
-	capacity := config.ResultBufferCapacity
-	if capacity <= 0 {
-		capacity = 1024
-	}
-	results, err := NewResultBuffer(capacity)
+	results, err := NewResultBuffer(opts.ResultBufferSize)
 	if err != nil {
 		return nil, err
 	}
 	stats := newResponseStatsCounters()
 
-	queues := config.Queues
-	if len(queues) == 0 {
-		queues = []int{0}
-	}
+	queues := opts.Queues
 	workerSpecs := make([]WorkerSpec, 0, len(queues))
-	backends := make([]XSKBackend, 0, len(queues))
+	sockets := make([]XSKSocket, 0, len(queues))
 	closers := make([]io.Closer, 0, 1)
 	ruleConfigs := NewRuleConfigStore()
 	buildOpts := BuildOptions{
-		HardwareAddr: append(net.HardwareAddr(nil), config.HardwareAddr...),
-		TCPSeq:       config.TCPSeq,
+		HardwareAddr: append(net.HardwareAddr(nil), opts.HardwareAddr...),
+		TCPSeq:       opts.TCPSeq,
 		RuleConfigs:  ruleConfigs,
 	}
-	afpacketOut, err := openAFPacketFrameSender(config.EgressInterface)
+	afpacketOut, err := openAFPacketFrameSender(opts.EgressInterface)
 	if err != nil {
 		return nil, err
 	}
@@ -86,29 +58,29 @@ func NewRuntime(config RuntimeConfig) (*Runtime, error) {
 		closers = append(closers, afpacketOut.(io.Closer))
 	}
 	for _, queueID := range queues {
-		backend, err := config.NewXSK(queueID)
+		socket, err := opts.NewXSK(queueID)
 		if err != nil {
-			closeBackends(backends)
+			closeSockets(sockets)
 			closeClosers(closers)
 			return nil, fmt.Errorf("create xsk queue %d: %w", queueID, err)
 		}
-		backends = append(backends, backend)
-		sender := buildResponseSender(backend, afpacketOut, buildOpts)
+		sockets = append(sockets, socket)
+		sender := buildResponseSender(socket, afpacketOut, buildOpts)
 		executor, err := NewResponseExecutor(ResponseExecutorConfig{
-			IfIndex: config.IfIndex,
+			IfIndex: opts.IfIndex,
 			QueueID: queueID,
 			Sender:  sender,
 			Results: results,
 			Stats:   stats,
 		})
 		if err != nil {
-			closeBackends(backends)
+			closeSockets(sockets)
 			closeClosers(closers)
 			return nil, err
 		}
-		worker, err := NewXSKWorker(config.IfIndex, queueID, config.Registrar, backend, executor.ExecuteXSK)
+		worker, err := NewXSKWorker(opts.IfIndex, queueID, opts.Registrar, socket, executor.ExecuteXSK)
 		if err != nil {
-			closeBackends(backends)
+			closeSockets(sockets)
 			closeClosers(closers)
 			return nil, err
 		}
@@ -117,7 +89,7 @@ func NewRuntime(config RuntimeConfig) (*Runtime, error) {
 
 	group, err := NewWorkerGroup(workerSpecs)
 	if err != nil {
-		closeBackends(backends)
+		closeSockets(sockets)
 		closeClosers(closers)
 		return nil, err
 	}
@@ -125,20 +97,20 @@ func NewRuntime(config RuntimeConfig) (*Runtime, error) {
 		group:           group,
 		results:         results,
 		stats:           stats,
-		backends:        backends,
+		sockets:         sockets,
 		closers:         closers,
 		ruleConfigs:     ruleConfigs,
-		ifindex:         config.IfIndex,
+		ifindex:         opts.IfIndex,
 		queues:          append([]int(nil), queues...),
-		senderMode:      responseSenderMode(config.EgressInterface),
-		egressInterface: config.EgressInterface,
+		senderMode:      responseSenderMode(opts.EgressInterface),
+		egressInterface: opts.EgressInterface,
 	}, nil
 }
 
-func buildResponseSender(backend XSKBackend, afpacketOut frameSender, buildOpts BuildOptions) responseSender {
+func buildResponseSender(socket XSKSocket, afpacketOut frameSender, buildOpts BuildOptions) responseSender {
 	if afpacketOut == nil {
 		return &afxdpSender{
-			out:       backend,
+			out:       socket,
 			buildOpts: buildOpts,
 		}
 	}
@@ -180,12 +152,12 @@ func (r *Runtime) Close() error {
 		return nil
 	}
 	var firstErr error
-	for _, backend := range r.backends {
-		if err := backend.Close(); err != nil && firstErr == nil {
+	for _, socket := range r.sockets {
+		if err := socket.Close(); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
-	r.backends = nil
+	r.sockets = nil
 	for _, closer := range r.closers {
 		if err := closer.Close(); err != nil && firstErr == nil {
 			firstErr = err
@@ -224,9 +196,9 @@ func (r *Runtime) ResetStats() error {
 	return nil
 }
 
-func closeBackends(backends []XSKBackend) {
-	for _, backend := range backends {
-		_ = backend.Close()
+func closeSockets(sockets []XSKSocket) {
+	for _, socket := range sockets {
+		_ = socket.Close()
 	}
 }
 

@@ -187,83 +187,16 @@ func (c *ConsoleConfig) applyDefaults() {
 	}
 }
 
-func (c DataplaneConfig) NormalizedIngressVerdict() string {
-	verdict := strings.ToLower(strings.TrimSpace(c.IngressVerdict))
-	if verdict == "" {
-		return "pass"
-	}
-	return verdict
-}
-
-func (c DataplaneConfig) CombinedChannelCount() int {
-	if c.CombinedChannels <= 0 {
-		return 0
-	}
-	return c.CombinedChannels
-}
-
 func (c DataplaneConfig) validate() error {
 	if c.CombinedChannels < 0 {
 		return fmt.Errorf("dataplane.combined_channels must be >= 0")
 	}
-	switch c.NormalizedIngressVerdict() {
+	switch normalizeIngressVerdict(c.IngressVerdict) {
 	case "pass", "drop":
 		return nil
 	default:
 		return fmt.Errorf("dataplane.ingress_verdict %q is not valid", c.IngressVerdict)
 	}
-}
-
-func (c EgressConfig) TXPath() string {
-	if strings.TrimSpace(c.Interface) == "" {
-		return "same-interface"
-	}
-	return "egress-interface"
-}
-
-func (c EgressConfig) NormalizedVLANMode() string {
-	mode := strings.ToLower(strings.TrimSpace(c.VLANMode))
-	if mode == "" {
-		return "preserve"
-	}
-	return mode
-}
-
-func (c EgressConfig) NormalizedFailureVerdict() string {
-	verdict := strings.ToLower(strings.TrimSpace(c.FailureVerdict))
-	if verdict == "" {
-		return "pass"
-	}
-	return verdict
-}
-
-func (c ResponseRuntimeConfig) WorkerQueues() []int {
-	if len(c.Queues) == 0 {
-		return []int{0}
-	}
-	return append([]int(nil), c.Queues...)
-}
-
-func (c ResponseRuntimeConfig) WorkerQueuesWithDefault(defaultQueueCount int) []int {
-	if len(c.Queues) != 0 {
-		return append([]int(nil), c.Queues...)
-	}
-	if defaultQueueCount <= 0 {
-		return []int{0}
-	}
-
-	queues := make([]int, defaultQueueCount)
-	for i := 0; i < defaultQueueCount; i++ {
-		queues[i] = i
-	}
-	return queues
-}
-
-func (c ResponseRuntimeConfig) ResultBufferCapacity() int {
-	if c.ResultBufferSize <= 0 {
-		return 1024
-	}
-	return c.ResultBufferSize
 }
 
 func (c ResponseConfig) validate() error {
@@ -307,12 +240,12 @@ func (c ResponseActionsConfig) validate() error {
 }
 
 func (c EgressConfig) validate() error {
-	switch c.NormalizedVLANMode() {
+	switch normalizeVLANMode(c.VLANMode) {
 	case "preserve", "access":
 	default:
 		return fmt.Errorf("vlan_mode %q is not valid", c.VLANMode)
 	}
-	switch c.NormalizedFailureVerdict() {
+	switch normalizeFailureVerdict(c.FailureVerdict) {
 	case "pass", "drop":
 	default:
 		return fmt.Errorf("failure_verdict %q is not valid", c.FailureVerdict)
@@ -482,4 +415,28 @@ func parseConsoleDuration(raw string) (time.Duration, error) {
 		return 0, err
 	}
 	return dur, nil
+}
+
+func normalizeIngressVerdict(raw string) string {
+	verdict := strings.ToLower(strings.TrimSpace(raw))
+	if verdict == "" {
+		return "pass"
+	}
+	return verdict
+}
+
+func normalizeVLANMode(raw string) string {
+	mode := strings.ToLower(strings.TrimSpace(raw))
+	if mode == "" {
+		return "preserve"
+	}
+	return mode
+}
+
+func normalizeFailureVerdict(raw string) string {
+	verdict := strings.ToLower(strings.TrimSpace(raw))
+	if verdict == "" {
+		return "pass"
+	}
+	return verdict
 }

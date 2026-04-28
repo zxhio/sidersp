@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 
 	"github.com/sirupsen/logrus"
 
@@ -20,6 +21,8 @@ type XSKHandler func(ctx context.Context, frame []byte) error
 type XSKSocket interface {
 	FD() uint32
 	Receive(context.Context) ([]byte, error)
+	frameSender
+	io.Closer
 }
 
 type XSKWorker struct {

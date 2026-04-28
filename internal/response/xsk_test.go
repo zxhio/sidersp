@@ -47,6 +47,14 @@ func (s *stubSocket) Receive(ctx context.Context) ([]byte, error) {
 	return nil, s.err
 }
 
+func (s *stubSocket) SendFrame(_ context.Context, _ []byte) error {
+	return nil
+}
+
+func (s *stubSocket) Close() error {
+	return nil
+}
+
 type handledFrame struct {
 	data []byte
 }

@@ -9,7 +9,6 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"sidersp/internal/config"
 	"sidersp/internal/logs"
 	"sidersp/internal/model"
 	"sidersp/internal/rule"
@@ -33,47 +32,39 @@ type StatsReader interface {
 }
 
 type Runtime struct {
-	cfg              config.Config
-	syncer           RuleSyncer
-	streamer         EventStreamer
-	stats            StatsReader
-	statsCollectStep time.Duration
-	statsKeepWindow  time.Duration
-	statsKeepLimit   int
-	mu               sync.RWMutex
-	rules            rule.RuleSet
-	history          []StatsPoint
+	opts     Options
+	syncer   RuleSyncer
+	streamer EventStreamer
+	stats    StatsReader
+	mu       sync.RWMutex
+	rules    rule.RuleSet
+	history  []StatsPoint
 }
 
-func NewRuntime(cfg config.Config, syncer RuleSyncer, streamer EventStreamer, statsReader StatsReader) *Runtime {
+func NewRuntime(opts Options, syncer RuleSyncer, streamer EventStreamer, statsReader StatsReader) (*Runtime, error) {
 	if syncer == nil {
-		panic("controlplane: syncer is required")
+		return nil, fmt.Errorf("controlplane: syncer is required")
 	}
 	if streamer == nil {
-		panic("controlplane: streamer is required")
+		return nil, fmt.Errorf("controlplane: streamer is required")
 	}
 	if statsReader == nil {
-		panic("controlplane: stats reader is required")
+		return nil, fmt.Errorf("controlplane: stats reader is required")
 	}
-	statsCfg, err := cfg.Console.ParsedStats()
-	if err != nil {
-		panic(fmt.Sprintf("controlplane: invalid console stats config: %v", err))
+	if err := validateOptions(opts); err != nil {
+		return nil, fmt.Errorf("controlplane: invalid options: %w", err)
 	}
-	collectStep, keepWindow, keepLimit := buildStatsRetention(statsCfg)
 
 	return &Runtime{
-		cfg:              cfg,
-		syncer:           syncer,
-		streamer:         streamer,
-		stats:            statsReader,
-		statsCollectStep: collectStep,
-		statsKeepWindow:  keepWindow,
-		statsKeepLimit:   keepLimit,
-	}
+		opts:     opts,
+		syncer:   syncer,
+		streamer: streamer,
+		stats:    statsReader,
+	}, nil
 }
 
 func (r *Runtime) bootstrap() (rule.RuleSet, error) {
-	rules, changed, err := loadRulesFile(r.cfg.ControlPlane.RulesPath)
+	rules, changed, err := loadRulesFile(r.opts.RulesPath)
 	if err != nil {
 		return rule.RuleSet{}, fmt.Errorf("load rules: %w", err)
 	}
@@ -93,7 +84,7 @@ func (r *Runtime) bootstrap() (rule.RuleSet, error) {
 
 	logs.App().WithFields(logrus.Fields{
 		"rules":      len(enabledRuleSet(rules).Rules),
-		"rules_path": r.cfg.ControlPlane.RulesPath,
+		"rules_path": r.opts.RulesPath,
 	}).Info("Bootstrapped controlplane")
 
 	return rules, nil
@@ -111,19 +102,29 @@ func (r *Runtime) Run(ctx context.Context) error {
 
 	logs.App().WithField("rules", len(rules.Rules)).Info("Started controlplane runtime")
 
-	go r.runStatsCollector(ctx)
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
-	if err := r.streamer.RunEventStream(ctx); err != nil {
+	statsDone := make(chan struct{})
+	go func() {
+		defer close(statsDone)
+		r.runStatsCollector(runCtx)
+	}()
+
+	err = r.streamer.RunEventStream(runCtx)
+	cancel()
+	<-statsDone
+	if err != nil {
 		return fmt.Errorf("start event stream: %w", err)
 	}
 	return nil
 }
 
-func (r *Runtime) Status() Status {
+func (r *Runtime) RuleStatus() RuleStatus {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	return newStatus(r.cfg, r.rules)
+	return newRuleStatus(r.opts, r.rules)
 }
 
 func (r *Runtime) Stats(rangeSeconds int) (Stats, error) {
@@ -132,19 +133,19 @@ func (r *Runtime) Stats(rangeSeconds int) (Stats, error) {
 		return Stats{}, fmt.Errorf("read runtime stats: %w", err)
 	}
 
-	rangeDuration, err := normalizeStatsRange(rangeSeconds, r.statsCollectStep, r.statsKeepWindow)
+	rangeDuration, err := normalizeStatsRange(rangeSeconds, r.opts.StatsCollectStep, r.opts.StatsKeepWindow)
 	if err != nil {
 		return Stats{}, err
 	}
-	query := buildStatsQuery(rangeDuration, r.statsCollectStep)
+	query := buildStatsQuery(rangeDuration, r.opts.StatsCollectStep)
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	current := newStats(r.rules, runtimeStats)
 	current.RangeSeconds = int(rangeDuration / time.Second)
-	current.CollectIntervalSeconds = int(r.statsCollectStep / time.Second)
-	current.RetentionSeconds = int(r.statsKeepWindow / time.Second)
+	current.CollectIntervalSeconds = int(r.opts.StatsCollectStep / time.Second)
+	current.RetentionSeconds = int(r.opts.StatsKeepWindow / time.Second)
 	current.DisplayStepSeconds = int(query.Step / time.Second)
 
 	history, err := r.buildStatsHistory(time.Now().UTC(), current, query)
@@ -186,6 +187,20 @@ func (r *Runtime) RuleMatchCounts() (map[int]uint64, error) {
 	return counts, nil
 }
 
+type RuleStatus struct {
+	RulesPath  string `json:"rules_path"`
+	TotalRules int    `json:"total_rules"`
+	Enabled    int    `json:"enabled_rules"`
+}
+
+func newRuleStatus(opts Options, rules rule.RuleSet) RuleStatus {
+	return RuleStatus{
+		RulesPath:  opts.RulesPath,
+		TotalRules: len(rules.Rules),
+		Enabled:    len(enabledRuleSet(rules).Rules),
+	}
+}
+
 type Status struct {
 	RulesPath   string `json:"rules_path"`
 	ListenAddr  string `json:"listen_addr"`
@@ -195,21 +210,6 @@ type Status struct {
 	Enabled     int    `json:"enabled_rules"`
 }
 
-func newStatus(cfg config.Config, rules rule.RuleSet) Status {
-	txInterface := cfg.Dataplane.Interface
-	if cfg.Egress.TXPath() == "egress-interface" && cfg.Egress.Interface != "" {
-		txInterface = cfg.Egress.Interface
-	}
-
-	return Status{
-		RulesPath:   cfg.ControlPlane.RulesPath,
-		ListenAddr:  cfg.Console.ListenAddr,
-		Interface:   cfg.Dataplane.Interface,
-		TXInterface: txInterface,
-		TotalRules:  len(rules.Rules),
-		Enabled:     len(enabledRuleSet(rules).Rules),
-	}
-}
 func (r *Runtime) ListRules() []rule.Rule {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -361,10 +361,10 @@ func (r *Runtime) syncRules(rules rule.RuleSet) error {
 }
 
 func (r *Runtime) persistRules(rules rule.RuleSet) error {
-	if r.cfg.ControlPlane.RulesPath == "" {
+	if r.opts.RulesPath == "" {
 		return nil
 	}
-	if err := SaveRules(r.cfg.ControlPlane.RulesPath, rules); err != nil {
+	if err := SaveRules(r.opts.RulesPath, rules); err != nil {
 		if errors.Is(err, ErrRuleValidation) {
 			return err
 		}

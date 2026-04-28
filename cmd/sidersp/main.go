@@ -4,9 +4,9 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/sirupsen/logrus"
@@ -18,7 +18,6 @@ import (
 	"sidersp/internal/logs"
 	"sidersp/internal/model"
 	"sidersp/internal/response"
-	"sidersp/internal/response/afxdp"
 	"sidersp/internal/rule"
 )
 
@@ -58,18 +57,12 @@ func main() {
 		cancel()
 	}()
 
-	xdpResponse, err := buildXDPResponseOptions(cfg.Egress)
+	dpOpts, err := dataplane.NewOptions(cfg.Dataplane, cfg.Egress)
 	if err != nil {
-		logs.App().WithError(err).Fatal("Fail to configure xdp response path")
+		logs.App().WithError(err).Fatal("Fail to build dataplane options")
 	}
 
-	dp, err := dataplane.Open(dataplane.Options{
-		Interface:        cfg.Dataplane.Interface,
-		AttachMode:       cfg.Dataplane.AttachMode,
-		CombinedChannels: cfg.Dataplane.CombinedChannelCount(),
-		IngressVerdict:   cfg.Dataplane.NormalizedIngressVerdict(),
-		XDPResponse:      xdpResponse,
-	})
+	dp, err := dataplane.Open(dpOpts)
 	if err != nil {
 		logs.App().WithError(err).Fatal("Fail to open dataplane")
 	}
@@ -79,9 +72,17 @@ func main() {
 		}
 	}()
 
-	responseRuntime, err := buildResponseRuntime(cfg, dp)
+	responseOpts, err := response.NewOptions(cfg.Dataplane, cfg.Egress, cfg.Response, dp)
 	if err != nil {
-		logs.App().WithError(err).Fatal("Fail to build response runtime")
+		logs.App().WithError(err).Fatal("Fail to build response options")
+	}
+
+	var responseRuntime *response.Runtime
+	if responseOpts.Enabled {
+		responseRuntime, err = response.NewRuntime(responseOpts)
+		if err != nil {
+			logs.App().WithError(err).Fatal("Fail to build response runtime")
+		}
 	}
 	// Apply dataplane first so a failed dataplane sync never leaves user-space
 	// response params ahead of the active redirect rules.
@@ -90,11 +91,19 @@ func main() {
 		syncer.targets = append(syncer.targets, responseRuntime)
 	}
 
-	cp := controlplane.NewRuntime(cfg, syncer, dp, runtimeStatsReader{
+	cpOpts, err := controlplane.NewOptions(cfg.ControlPlane, cfg.Console)
+	if err != nil {
+		logs.App().WithError(err).Fatal("Fail to build controlplane options")
+	}
+
+	cp, err := controlplane.NewRuntime(cpOpts, syncer, dp, runtimeStatsReader{
 		dataplane: dp,
 		response:  responseRuntime,
 	})
-	consoleServer := console.NewServer(cfg.Console.ListenAddr, cp, logManager)
+	if err != nil {
+		logs.App().WithError(err).Fatal("Fail to build controlplane runtime")
+	}
+	consoleServer := console.NewServer(cfg.Console.ListenAddr, newConsoleService(cp, cfg), logManager)
 	logs.App().WithFields(logrus.Fields{
 		"config_path": *configPath,
 		"interface":   cfg.Dataplane.Interface,
@@ -147,6 +156,31 @@ type runtimeStatsReader struct {
 	response  responseStatsReader
 }
 
+type consoleService struct {
+	*controlplane.Runtime
+	status controlplane.Status
+}
+
+func newConsoleService(runtime *controlplane.Runtime, cfg config.Config) *consoleService {
+	return &consoleService{
+		Runtime: runtime,
+		status: controlplane.Status{
+			ListenAddr:  cfg.Console.ListenAddr,
+			Interface:   strings.TrimSpace(cfg.Dataplane.Interface),
+			TXInterface: txInterface(cfg.Dataplane.Interface, cfg.Egress.Interface),
+		},
+	}
+}
+
+func (s *consoleService) Status() controlplane.Status {
+	current := s.Runtime.RuleStatus()
+	status := s.status
+	status.RulesPath = current.RulesPath
+	status.TotalRules = current.TotalRules
+	status.Enabled = current.Enabled
+	return status
+}
+
 func (r runtimeStatsReader) ReadStats() (model.RuntimeStats, error) {
 	dataplaneStats, err := r.dataplane.ReadStats()
 	if err != nil {
@@ -178,86 +212,11 @@ func (r runtimeStatsReader) ResetStats() error {
 	return nil
 }
 
-func buildXDPResponseOptions(cfg config.EgressConfig) (dataplane.XDPResponseOptions, error) {
-	var egressIfIndex int
-	if cfg.TXPath() == "egress-interface" {
-		iface, err := net.InterfaceByName(cfg.Interface)
-		if err != nil {
-			return dataplane.XDPResponseOptions{}, fmt.Errorf("lookup egress interface %s: %w", cfg.Interface, err)
-		}
-		egressIfIndex = iface.Index
+func txInterface(dataplaneInterface string, egressInterface string) string {
+	if iface := strings.TrimSpace(egressInterface); iface != "" {
+		return iface
 	}
-
-	return dataplane.XDPResponseOptions{
-		EgressIfIndex:  egressIfIndex,
-		VLANMode:       cfg.NormalizedVLANMode(),
-		FailureVerdict: cfg.NormalizedFailureVerdict(),
-	}, nil
-}
-
-func buildResponseRuntime(cfg config.Config, registrar response.XSKRegistrar) (*response.Runtime, error) {
-	if !cfg.Response.Runtime.Enabled {
-		return nil, nil
-	}
-
-	iface, err := net.InterfaceByName(cfg.Dataplane.Interface)
-	if err != nil {
-		return nil, fmt.Errorf("lookup response interface: %w", err)
-	}
-
-	var hardwareAddr net.HardwareAddr
-	if cfg.Response.Actions.ARPReply.HardwareAddr != "" {
-		hardwareAddr, err = net.ParseMAC(cfg.Response.Actions.ARPReply.HardwareAddr)
-		if err != nil {
-			return nil, fmt.Errorf("parse response hardware address: %w", err)
-		}
-	}
-
-	afxdpCfg := buildAFXDPConfig(cfg.Response.Runtime, iface.Index)
-
-	newXSK := func(queueID int) (response.XSKBackend, error) {
-		return afxdp.NewSocket(afxdpCfg, queueID)
-	}
-
-	return response.NewRuntime(response.RuntimeConfig{
-		IfIndex:              iface.Index,
-		Queues:               cfg.Response.Runtime.WorkerQueuesWithDefault(cfg.Dataplane.CombinedChannelCount()),
-		ResultBufferCapacity: cfg.Response.Runtime.ResultBufferCapacity(),
-		HardwareAddr:         hardwareAddr,
-		TCPSeq:               cfg.Response.Actions.TCPSynAck.TCPSeq,
-		EgressInterface:      cfg.Egress.Interface,
-		Registrar:            registrar,
-		NewXSK:               newXSK,
-	})
-}
-
-func buildAFXDPConfig(cfg config.ResponseRuntimeConfig, ifindex int) afxdp.SocketConfig {
-	afxdpCfg := afxdp.DefaultSocketConfig()
-	afxdpCfg.IfIndex = ifindex
-
-	if v := cfg.AFXDP.FrameSize; v != 0 {
-		afxdpCfg.FrameSize = v
-	}
-	if v := cfg.AFXDP.FrameCount; v != 0 {
-		afxdpCfg.FrameCount = v
-	}
-	if v := cfg.AFXDP.FillRingSize; v != 0 {
-		afxdpCfg.FillRingSize = v
-	}
-	if v := cfg.AFXDP.CompletionRingSize; v != 0 {
-		afxdpCfg.CompletionRingSize = v
-	}
-	if v := cfg.AFXDP.RXRingSize; v != 0 {
-		afxdpCfg.RXRingSize = v
-	}
-	if v := cfg.AFXDP.TXRingSize; v != 0 {
-		afxdpCfg.TXRingSize = v
-	}
-	if v := cfg.AFXDP.TXFrameReserve; v != 0 {
-		afxdpCfg.TXFrameReserve = v
-	}
-
-	return afxdpCfg
+	return strings.TrimSpace(dataplaneInterface)
 }
 
 type ruleSyncFanout struct {
