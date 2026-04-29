@@ -3,7 +3,6 @@ package response
 import (
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/sirupsen/logrus"
 
@@ -38,22 +37,27 @@ type ResponseResult struct {
 	Error       string       `json:"error"`
 }
 
-var responseActionNames = map[uint16]string{
-	ActionICMPEchoReply: "icmp_echo_reply",
-	ActionARPReply:      "arp_reply",
-	ActionTCPSynAck:     "tcp_syn_ack",
-	ActionUDPEchoReply:  "udp_echo_reply",
-	ActionDNSRefused:    "dns_refused",
-	ActionDNSSinkhole:   "dns_sinkhole",
-}
-
 func ResponseActionName(action uint16) (string, bool) {
-	name, ok := responseActionNames[action]
-	return name, ok
+	switch action {
+	case ActionICMPEchoReply:
+		return "icmp_echo_reply", true
+	case ActionARPReply:
+		return "arp_reply", true
+	case ActionTCPSynAck:
+		return "tcp_syn_ack", true
+	case ActionUDPEchoReply:
+		return "udp_echo_reply", true
+	case ActionDNSRefused:
+		return "dns_refused", true
+	case ActionDNSSinkhole:
+		return "dns_sinkhole", true
+	default:
+		return "", false
+	}
 }
 
 type ResultBuffer struct {
-	mu       sync.RWMutex
+	mu       sync.Mutex
 	items    []ResponseResult
 	next     int
 	capacity int
@@ -76,21 +80,7 @@ func (b *ResultBuffer) Record(result ResponseResult) error {
 	if err := validateResult(result); err != nil {
 		return err
 	}
-	if result.TimestampNS == 0 {
-		result.TimestampNS = uint64(time.Now().UnixNano())
-	}
-
-	b.mu.Lock()
-	if len(b.items) < b.capacity {
-		b.items = append(b.items, result)
-	} else {
-		b.items[b.next] = result
-		b.next = (b.next + 1) % b.capacity
-	}
-	b.mu.Unlock()
-
-	logResult(result)
-	return nil
+	return b.recordTrusted(&result)
 }
 
 func (b *ResultBuffer) List() []ResponseResult {
@@ -98,8 +88,8 @@ func (b *ResultBuffer) List() []ResponseResult {
 		return nil
 	}
 
-	b.mu.RLock()
-	defer b.mu.RUnlock()
+	b.mu.Lock()
+	defer b.mu.Unlock()
 
 	out := make([]ResponseResult, 0, len(b.items))
 	if len(b.items) < b.capacity {
@@ -135,16 +125,35 @@ func validateResult(result ResponseResult) error {
 }
 
 func isResponseAction(action string) bool {
-	for _, name := range responseActionNames {
-		if action == name {
-			return true
-		}
+	switch action {
+	case "icmp_echo_reply", "arp_reply", "tcp_syn_ack", "udp_echo_reply", "dns_refused", "dns_sinkhole":
+		return true
+	default:
+		return false
 	}
-	return false
+}
+
+func (b *ResultBuffer) recordTrusted(result *ResponseResult) error {
+	if b == nil {
+		return fmt.Errorf("record response result: nil buffer")
+	}
+
+	b.mu.Lock()
+	if len(b.items) < b.capacity {
+		b.items = append(b.items, *result)
+	} else {
+		b.items[b.next] = *result
+		b.next = (b.next + 1) % b.capacity
+	}
+	b.mu.Unlock()
+
+	logResult(*result)
+	return nil
 }
 
 func logResult(result ResponseResult) {
-	if result.Result != ResultFailed && !logs.App().IsLevelEnabled(logrus.DebugLevel) {
+	logger := logs.App()
+	if result.Result != ResultFailed && !logger.IsLevelEnabled(logrus.DebugLevel) {
 		return
 	}
 
@@ -163,8 +172,8 @@ func logResult(result ResponseResult) {
 		"error_text": result.Error,
 	}
 	if result.Result == ResultFailed {
-		logs.App().WithFields(fields).Warn("Fail to execute response")
+		logger.WithFields(fields).Warn("Fail to execute response")
 		return
 	}
-	logs.App().WithFields(fields).Debug("Recorded response result")
+	logger.WithFields(fields).Debug("Recorded response result")
 }

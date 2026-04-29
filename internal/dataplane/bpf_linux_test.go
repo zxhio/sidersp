@@ -374,12 +374,12 @@ func buildTruncatedUDPPkt() []byte {
 // BPF test helpers
 // ---------------------------------------------------------------------------
 
-func setupBPFRuntime(t *testing.T, rules []rule.Rule) (*siderspObjects, *ringbuf.Reader) {
+func setupBPFRuntime(t testing.TB, rules []rule.Rule) (*siderspObjects, *ringbuf.Reader) {
 	t.Helper()
 	return setupBPFRuntimeWithOptions(t, rules, Options{})
 }
 
-func setupBPFRuntimeWithOptions(t *testing.T, rules []rule.Rule, opts Options) (*siderspObjects, *ringbuf.Reader) {
+func setupBPFRuntimeWithOptions(t testing.TB, rules []rule.Rule, opts Options) (*siderspObjects, *ringbuf.Reader) {
 	t.Helper()
 
 	require.NoError(t, rlimit.RemoveMemlock(), "remove memlock")
@@ -406,7 +406,7 @@ func setupBPFRuntimeWithOptions(t *testing.T, rules []rule.Rule, opts Options) (
 	return &objs, reader
 }
 
-func writeSnapshotToMaps(t *testing.T, objs *siderspObjects, snap mapSnapshot) {
+func writeSnapshotToMaps(t testing.TB, objs *siderspObjects, snap mapSnapshot) {
 	t.Helper()
 	writers := []struct {
 		name string
@@ -425,7 +425,7 @@ func writeSnapshotToMaps(t *testing.T, objs *siderspObjects, snap mapSnapshot) {
 	}
 }
 
-func readStat(t *testing.T, objs *siderspObjects, idx uint32) uint64 {
+func readStat(t testing.TB, objs *siderspObjects, idx uint32) uint64 {
 	t.Helper()
 	val, err := readPerCPUCounter(objs.StatsMap, idx)
 	require.NoError(t, err, "read stats[%d]", idx)
@@ -457,7 +457,7 @@ func readEventAsync(reader *ringbuf.Reader) <-chan eventResult {
 
 // tryReadEvent attempts to read a ringbuf event with a short timeout.
 // Returns false without failing the test if no event is available.
-func tryReadEvent(t *testing.T, reader *ringbuf.Reader) (ruleEvent, bool) {
+func tryReadEvent(t testing.TB, reader *ringbuf.Reader) (ruleEvent, bool) {
 	t.Helper()
 	timer := time.NewTimer(100 * time.Millisecond)
 	defer timer.Stop()
@@ -470,7 +470,7 @@ func tryReadEvent(t *testing.T, reader *ringbuf.Reader) (ruleEvent, bool) {
 }
 
 // mustReadEvent reads a ringbuf event or fails the test on timeout.
-func mustReadEvent(t *testing.T, reader *ringbuf.Reader) ruleEvent {
+func mustReadEvent(t testing.TB, reader *ringbuf.Reader) ruleEvent {
 	t.Helper()
 	timer := time.NewTimer(500 * time.Millisecond)
 	defer timer.Stop()
@@ -516,7 +516,7 @@ func tcpChecksumValid(pkt []byte, l3Off int) bool {
 	return internetChecksum(pseudo) == 0
 }
 
-func assertTCPResetFrame(t *testing.T, out []byte, orig []byte, wantFlags uint8, wantSeq, wantAck uint32) {
+func assertTCPResetFrame(t testing.TB, out []byte, orig []byte, wantFlags uint8, wantSeq, wantAck uint32) {
 	t.Helper()
 	frameLen := ethHeaderLen + ipv4HeaderLen + 20
 	frame := out[:frameLen]

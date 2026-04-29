@@ -72,6 +72,67 @@ func BuildResponseIPv4PacketToBuffer(meta XSKMetadata, frame []byte, opts BuildO
 	}
 }
 
+func BuildResponseFrameFromParsed(meta XSKMetadata, pf *parsedFrame, opts BuildOptions, dst []byte) ([]byte, error) {
+	switch meta.Action {
+	case ActionICMPEchoReply:
+		if pf.icmp.typ != 8 || pf.icmp.code != 0 {
+			return nil, fmt.Errorf("build icmp echo reply: packet is not echo request")
+		}
+		return buildICMPEchoReplyFrameToBuffer(dst, pf.eth, pf.ip4, pf.icmp), nil
+	case ActionARPReply:
+		if pf.arp.operation != fastpktARPRequest {
+			return nil, fmt.Errorf("build arp reply: packet is not arp request")
+		}
+		config, err := lookupARPReplyConfig(meta.RuleID, opts.HardwareAddr, opts.RuleConfigs)
+		if err != nil {
+			return nil, err
+		}
+		return buildARPReplyFrameToBuffer(dst, pf.eth, pf.arp, config.HardwareAddr, config.SenderIPv4, config.HasSenderIPv4()), nil
+	case ActionTCPSynAck:
+		if pf.tcp.flags&fastpktTCPSyn == 0 || pf.tcp.flags&(fastpktTCPAck|fastpktTCPRst|fastpktTCPFin) != 0 {
+			return nil, fmt.Errorf("build tcp syn ack: packet is not initial syn")
+		}
+		if len(pf.tcp.payload) > 0 {
+			return nil, fmt.Errorf("build tcp syn ack: syn payload is not supported")
+		}
+		seq := lookupTCPSynAckSeq(meta.RuleID, opts.RuleConfigs)
+		return buildTCPSynAckFrameToBuffer(dst, pf.eth, pf.ip4, pf.tcp, seq), nil
+	case ActionUDPEchoReply:
+		return buildUDPEchoReplyFrameToBuffer(dst, pf.eth, pf.ip4, pf.udp), nil
+	case ActionDNSRefused, ActionDNSSinkhole:
+		return buildDNSResponseFromParsed(meta, pf, opts, dst)
+	default:
+		return nil, fmt.Errorf("build response: unsupported action %d", meta.Action)
+	}
+}
+
+func BuildResponseIPv4PacketFromParsed(meta XSKMetadata, pf *parsedFrame, opts BuildOptions, dst []byte) ([]byte, error) {
+	switch meta.Action {
+	case ActionICMPEchoReply:
+		if pf.icmp.typ != 8 || pf.icmp.code != 0 {
+			return nil, fmt.Errorf("build icmp echo reply: packet is not echo request")
+		}
+		return buildICMPEchoReplyIPv4PacketToBuffer(dst, pf.ip4, pf.icmp), nil
+	case ActionTCPSynAck:
+		if pf.tcp.flags&fastpktTCPSyn == 0 || pf.tcp.flags&(fastpktTCPAck|fastpktTCPRst|fastpktTCPFin) != 0 {
+			return nil, fmt.Errorf("build tcp syn ack: packet is not initial syn")
+		}
+		if len(pf.tcp.payload) > 0 {
+			return nil, fmt.Errorf("build tcp syn ack: syn payload is not supported")
+		}
+		seq := lookupTCPSynAckSeq(meta.RuleID, opts.RuleConfigs)
+		return buildTCPSynAckIPv4PacketToBuffer(dst, pf.ip4, pf.tcp, seq), nil
+	case ActionUDPEchoReply:
+		return buildUDPEchoReplyIPv4PacketToBuffer(dst, pf.ip4, pf.udp), nil
+	case ActionDNSRefused, ActionDNSSinkhole:
+		return buildDNSResponseIPv4FromParsed(meta, pf, opts, dst)
+	case ActionARPReply:
+		return nil, fmt.Errorf("build response ipv4 packet: %w for action %d", errResponseRequiresEthernetFraming, meta.Action)
+	default:
+		return nil, fmt.Errorf("build response ipv4 packet: unsupported action %d", meta.Action)
+	}
+}
+
 func BuildICMPEchoReplyIPv4(frame []byte) ([]byte, error) {
 	return BuildICMPEchoReplyIPv4ToBuffer(frame, nil)
 }
@@ -374,4 +435,38 @@ func scanDNSQuestion(payload []byte, offset int) (int, int, error) {
 			idx += labelLen
 		}
 	}
+}
+
+func buildDNSResponseFromParsed(meta XSKMetadata, pf *parsedFrame, opts BuildOptions, dst []byte) ([]byte, error) {
+	context := "build dns response"
+	query, err := parseDNSQuery(pf.udp.payload, context)
+	if err != nil {
+		return nil, err
+	}
+	config, err := lookupDNSResponseConfig(meta.RuleID, opts.RuleConfigs, context)
+	if err != nil {
+		return nil, err
+	}
+	answerType, answers, err := selectDNSResponseAnswers(query, config, context)
+	if err != nil {
+		return nil, err
+	}
+	return buildDNSResponseFrameToBuffer(dst, pf.eth, pf.ip4, pf.udp, query, config, answerType, answers), nil
+}
+
+func buildDNSResponseIPv4FromParsed(meta XSKMetadata, pf *parsedFrame, opts BuildOptions, dst []byte) ([]byte, error) {
+	context := "build dns response"
+	query, err := parseDNSQuery(pf.udp.payload, context)
+	if err != nil {
+		return nil, err
+	}
+	config, err := lookupDNSResponseConfig(meta.RuleID, opts.RuleConfigs, context)
+	if err != nil {
+		return nil, err
+	}
+	answerType, answers, err := selectDNSResponseAnswers(query, config, context)
+	if err != nil {
+		return nil, err
+	}
+	return buildDNSResponseIPv4PacketToBuffer(dst, pf.ip4, pf.udp, query, config, answerType, answers), nil
 }

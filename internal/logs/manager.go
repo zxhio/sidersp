@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 
 	"github.com/sirupsen/logrus"
 	"gopkg.in/natefinch/lumberjack.v2"
@@ -26,7 +27,6 @@ type Levels struct {
 }
 
 type Manager struct {
-	mu       sync.RWMutex
 	channels map[string]*channelLogger
 }
 
@@ -36,8 +36,7 @@ type channelLogger struct {
 }
 
 var (
-	defaultMu      sync.RWMutex
-	defaultManager *Manager
+	defaultManager atomic.Pointer[Manager]
 	fallbackOnce   sync.Once
 	fallbackSet    fallbackLoggers
 )
@@ -93,15 +92,11 @@ func Event() *logrus.Logger {
 }
 
 func SetDefaultManager(manager *Manager) {
-	defaultMu.Lock()
-	defer defaultMu.Unlock()
-	defaultManager = manager
+	defaultManager.Store(manager)
 }
 
 func ResetDefaultManager() {
-	defaultMu.Lock()
-	defer defaultMu.Unlock()
-	defaultManager = nil
+	defaultManager.Store(nil)
 }
 
 func (m *Manager) App() *logrus.Logger {
@@ -175,9 +170,6 @@ func (m *Manager) Close() error {
 		return nil
 	}
 
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
 	var firstErr error
 	seen := make(map[*lumberjack.Logger]struct{}, len(m.channels))
 	for _, channel := range []string{ChannelApp, ChannelStats, ChannelEvent} {
@@ -245,9 +237,7 @@ func parseLevel(raw string) (logrus.Level, error) {
 }
 
 func currentDefaultManager() *Manager {
-	defaultMu.RLock()
-	defer defaultMu.RUnlock()
-	return defaultManager
+	return defaultManager.Load()
 }
 
 func fallback() fallbackLoggers {
@@ -265,9 +255,6 @@ func (m *Manager) logger(channel string) *logrus.Logger {
 	if m == nil {
 		return nil
 	}
-
-	m.mu.RLock()
-	defer m.mu.RUnlock()
 
 	item := m.channels[channel]
 	if item == nil {

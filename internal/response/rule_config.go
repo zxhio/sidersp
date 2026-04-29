@@ -5,7 +5,7 @@ import (
 	"net"
 	"net/netip"
 	"strings"
-	"sync"
+	"sync/atomic"
 
 	"sidersp/internal/rule"
 )
@@ -49,7 +49,10 @@ func (c ARPReplyConfig) Empty() bool {
 }
 
 type RuleConfigStore struct {
-	mu         sync.RWMutex
+	state atomic.Pointer[ruleConfigState]
+}
+
+type ruleConfigState struct {
 	dnsRules   map[uint32]DNSResponseConfig
 	arpReplies map[uint32]ARPReplyConfig
 	tcpSynAcks map[uint32]TCPSynAckConfig
@@ -98,11 +101,11 @@ func (s *RuleConfigStore) ReplaceRules(set rule.RuleSet) error {
 		}
 	}
 
-	s.mu.Lock()
-	s.dnsRules = nextDNS
-	s.arpReplies = nextARP
-	s.tcpSynAcks = nextTCP
-	s.mu.Unlock()
+	s.state.Store(&ruleConfigState{
+		dnsRules:   nextDNS,
+		arpReplies: nextARP,
+		tcpSynAcks: nextTCP,
+	})
 	return nil
 }
 
@@ -111,9 +114,11 @@ func (s *RuleConfigStore) DNSResponseConfig(ruleID uint32) (DNSResponseConfig, b
 		return DNSResponseConfig{}, false
 	}
 
-	s.mu.RLock()
-	config, ok := s.dnsRules[ruleID]
-	s.mu.RUnlock()
+	state := s.state.Load()
+	if state == nil {
+		return DNSResponseConfig{}, false
+	}
+	config, ok := state.dnsRules[ruleID]
 	return config, ok
 }
 
@@ -122,9 +127,11 @@ func (s *RuleConfigStore) ARPReplyConfig(ruleID uint32) (ARPReplyConfig, bool) {
 		return ARPReplyConfig{}, false
 	}
 
-	s.mu.RLock()
-	config, ok := s.arpReplies[ruleID]
-	s.mu.RUnlock()
+	state := s.state.Load()
+	if state == nil {
+		return ARPReplyConfig{}, false
+	}
+	config, ok := state.arpReplies[ruleID]
 	return config, ok
 }
 
@@ -133,9 +140,11 @@ func (s *RuleConfigStore) TCPSynAckConfig(ruleID uint32) (TCPSynAckConfig, bool)
 		return TCPSynAckConfig{}, false
 	}
 
-	s.mu.RLock()
-	config, ok := s.tcpSynAcks[ruleID]
-	s.mu.RUnlock()
+	state := s.state.Load()
+	if state == nil {
+		return TCPSynAckConfig{}, false
+	}
+	config, ok := state.tcpSynAcks[ruleID]
 	return config, ok
 }
 

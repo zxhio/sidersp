@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"time"
 )
 
 type frameSender interface {
@@ -16,6 +17,7 @@ type ResponseExecutor struct {
 	sender  responseSender
 	results *ResultBuffer
 	stats   *responseStatsCounters
+	pf      parsedFrame
 }
 
 type ResponseExecutorConfig struct {
@@ -58,16 +60,23 @@ func (e *ResponseExecutor) Execute(ctx context.Context, meta XSKMetadata, frame 
 		return fmt.Errorf("execute response: unsupported action %d", meta.Action)
 	}
 
-	result := e.newResult(meta, action, frame)
-	if err := e.sender.Send(ctx, meta, frame); err != nil {
+	parseErr := parseFrameForAction(&e.pf, frame, meta.Action, "execute response")
+	if parseErr != nil {
+		result := e.newResult(meta, action, frame)
+		e.recordFailure(&result, fmt.Errorf("parse response frame: %w", parseErr))
+		return parseErr
+	}
+
+	result := e.newResultFromParsed(meta, action, &e.pf)
+	if err := e.sender.Send(ctx, meta, frame, &e.pf); err != nil {
 		err = fmt.Errorf("transmit response frame: %w", err)
-		e.recordFailure(result, err)
+		e.recordFailure(&result, err)
 		return err
 	}
 
 	result.Result = ResultSent
 	e.stats.recordSent(result.TXBackend)
-	return e.results.Record(result)
+	return e.results.recordTrusted(&result)
 }
 
 func (e *ResponseExecutor) ExecuteXSK(ctx context.Context, frame []byte) error {
@@ -84,33 +93,47 @@ func (e *ResponseExecutor) ExecuteXSK(ctx context.Context, frame []byte) error {
 
 func (e *ResponseExecutor) newResult(meta XSKMetadata, action string, frame []byte) ResponseResult {
 	result := ResponseResult{
-		RuleID:    meta.RuleID,
-		Action:    action,
-		TXBackend: e.sender.Backend(),
-		IfIndex:   e.ifindex,
-		RXQueue:   e.queueID,
+		TimestampNS: uint64(time.Now().UnixNano()),
+		RuleID:      meta.RuleID,
+		Action:      action,
+		TXBackend:   e.sender.Backend(),
+		IfIndex:     e.ifindex,
+		RXQueue:     e.queueID,
 	}
 	fillTupleFields(&result, frame)
 	return result
 }
 
-func (e *ResponseExecutor) recordFailure(result ResponseResult, err error) {
+func (e *ResponseExecutor) newResultFromParsed(meta XSKMetadata, action string, pf *parsedFrame) ResponseResult {
+	result := ResponseResult{
+		TimestampNS: uint64(time.Now().UnixNano()),
+		RuleID:      meta.RuleID,
+		Action:      action,
+		TXBackend:   e.sender.Backend(),
+		IfIndex:     e.ifindex,
+		RXQueue:     e.queueID,
+	}
+	fillTupleFromParsed(&result, pf)
+	return result
+}
+
+func (e *ResponseExecutor) recordFailure(result *ResponseResult, err error) {
 	result.Result = ResultFailed
 	result.Error = err.Error()
 	e.stats.recordFailed(result.TXBackend)
-	_ = e.results.Record(result)
+	_ = e.results.recordTrusted(result)
 }
 
 func fillTupleFields(result *ResponseResult, frame []byte) {
-	eth, err := parseTupleEthernetFrame(frame)
-	if err != nil {
+	etherType, payload, ok := parseTupleEthernetPayload(frame)
+	if !ok {
 		return
 	}
 
-	switch eth.etherType {
+	switch etherType {
 	case fastpktEtherTypeIPv4:
-		ip4, err := parseIPv4Packet(eth.payload, "fill tuple fields")
-		if err != nil {
+		ip4, ok := parseTupleIPv4Packet(payload)
+		if !ok {
 			return
 		}
 		result.SIP = binary.BigEndian.Uint32(ip4.src[:])
@@ -119,26 +142,45 @@ func fillTupleFields(result *ResponseResult, frame []byte) {
 
 		switch ip4.protocol {
 		case fastpktIPProtoTCP:
-			tcp, err := parseTCPPacket(ip4.payload, "fill tuple fields")
-			if err != nil {
+			tcp, ok := parseTupleTCPPacket(ip4.payload)
+			if !ok {
 				return
 			}
 			result.SPort = tcp.srcPort
 			result.DPort = tcp.dstPort
 		case fastpktIPProtoUDP:
-			udp, err := parseUDPPacket(ip4.payload)
-			if err != nil {
+			udp, ok := parseTupleUDPPacket(ip4.payload)
+			if !ok {
 				return
 			}
 			result.SPort = udp.srcPort
 			result.DPort = udp.dstPort
 		}
 	case fastpktEtherTypeARP:
-		arp, err := parseARPPacket(eth.payload)
-		if err != nil {
+		arp, ok := parseTupleARPPacket(payload)
+		if !ok {
 			return
 		}
 		result.SIP = binary.BigEndian.Uint32(arp.srcProt[:])
 		result.DIP = binary.BigEndian.Uint32(arp.dstProt[:])
+	}
+}
+
+func fillTupleFromParsed(result *ResponseResult, pf *parsedFrame) {
+	switch pf.kind {
+	case parsedFrameICMP, parsedFrameTCP, parsedFrameUDP:
+		result.SIP = binary.BigEndian.Uint32(pf.ip4.src[:])
+		result.DIP = binary.BigEndian.Uint32(pf.ip4.dst[:])
+		result.IPProto = pf.ip4.protocol
+		if pf.kind == parsedFrameTCP {
+			result.SPort = pf.tcp.srcPort
+			result.DPort = pf.tcp.dstPort
+		} else if pf.kind == parsedFrameUDP {
+			result.SPort = pf.udp.srcPort
+			result.DPort = pf.udp.dstPort
+		}
+	case parsedFrameARP:
+		result.SIP = binary.BigEndian.Uint32(pf.arp.srcProt[:])
+		result.DIP = binary.BigEndian.Uint32(pf.arp.dstProt[:])
 	}
 }

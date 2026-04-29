@@ -7,7 +7,7 @@ import (
 )
 
 type responseSender interface {
-	Send(context.Context, XSKMetadata, []byte) error
+	Send(context.Context, XSKMetadata, []byte, *parsedFrame) error
 	Backend() TXBackend
 }
 
@@ -57,28 +57,34 @@ func releaseResponseFrameBuffer(item *pooledFrameBuffer) {
 	responseFramePool.Put(item)
 }
 
-func (s *afxdpSender) Send(ctx context.Context, meta XSKMetadata, frame []byte) error {
-	return sendResponseFrame(ctx, s.out, meta, frame, s.buildOpts)
+func (s *afxdpSender) Send(ctx context.Context, meta XSKMetadata, frame []byte, pf *parsedFrame) error {
+	return sendResponseFrame(ctx, s.out, meta, frame, s.buildOpts, pf)
 }
 
 func (s *afxdpSender) Backend() TXBackend {
 	return TXBackendAFXDP
 }
 
-func (s *afpacketSender) Send(ctx context.Context, meta XSKMetadata, frame []byte) error {
-	return sendResponseFrame(ctx, s.out, meta, frame, s.buildOpts)
+func (s *afpacketSender) Send(ctx context.Context, meta XSKMetadata, frame []byte, pf *parsedFrame) error {
+	return sendResponseFrame(ctx, s.out, meta, frame, s.buildOpts, pf)
 }
 
 func (s *afpacketSender) Backend() TXBackend {
 	return TXBackendAFPacket
 }
 
-func sendResponseFrame(ctx context.Context, out frameSender, meta XSKMetadata, frame []byte, buildOpts BuildOptions) error {
+func sendResponseFrame(ctx context.Context, out frameSender, meta XSKMetadata, frame []byte, buildOpts BuildOptions, pf *parsedFrame) error {
 	if borrowedIPv4, ok := out.(borrowedIPv4PacketSender); ok {
 		buf := acquireResponseFrameBuffer()
 		defer releaseResponseFrameBuffer(buf)
 
-		responsePacket, err := BuildResponseIPv4PacketToBuffer(meta, frame, buildOpts, buf.buf)
+		var responsePacket []byte
+		var err error
+		if pf != nil {
+			responsePacket, err = BuildResponseIPv4PacketFromParsed(meta, pf, buildOpts, buf.buf)
+		} else {
+			responsePacket, err = BuildResponseIPv4PacketToBuffer(meta, frame, buildOpts, buf.buf)
+		}
 		if err == nil {
 			buf.buf = responsePacket
 			return borrowedIPv4.SendBorrowedIPv4Packet(ctx, responsePacket)
@@ -92,7 +98,13 @@ func sendResponseFrame(ctx context.Context, out frameSender, meta XSKMetadata, f
 		buf := acquireResponseFrameBuffer()
 		defer releaseResponseFrameBuffer(buf)
 
-		responseFrame, err := BuildResponseFrameToBuffer(meta, frame, buildOpts, buf.buf)
+		var responseFrame []byte
+		var err error
+		if pf != nil {
+			responseFrame, err = BuildResponseFrameFromParsed(meta, pf, buildOpts, buf.buf)
+		} else {
+			responseFrame, err = BuildResponseFrameToBuffer(meta, frame, buildOpts, buf.buf)
+		}
 		if err != nil {
 			return err
 		}
@@ -100,7 +112,13 @@ func sendResponseFrame(ctx context.Context, out frameSender, meta XSKMetadata, f
 		return borrowed.SendBorrowedFrame(ctx, responseFrame)
 	}
 
-	responseFrame, err := BuildResponseFrame(meta, frame, buildOpts)
+	var responseFrame []byte
+	var err error
+	if pf != nil {
+		responseFrame, err = BuildResponseFrameFromParsed(meta, pf, buildOpts, nil)
+	} else {
+		responseFrame, err = BuildResponseFrame(meta, frame, buildOpts)
+	}
 	if err != nil {
 		return err
 	}

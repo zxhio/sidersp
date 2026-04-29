@@ -3,6 +3,7 @@ package response
 import (
 	"context"
 	"testing"
+	"time"
 )
 
 var (
@@ -91,14 +92,34 @@ func benchmarkExecuteResponseFrame(b *testing.B, meta XSKMetadata, request []byt
 	b.ReportAllocs()
 	b.SetBytes(int64(len(frame)))
 	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		err := executor.ExecuteXSK(context.Background(), frame)
-		if err != nil {
-			b.Fatalf("ExecuteXSK() error = %v", err)
-		}
-	}
+	benchmarkExecuteXSKFrame(b, executor, frame)
 
 	benchmarkFrameSink = tx.lastFrame
 	benchmarkErrSink = nil
+}
+
+func benchmarkStartTimer(b *testing.B) time.Time {
+	b.Helper()
+	return time.Now()
+}
+
+func benchmarkStopTimerWithRates(b *testing.B, startedAt time.Time, frameLen int) {
+	b.Helper()
+
+	elapsed := time.Since(startedAt)
+	b.StopTimer()
+	b.ReportMetric(float64(b.N)/elapsed.Seconds(), "pps")
+	b.ReportMetric(float64(frameLen*8*b.N)/elapsed.Seconds()/1e9, "gbps")
+}
+
+func benchmarkExecuteXSKFrame(b *testing.B, executor *ResponseExecutor, frame []byte) {
+	b.Helper()
+
+	startedAt := benchmarkStartTimer(b)
+	for i := 0; i < b.N; i++ {
+		if err := executor.ExecuteXSK(context.Background(), frame); err != nil {
+			b.Fatalf("ExecuteXSK() error = %v", err)
+		}
+	}
+	benchmarkStopTimerWithRates(b, startedAt, len(frame))
 }

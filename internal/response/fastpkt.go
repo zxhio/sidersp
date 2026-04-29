@@ -81,6 +81,69 @@ type fastpktUDPPacket struct {
 	payload []byte
 }
 
+type parsedFrameKind uint8
+
+const (
+	parsedFrameNone parsedFrameKind = iota
+	parsedFrameICMP
+	parsedFrameARP
+	parsedFrameTCP
+	parsedFrameUDP
+)
+
+type parsedFrame struct {
+	eth  fastpktEthernetFrame
+	ip4  fastpktIPv4Packet
+	tcp  fastpktTCPPacket
+	udp  fastpktUDPPacket
+	icmp fastpktICMPv4Packet
+	arp  fastpktARPPacket
+	kind parsedFrameKind
+}
+
+func parseFrameForAction(out *parsedFrame, frame []byte, action uint16, context string) error {
+	switch action {
+	case ActionICMPEchoReply:
+		eth, ip4, icmp, err := parseICMPEthernetFrame(frame, context)
+		if err != nil {
+			return err
+		}
+		out.eth = eth
+		out.ip4 = ip4
+		out.icmp = icmp
+		out.kind = parsedFrameICMP
+	case ActionARPReply:
+		eth, arp, err := parseARPEthernetFrame(frame, context)
+		if err != nil {
+			return err
+		}
+		out.eth = eth
+		out.arp = arp
+		out.kind = parsedFrameARP
+	case ActionTCPSynAck:
+		eth, ip4, tcp, err := parseTCPEthernetFrame(frame, context)
+		if err != nil {
+			return err
+		}
+		out.eth = eth
+		out.ip4 = ip4
+		out.tcp = tcp
+		out.kind = parsedFrameTCP
+	case ActionUDPEchoReply, ActionDNSRefused, ActionDNSSinkhole:
+		eth, ip4, udp, err := parseUDPEthernetFrame(frame, context)
+		if err != nil {
+			return err
+		}
+		out.eth = eth
+		out.ip4 = ip4
+		out.udp = udp
+		out.kind = parsedFrameUDP
+	default:
+		return fmt.Errorf("%s: unsupported action %d", context, action)
+	}
+	return nil
+}
+
 func parseICMPEthernetFrame(frame []byte, context string) (fastpktEthernetFrame, fastpktIPv4Packet, fastpktICMPv4Packet, error) {
 	eth, err := parseEthernetFrame(frame)
 	if err != nil {
@@ -201,6 +264,27 @@ func parseTupleEthernetFrame(frame []byte) (fastpktTupleFrame, error) {
 	}
 }
 
+func parseTupleEthernetPayload(frame []byte) (uint16, []byte, bool) {
+	if len(frame) < fastpktEthernetHeaderLen {
+		return 0, nil, false
+	}
+
+	etherType := binary.BigEndian.Uint16(frame[12:14])
+	switch etherType {
+	case fastpktEtherTypeDot1Q:
+		if len(frame) < fastpktEthernetHeaderLen+4 {
+			return 0, nil, false
+		}
+		innerEtherType := binary.BigEndian.Uint16(frame[16:18])
+		if innerEtherType == fastpktEtherTypeDot1Q {
+			return 0, nil, false
+		}
+		return innerEtherType, frame[18:], true
+	default:
+		return etherType, frame[fastpktEthernetHeaderLen:], true
+	}
+}
+
 func parseIPv4Packet(frame []byte, context string) (fastpktIPv4Packet, error) {
 	if len(frame) < fastpktIPv4HeaderMinLen {
 		return fastpktIPv4Packet{}, fmt.Errorf("%s: ipv4 layer missing", context)
@@ -225,6 +309,28 @@ func parseIPv4Packet(frame []byte, context string) (fastpktIPv4Packet, error) {
 	copy(ip4.dst[:], frame[16:20])
 	ip4.payload = frame[headerLen:totalLen]
 	return ip4, nil
+}
+
+func parseTupleIPv4Packet(frame []byte) (fastpktIPv4Packet, bool) {
+	if len(frame) < fastpktIPv4HeaderMinLen || frame[0]>>4 != 4 {
+		return fastpktIPv4Packet{}, false
+	}
+
+	headerLen := int(frame[0]&0x0f) * 4
+	if headerLen < fastpktIPv4HeaderMinLen || len(frame) < headerLen {
+		return fastpktIPv4Packet{}, false
+	}
+	totalLen := int(binary.BigEndian.Uint16(frame[2:4]))
+	if totalLen < headerLen || len(frame) < totalLen {
+		return fastpktIPv4Packet{}, false
+	}
+
+	var ip4 fastpktIPv4Packet
+	ip4.protocol = frame[9]
+	copy(ip4.src[:], frame[12:16])
+	copy(ip4.dst[:], frame[16:20])
+	ip4.payload = frame[headerLen:totalLen]
+	return ip4, true
 }
 
 func parseICMPv4Packet(frame []byte, context string) (fastpktICMPv4Packet, error) {
@@ -255,6 +361,17 @@ func parseARPPacket(frame []byte) (fastpktARPPacket, error) {
 	return arp, nil
 }
 
+func parseTupleARPPacket(frame []byte) (fastpktARPPacket, bool) {
+	if len(frame) < fastpktARPHeaderLen {
+		return fastpktARPPacket{}, false
+	}
+
+	var arp fastpktARPPacket
+	copy(arp.srcProt[:], frame[14:18])
+	copy(arp.dstProt[:], frame[24:28])
+	return arp, true
+}
+
 func parseTCPPacket(frame []byte, context string) (fastpktTCPPacket, error) {
 	if len(frame) < fastpktTCPHeaderMinLen {
 		return fastpktTCPPacket{}, fmt.Errorf("%s: tcp layer missing", context)
@@ -274,6 +391,22 @@ func parseTCPPacket(frame []byte, context string) (fastpktTCPPacket, error) {
 	return tcp, nil
 }
 
+func parseTupleTCPPacket(frame []byte) (fastpktTCPPacket, bool) {
+	if len(frame) < fastpktTCPHeaderMinLen {
+		return fastpktTCPPacket{}, false
+	}
+
+	headerLen := int(frame[12]>>4) * 4
+	if headerLen < fastpktTCPHeaderMinLen || len(frame) < headerLen {
+		return fastpktTCPPacket{}, false
+	}
+
+	return fastpktTCPPacket{
+		srcPort: binary.BigEndian.Uint16(frame[0:2]),
+		dstPort: binary.BigEndian.Uint16(frame[2:4]),
+	}, true
+}
+
 func parseUDPPacket(frame []byte) (fastpktUDPPacket, error) {
 	if len(frame) < fastpktUDPHeaderLen {
 		return fastpktUDPPacket{}, fmt.Errorf("udp layer missing")
@@ -289,6 +422,22 @@ func parseUDPPacket(frame []byte) (fastpktUDPPacket, error) {
 		dstPort: binary.BigEndian.Uint16(frame[2:4]),
 		payload: frame[fastpktUDPHeaderLen:udpLen],
 	}, nil
+}
+
+func parseTupleUDPPacket(frame []byte) (fastpktUDPPacket, bool) {
+	if len(frame) < fastpktUDPHeaderLen {
+		return fastpktUDPPacket{}, false
+	}
+
+	udpLen := int(binary.BigEndian.Uint16(frame[4:6]))
+	if udpLen < fastpktUDPHeaderLen || len(frame) < udpLen {
+		return fastpktUDPPacket{}, false
+	}
+
+	return fastpktUDPPacket{
+		srcPort: binary.BigEndian.Uint16(frame[0:2]),
+		dstPort: binary.BigEndian.Uint16(frame[2:4]),
+	}, true
 }
 
 func buildICMPEchoReplyFrame(eth fastpktEthernetFrame, ip4 fastpktIPv4Packet, icmp fastpktICMPv4Packet) []byte {

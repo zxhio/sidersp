@@ -115,6 +115,22 @@ Run BPF tests on a suitable Linux environment:
 make test-bpf
 ```
 
+Run the benchmark entrypoints on a suitable Linux environment:
+
+```bash
+make bench
+sudo make bench-vnet
+```
+
+`make bench` aggregates the BPF kernel benchmark, the userspace response
+benchmarks, and the AF_PACKET send benchmark. `make bench-vnet` creates and
+tears down a fixed-name `bridge + veth + netns` topology before running the
+vnet latency matrix and the `internal/vnetbench` benchmark suite.
+
+For the benchmark matrix, `perf` / Go `pprof` capture commands, artifact
+locations, and inspection workflow, see
+[docs/benchmarks.md](docs/benchmarks.md).
+
 ## Layout
 
 ```text

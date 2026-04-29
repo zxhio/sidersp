@@ -113,6 +113,21 @@ sudo scripts/install-systemd.sh
 make test-bpf
 ```
 
+在合适的 Linux 环境运行 benchmark 入口：
+
+```bash
+make bench
+sudo make bench-vnet
+```
+
+`make bench` 会聚合执行 BPF 内核 benchmark、用户态 response benchmark 和
+AF_PACKET send benchmark。`make bench-vnet` 会先在脚本里搭建并清理固定名称
+的 `bridge + veth + netns` 拓扑，再执行 vnet 时延矩阵和
+`internal/vnetbench` benchmark。
+
+完整 benchmark case、`perf` / Go `pprof` 采集命令、产物位置和查看方式见
+[docs/benchmarks.md](docs/benchmarks.md)。
+
 ## 目录结构
 
 ```text

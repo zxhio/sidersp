@@ -91,11 +91,12 @@ func TestResultBufferFillsTimestamp(t *testing.T) {
 
 	buffer := newTestResultBuffer(t, 1)
 	recordTestResult(t, buffer, ResponseResult{
-		RuleID:    1001,
-		Action:    "icmp_echo_reply",
-		Result:    ResultSent,
-		TXBackend: TXBackendAFXDP,
-		RXQueue:   0,
+		TimestampNS: 1,
+		RuleID:      1001,
+		Action:      "icmp_echo_reply",
+		Result:      ResultSent,
+		TXBackend:   TXBackendAFXDP,
+		RXQueue:     0,
 	})
 
 	results := buffer.List()
