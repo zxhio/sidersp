@@ -5,4 +5,6 @@
 internal/dataplane/sidersp_bpfel.o
 internal/console/static/*
 !internal/console/static/.keep
+!internal/console/static/assets/
+!internal/console/static/assets/.keep
 .claude/settings.local.json
