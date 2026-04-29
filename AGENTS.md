@@ -18,6 +18,7 @@ Agent rules live here. Product contracts live in `specs/`. Technical docs live i
 - `docs/`: technical docs
 - `specs/`: product contracts
 - `web/`: management frontend
+- `.github/`: repository automation and PR templates
 - `skills/`: repo-local agent skills
 - `.agent/`: local plans and reviews
 
@@ -95,4 +96,5 @@ Use the smallest skill set that fits the task. If you change agent workflow, upd
 - `.agent/reviews/`: local review notes
 - `.agent/templates/`: plan and review templates
 - Local gate: `make ai-review`
+- PR carrier: `.github/pull_request_template.md` under `## AI Review`
 - Do not put AI workflow rules in `docs/` or `specs/`

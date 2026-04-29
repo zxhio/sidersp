@@ -34,6 +34,7 @@ Write a short implementation plan.
 - `docs/`: technical docs
 - `specs/`: product contracts
 - `web/`: frontend
+- `.github/`: repository automation and PR templates
 - `skills/`: agent workflow rules
 
 ## Rules

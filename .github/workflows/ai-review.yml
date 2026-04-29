@@ -1,0 +1,52 @@
+name: ai-review
+
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - edited
+      - ready_for_review
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ai-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  pr-summary:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out pull request head
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+
+      - name: Validate AI Review summary
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          body_file="$RUNNER_TEMP/pr-body.md"
+          printf '%s' "${PR_BODY}" > "$body_file"
+          python3 scripts/check-pr-review-summary.py "$body_file"
+
+  diff-review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out pull request head
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Run ai-review against pull request diff
+        run: |
+          bash scripts/ai-review.sh \
+            --base "${{ github.event.pull_request.base.sha }}" \
+            --head HEAD

@@ -23,7 +23,7 @@ Inspect only what you need:
 - the request, plan, or stated scope
 - the current diff or changed files
 - `AGENTS.md`
-- matching files in `specs/`, `docs/`, `cmd/`, `internal/`, `bpf/`, `web/`, or `skills/`
+- matching files in `specs/`, `docs/`, `cmd/`, `internal/`, `bpf/`, `web/`, `.github/`, or `skills/`
 
 ## Review checklist
 
@@ -103,3 +103,4 @@ Rules:
 Prefer `.agent/reviews/YYYYMMDD-<slug>.md` for new review files.
 Start from `.agent/templates/review.md` when useful.
 Use `make ai-review` for a local review pass.
+If the change goes through a pull request, summarize the result in `.github/pull_request_template.md` under `## AI Review`.

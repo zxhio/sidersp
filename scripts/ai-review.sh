@@ -4,6 +4,44 @@ set -euo pipefail
 repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"
 
+base_ref=""
+head_ref="HEAD"
+
+usage() {
+	cat <<'EOF'
+Usage:
+  bash scripts/ai-review.sh
+  bash scripts/ai-review.sh --base <git-ref> [--head <git-ref>]
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+		--base)
+			base_ref="${2:-}"
+			shift 2
+			;;
+		--head)
+			head_ref="${2:-}"
+			shift 2
+			;;
+		-h|--help)
+			usage
+			exit 0
+			;;
+		*)
+			echo "ai-review: unknown argument: $1" >&2
+			usage >&2
+			exit 1
+			;;
+	esac
+done
+
+if [[ -z "$base_ref" && "$head_ref" != "HEAD" ]]; then
+	echo "ai-review: --head requires --base" >&2
+	exit 1
+fi
+
 merge_file_lists() {
 	local line
 	mapfile -t files < <(
@@ -14,36 +52,49 @@ merge_file_lists() {
 	)
 }
 
-diff_mode="staged"
-if git diff --cached --quiet --ignore-submodules HEAD --; then
-	if git diff --quiet --ignore-submodules --; then
-		mapfile -t files < <(git ls-files --others --exclude-standard)
-		if [[ ${#files[@]} -eq 0 ]]; then
-			echo "ai-review: no staged, unstaged, or untracked changes"
-			exit 0
+collect_local_files() {
+	diff_mode="staged"
+	if git diff --cached --quiet --ignore-submodules HEAD --; then
+		if git diff --quiet --ignore-submodules --; then
+			mapfile -t files < <(git ls-files --others --exclude-standard)
+			if [[ ${#files[@]} -eq 0 ]]; then
+				echo "ai-review: no staged, unstaged, or untracked changes"
+				exit 0
+			fi
+			diff_mode="untracked"
+		else
+			diff_mode="working tree"
+			mapfile -t files < <(git diff --name-only --diff-filter=ACMR)
 		fi
-		diff_mode="untracked"
 	else
-		diff_mode="working tree"
-		mapfile -t files < <(git diff --name-only --diff-filter=ACMR)
+		mapfile -t files < <(git diff --cached --name-only --diff-filter=ACMR)
+	fi
+
+	merge_file_lists
+
+	if [[ ${#files[@]} -eq 0 ]]; then
+		echo "ai-review: no added, copied, modified, renamed, or untracked files"
+		exit 0
+	fi
+
+	if git ls-files --others --exclude-standard | grep -q .; then
+		case "$diff_mode" in
+			staged|working\ tree)
+				diff_mode="${diff_mode} + untracked"
+				;;
+		esac
+	fi
+}
+
+if [[ -n "$base_ref" ]]; then
+	diff_mode="range ${base_ref}...${head_ref}"
+	mapfile -t files < <(git diff --name-only --diff-filter=ACMR "${base_ref}...${head_ref}")
+	if [[ ${#files[@]} -eq 0 ]]; then
+		echo "ai-review: no added, copied, modified, or renamed files in ${base_ref}...${head_ref}"
+		exit 0
 	fi
 else
-	mapfile -t files < <(git diff --cached --name-only --diff-filter=ACMR)
-fi
-
-merge_file_lists
-
-if [[ ${#files[@]} -eq 0 ]]; then
-	echo "ai-review: no added, copied, modified, renamed, or untracked files"
-	exit 0
-fi
-
-if git ls-files --others --exclude-standard | grep -q .; then
-	case "$diff_mode" in
-		staged|working\ tree)
-			diff_mode="${diff_mode} + untracked"
-			;;
-	esac
+	collect_local_files
 fi
 
 has_agent=0
@@ -84,7 +135,7 @@ for file in "${files[@]}"; do
 	fi
 
 	case "$file" in
-		AGENTS.md|skills/*|.agent/*|Makefile|scripts/ai-review.sh)
+		AGENTS.md|.github/*|skills/*|.agent/*|Makefile|scripts/ai-review.sh|scripts/check-pr-review-summary.py)
 			has_agent=1
 			;;
 		specs/*)
