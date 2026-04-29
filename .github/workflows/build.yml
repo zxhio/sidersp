@@ -26,18 +26,10 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Install clang, llvm, and BPF headers
+      - name: Install clang and llvm
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang llvm linux-libc-dev libbpf-dev
-
-      - name: Export BPF asm header bridge
-        run: |
-          arch="$(dpkg-architecture -qDEB_HOST_MULTIARCH)"
-          bridge_dir="$RUNNER_TEMP/bpf-include"
-          mkdir -p "$bridge_dir"
-          ln -s "/usr/include/${arch}/asm" "$bridge_dir/asm"
-          echo "CPATH=$bridge_dir" >> "$GITHUB_ENV"
+          sudo apt-get install -y clang llvm
 
       - name: Regenerate dataplane artifacts
         run: go generate ./internal/dataplane
