@@ -2,6 +2,25 @@
 
 Side-path analysis and active response platform for mirrored traffic.
 
+Agent rules live here. Product contracts live in `specs/`. Technical docs live in `docs/`. Agent artifacts live in `.agent/`.
+
+## Writing Style
+
+- Keep descriptions short and precise.
+
+## Repository Layout
+
+- `cmd/`: entrypoints
+- `internal/`: backend runtime modules
+- `bpf/`: XDP/BPF programs
+- `configs/`: config samples and defaults
+- `deploy/`: deployment assets
+- `docs/`: technical docs
+- `specs/`: product contracts
+- `web/`: management frontend
+- `skills/`: repo-local agent skills
+- `.agent/`: local plans and reviews
+
 ## Module Boundaries
 
 | Module | Responsibility |
@@ -51,8 +70,29 @@ Do not edit `internal/dataplane/sidersp_bpfel.go` directly; regenerate it.
 - `specs/RESPONSES.md`: response execution path, defaults, fallbacks
 - `specs/STATS.md`: authoritative source for public metric names and meanings
 
+## Skill Routing
+
+- File-backed plan before coding: `skills/planning-with-files`
+- AI change review: `skills/agent-review`
+- Go structure and ownership: `skills/go-abstraction`
+- Go style and test scope: `skills/go-coding-style`
+- Go logging: `skills/go-logging`
+- Gin REST API changes: `skills/go-rest-api`
+- Frontend changes under `web/`: `skills/web-console`
+- Git staging and commits: `skills/git-workflow`
+
+Use the smallest skill set that fits the task. If you change agent workflow, update the matching file in `AGENTS.md` or `skills/`.
+
 ## Coding References
 
 - Go structure: `skills/go-abstraction`
 - Go style and test scope: `skills/go-coding-style`
 - Logging: `skills/go-logging`
+
+## Agent Workspace
+
+- `.agent/plans/`: local plan files
+- `.agent/reviews/`: local review notes
+- `.agent/templates/`: plan and review templates
+- Local gate: `make ai-review`
+- Do not put AI workflow rules in `docs/` or `specs/`

@@ -1,5 +1,7 @@
 /build/
 /dist/
+.agent/plans/
+.agent/reviews/
 internal/dataplane/sidersp_bpfel.o
 internal/console/static/*
 !internal/console/static/.keep

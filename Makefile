@@ -24,7 +24,7 @@ PERF_RECORD_FLAGS ?= -g
 GOOS := linux
 GOARCH := amd64
 
-.PHONY: build build-all build-web build-xdp package run clean test test-unit test-bpf bench bench-vnet bench-bpf-perf bench-response-perf bench-bpf-pprof bench-response-pprof
+.PHONY: build build-all build-web build-xdp package run clean test test-unit test-bpf ai-review bench bench-vnet bench-bpf-perf bench-response-perf bench-bpf-pprof bench-response-pprof
 
 build: build-xdp build-web
 	CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) go build -trimpath -ldflags="-s -w" -o $(BIN) $(MAIN)
@@ -57,6 +57,9 @@ test-unit: build-xdp
 
 test-bpf: build-xdp
 	SIDERSP_RUN_BPF_TESTS=1 go test ./internal/dataplane/ -v -count=1 -run TestBPF
+
+ai-review:
+	bash scripts/ai-review.sh
 
 bench: build-xdp
 	GOCACHE=$(BENCH_GOCACHE) SIDERSP_RUN_BPF_TESTS=1 go test ./internal/dataplane/ -run '^$$' -bench $(BPF_BENCH) -benchmem -benchtime=$(BENCHTIME) -count=1
