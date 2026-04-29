@@ -2,6 +2,9 @@
 
 轻量级旁路流量前置裁决与主动响应服务。
 
+[![Build](https://github.com/zxhio/sidersp/actions/workflows/build.yml/badge.svg)](https://github.com/zxhio/sidersp/actions/workflows/build.yml)
+[![AI Review](https://github.com/zxhio/sidersp/actions/workflows/ai-review.yml/badge.svg)](https://github.com/zxhio/sidersp/actions/workflows/ai-review.yml)
+
 中文 | [English](README.md)
 
 ## 功能

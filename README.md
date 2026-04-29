@@ -2,6 +2,9 @@
 
 Lightweight side-path traffic pre-decision and active response service.
 
+[![Build](https://github.com/zxhio/sidersp/actions/workflows/build.yml/badge.svg)](https://github.com/zxhio/sidersp/actions/workflows/build.yml)
+[![AI Review](https://github.com/zxhio/sidersp/actions/workflows/ai-review.yml/badge.svg)](https://github.com/zxhio/sidersp/actions/workflows/ai-review.yml)
+
 [中文](README.zh-CN.md) | English
 
 ## Features
