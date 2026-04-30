@@ -43,7 +43,7 @@ func BenchmarkExecuteTCPSynAckAFPacketSend(b *testing.B) {
 			buildOpts: testTCPSynAckBuildOptions(b, 1003, 1000),
 		},
 		Results: results,
-		Stats:   newResponseStatsCounters(),
+		Stats:   newStatsCounters(),
 	})
 	if err != nil {
 		b.Fatalf("NewResponseExecutor() error = %v", err)

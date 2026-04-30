@@ -19,7 +19,7 @@ type NewXSKFunc func(queueID int) (XSKSocket, error)
 type Runtime struct {
 	group           *WorkerGroup
 	results         *ResultBuffer
-	stats           *responseStatsCounters
+	stats           *statsCounters
 	sockets         []XSKSocket
 	closers         []io.Closer
 	ruleConfigs     *RuleConfigStore
@@ -38,7 +38,7 @@ func NewRuntime(opts Options) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
-	stats := newResponseStatsCounters()
+	stats := newStatsCounters()
 
 	queues := opts.Queues
 	workerSpecs := make([]WorkerSpec, 0, len(queues))
@@ -101,7 +101,7 @@ func NewRuntime(opts Options) (*Runtime, error) {
 		ruleConfigs:     ruleConfigs,
 		ifindex:         opts.IfIndex,
 		queues:          append([]int(nil), queues...),
-		senderMode:      responseSenderMode(opts.EgressInterface),
+		senderMode:      senderMode(opts.EgressInterface),
 		egressInterface: opts.EgressInterface,
 	}, nil
 }
@@ -207,7 +207,7 @@ func closeClosers(closers []io.Closer) {
 	}
 }
 
-func responseSenderMode(egressInterface string) string {
+func senderMode(egressInterface string) string {
 	if egressInterface == "" {
 		return string(TXBackendAFXDP)
 	}

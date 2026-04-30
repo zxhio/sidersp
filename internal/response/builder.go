@@ -1,11 +1,14 @@
 package response
 
 import (
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"net"
 	"net/netip"
+	"sync"
+
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
 
 	"sidersp/internal/rule"
 )
@@ -35,322 +38,38 @@ func BuildResponseIPv4Packet(meta XSKMetadata, frame []byte, opts BuildOptions) 
 }
 
 func BuildResponseFrameToBuffer(meta XSKMetadata, frame []byte, opts BuildOptions, dst []byte) ([]byte, error) {
-	switch meta.Action {
-	case ActionICMPEchoReply:
-		return buildICMPEchoReplyToBuffer(frame, dst)
-	case ActionARPReply:
-		return buildARPReplyToBuffer(meta.RuleID, frame, opts.HardwareAddr, opts.RuleConfigs, dst)
-	case ActionTCPSynAck:
-		return buildTCPSynAckToBuffer(meta.RuleID, frame, opts.RuleConfigs, dst)
-	case ActionUDPEchoReply:
-		return buildUDPEchoReplyToBuffer(frame, dst)
-	case ActionDNSRefused:
-		return buildDNSResponseToBuffer(meta.RuleID, frame, opts.RuleConfigs, "build dns refused", dst)
-	case ActionDNSSinkhole:
-		return buildDNSResponseToBuffer(meta.RuleID, frame, opts.RuleConfigs, "build dns sinkhole", dst)
-	default:
-		return nil, fmt.Errorf("build response: unsupported action %d", meta.Action)
+	engine := getResponseEngine()
+	defer putResponseEngine(engine)
+
+	context := buildContext(meta.Action)
+	pkt, builder, err := engine.ResolveBuilder(meta, frame, context)
+	if err != nil {
+		return nil, err
 	}
+	return buildResponseFrame(builder, meta, pkt, opts, dst)
 }
 
 func BuildResponseIPv4PacketToBuffer(meta XSKMetadata, frame []byte, opts BuildOptions, dst []byte) ([]byte, error) {
-	switch meta.Action {
-	case ActionICMPEchoReply:
-		return BuildICMPEchoReplyIPv4ToBuffer(frame, dst)
-	case ActionTCPSynAck:
-		return buildTCPSynAckIPv4ToBuffer(meta.RuleID, frame, opts.RuleConfigs, dst)
-	case ActionUDPEchoReply:
-		return buildUDPEchoReplyIPv4ToBuffer(frame, dst)
-	case ActionDNSRefused:
-		return buildDNSResponseIPv4ToBuffer(meta.RuleID, frame, opts.RuleConfigs, "build dns refused", dst)
-	case ActionDNSSinkhole:
-		return buildDNSResponseIPv4ToBuffer(meta.RuleID, frame, opts.RuleConfigs, "build dns sinkhole", dst)
-	case ActionARPReply:
-		return nil, fmt.Errorf("build response ipv4 packet: %w for action %d", errResponseRequiresEthernetFraming, meta.Action)
-	default:
-		return nil, fmt.Errorf("build response ipv4 packet: unsupported action %d", meta.Action)
-	}
-}
+	engine := getResponseEngine()
+	defer putResponseEngine(engine)
 
-func BuildResponseFrameFromParsed(meta XSKMetadata, pf *parsedFrame, opts BuildOptions, dst []byte) ([]byte, error) {
-	switch meta.Action {
-	case ActionICMPEchoReply:
-		if pf.icmp.typ != 8 || pf.icmp.code != 0 {
-			return nil, fmt.Errorf("build icmp echo reply: packet is not echo request")
-		}
-		return buildICMPEchoReplyFrameToBuffer(dst, pf.eth, pf.ip4, pf.icmp), nil
-	case ActionARPReply:
-		if pf.arp.operation != fastpktARPRequest {
-			return nil, fmt.Errorf("build arp reply: packet is not arp request")
-		}
-		config, err := lookupARPReplyConfig(meta.RuleID, opts.HardwareAddr, opts.RuleConfigs)
-		if err != nil {
-			return nil, err
-		}
-		return buildARPReplyFrameToBuffer(dst, pf.eth, pf.arp, config.HardwareAddr, config.SenderIPv4, config.HasSenderIPv4()), nil
-	case ActionTCPSynAck:
-		if pf.tcp.flags&fastpktTCPSyn == 0 || pf.tcp.flags&(fastpktTCPAck|fastpktTCPRst|fastpktTCPFin) != 0 {
-			return nil, fmt.Errorf("build tcp syn ack: packet is not initial syn")
-		}
-		if len(pf.tcp.payload) > 0 {
-			return nil, fmt.Errorf("build tcp syn ack: syn payload is not supported")
-		}
-		seq := lookupTCPSynAckSeq(meta.RuleID, opts.RuleConfigs)
-		return buildTCPSynAckFrameToBuffer(dst, pf.eth, pf.ip4, pf.tcp, seq), nil
-	case ActionUDPEchoReply:
-		return buildUDPEchoReplyFrameToBuffer(dst, pf.eth, pf.ip4, pf.udp), nil
-	case ActionDNSRefused, ActionDNSSinkhole:
-		return buildDNSResponseFromParsed(meta, pf, opts, dst)
-	default:
-		return nil, fmt.Errorf("build response: unsupported action %d", meta.Action)
-	}
-}
-
-func BuildResponseIPv4PacketFromParsed(meta XSKMetadata, pf *parsedFrame, opts BuildOptions, dst []byte) ([]byte, error) {
-	switch meta.Action {
-	case ActionICMPEchoReply:
-		if pf.icmp.typ != 8 || pf.icmp.code != 0 {
-			return nil, fmt.Errorf("build icmp echo reply: packet is not echo request")
-		}
-		return buildICMPEchoReplyIPv4PacketToBuffer(dst, pf.ip4, pf.icmp), nil
-	case ActionTCPSynAck:
-		if pf.tcp.flags&fastpktTCPSyn == 0 || pf.tcp.flags&(fastpktTCPAck|fastpktTCPRst|fastpktTCPFin) != 0 {
-			return nil, fmt.Errorf("build tcp syn ack: packet is not initial syn")
-		}
-		if len(pf.tcp.payload) > 0 {
-			return nil, fmt.Errorf("build tcp syn ack: syn payload is not supported")
-		}
-		seq := lookupTCPSynAckSeq(meta.RuleID, opts.RuleConfigs)
-		return buildTCPSynAckIPv4PacketToBuffer(dst, pf.ip4, pf.tcp, seq), nil
-	case ActionUDPEchoReply:
-		return buildUDPEchoReplyIPv4PacketToBuffer(dst, pf.ip4, pf.udp), nil
-	case ActionDNSRefused, ActionDNSSinkhole:
-		return buildDNSResponseIPv4FromParsed(meta, pf, opts, dst)
-	case ActionARPReply:
-		return nil, fmt.Errorf("build response ipv4 packet: %w for action %d", errResponseRequiresEthernetFraming, meta.Action)
-	default:
-		return nil, fmt.Errorf("build response ipv4 packet: unsupported action %d", meta.Action)
-	}
-}
-
-func BuildICMPEchoReplyIPv4(frame []byte) ([]byte, error) {
-	return BuildICMPEchoReplyIPv4ToBuffer(frame, nil)
-}
-
-func BuildICMPEchoReplyIPv4ToBuffer(frame []byte, dst []byte) ([]byte, error) {
-	ip4, icmp, err := parseICMPIPv4FromEthernet(frame, "build icmp echo reply")
+	context := buildContext(meta.Action)
+	pkt, builder, err := engine.ResolveBuilder(meta, frame, context)
 	if err != nil {
 		return nil, err
 	}
-	if icmp.typ != 8 || icmp.code != 0 {
-		return nil, fmt.Errorf("build icmp echo reply: packet is not echo request")
-	}
-
-	return buildICMPEchoReplyIPv4PacketToBuffer(dst, ip4, icmp), nil
-}
-
-func buildICMPEchoReply(frame []byte) ([]byte, error) {
-	return buildICMPEchoReplyToBuffer(frame, nil)
-}
-
-func buildICMPEchoReplyToBuffer(frame []byte, dst []byte) ([]byte, error) {
-	eth, ip4, icmp, err := parseICMPEthernetFrame(frame, "build icmp echo reply")
-	if err != nil {
-		return nil, err
-	}
-	if icmp.typ != 8 || icmp.code != 0 {
-		return nil, fmt.Errorf("build icmp echo reply: packet is not echo request")
-	}
-
-	return buildICMPEchoReplyFrameToBuffer(dst, eth, ip4, icmp), nil
-}
-
-func buildARPReply(frame []byte, hardwareAddr net.HardwareAddr) ([]byte, error) {
-	return buildARPReplyToBuffer(0, frame, hardwareAddr, nil, nil)
-}
-
-func buildARPReplyToBuffer(ruleID uint32, frame []byte, defaultHardwareAddr net.HardwareAddr, configs *RuleConfigStore, dst []byte) ([]byte, error) {
-	eth, arp, err := parseARPEthernetFrame(frame, "build arp reply")
-	if err != nil {
-		return nil, err
-	}
-	if arp.operation != fastpktARPRequest {
-		return nil, fmt.Errorf("build arp reply: packet is not arp request")
-	}
-
-	config, err := lookupARPReplyConfig(ruleID, defaultHardwareAddr, configs)
-	if err != nil {
-		return nil, err
-	}
-
-	return buildARPReplyFrameToBuffer(dst, eth, arp, config.HardwareAddr, config.SenderIPv4, config.HasSenderIPv4()), nil
-}
-
-func buildTCPSynAck(frame []byte) ([]byte, error) {
-	return buildTCPSynAckToBuffer(0, frame, nil, nil)
-}
-
-func buildTCPSynAckToBuffer(ruleID uint32, frame []byte, configs *RuleConfigStore, dst []byte) ([]byte, error) {
-	eth, ip4, tcp, err := parseTCPEthernetFrame(frame, "build tcp syn ack")
-	if err != nil {
-		return nil, err
-	}
-	if tcp.flags&fastpktTCPSyn == 0 || tcp.flags&(fastpktTCPAck|fastpktTCPRst|fastpktTCPFin) != 0 {
-		return nil, fmt.Errorf("build tcp syn ack: packet is not initial syn")
-	}
-	if len(tcp.payload) > 0 {
-		return nil, fmt.Errorf("build tcp syn ack: syn payload is not supported")
-	}
-
-	seq := lookupTCPSynAckSeq(ruleID, configs)
-
-	return buildTCPSynAckFrameToBuffer(dst, eth, ip4, tcp, seq), nil
-}
-
-func buildTCPSynAckIPv4ToBuffer(ruleID uint32, frame []byte, configs *RuleConfigStore, dst []byte) ([]byte, error) {
-	_, ip4, tcp, err := parseTCPEthernetFrame(frame, "build tcp syn ack")
-	if err != nil {
-		return nil, err
-	}
-	if tcp.flags&fastpktTCPSyn == 0 || tcp.flags&(fastpktTCPAck|fastpktTCPRst|fastpktTCPFin) != 0 {
-		return nil, fmt.Errorf("build tcp syn ack: packet is not initial syn")
-	}
-	if len(tcp.payload) > 0 {
-		return nil, fmt.Errorf("build tcp syn ack: syn payload is not supported")
-	}
-
-	seq := lookupTCPSynAckSeq(ruleID, configs)
-
-	return buildTCPSynAckIPv4PacketToBuffer(dst, ip4, tcp, seq), nil
-}
-
-func buildUDPEchoReply(frame []byte) ([]byte, error) {
-	return buildUDPEchoReplyToBuffer(frame, nil)
-}
-
-func buildUDPEchoReplyToBuffer(frame []byte, dst []byte) ([]byte, error) {
-	eth, ip4, udp, err := parseUDPEthernetFrame(frame, "build udp echo reply")
-	if err != nil {
-		return nil, err
-	}
-
-	return buildUDPEchoReplyFrameToBuffer(dst, eth, ip4, udp), nil
-}
-
-func buildUDPEchoReplyIPv4ToBuffer(frame []byte, dst []byte) ([]byte, error) {
-	_, ip4, udp, err := parseUDPEthernetFrame(frame, "build udp echo reply")
-	if err != nil {
-		return nil, err
-	}
-
-	return buildUDPEchoReplyIPv4PacketToBuffer(dst, ip4, udp), nil
-}
-
-func buildDNSRefused(frame []byte) ([]byte, error) {
-	return buildDNSResponseToBuffer(0, frame, nil, "build dns refused", nil)
-}
-
-func buildDNSResponseToBuffer(ruleID uint32, frame []byte, configs *RuleConfigStore, context string, dst []byte) ([]byte, error) {
-	eth, ip4, udp, err := parseUDPEthernetFrame(frame, context)
-	if err != nil {
-		return nil, err
-	}
-
-	query, err := parseDNSQuery(udp.payload, context)
-	if err != nil {
-		return nil, err
-	}
-
-	config, err := lookupDNSResponseConfig(ruleID, configs, context)
-	if err != nil {
-		return nil, err
-	}
-
-	answerType, answers, err := selectDNSResponseAnswers(query, config, context)
-	if err != nil {
-		return nil, err
-	}
-
-	return buildDNSResponseFrameToBuffer(dst, eth, ip4, udp, query, config, answerType, answers), nil
-}
-
-func buildDNSResponseIPv4ToBuffer(ruleID uint32, frame []byte, configs *RuleConfigStore, context string, dst []byte) ([]byte, error) {
-	_, ip4, udp, err := parseUDPEthernetFrame(frame, context)
-	if err != nil {
-		return nil, err
-	}
-
-	query, err := parseDNSQuery(udp.payload, context)
-	if err != nil {
-		return nil, err
-	}
-
-	config, err := lookupDNSResponseConfig(ruleID, configs, context)
-	if err != nil {
-		return nil, err
-	}
-
-	answerType, answers, err := selectDNSResponseAnswers(query, config, context)
-	if err != nil {
-		return nil, err
-	}
-
-	return buildDNSResponseIPv4PacketToBuffer(dst, ip4, udp, query, config, answerType, answers), nil
+	return buildResponseIPv4Packet(builder, meta, pkt, opts, dst)
 }
 
 const (
-	dnsHeaderLen      = 12
-	dnsFlagQR         = 1 << 15
-	dnsFlagOpcodeMask = 0x7800
-	dnsFlagRD         = 1 << 8
-	dnsRCodeServFail  = 2
-	dnsRCodeNXDomain  = 3
-	dnsRCodeRefused   = 5
-	dnsTypeA          = 1
-	dnsTypeAAAA       = 28
-	dnsClassIN        = 1
+	dnsHeaderLen     = 12
+	dnsRCodeServFail = 2
+	dnsRCodeNXDomain = 3
+	dnsRCodeRefused  = 5
+	dnsTypeA         = 1
+	dnsTypeAAAA      = 28
+	dnsClassIN       = 1
 )
-
-type dnsQuery struct {
-	id       uint16
-	preserve uint16
-	name     []byte
-	question []byte
-	qtype    uint16
-	qclass   uint16
-}
-
-func parseDNSQuery(payload []byte, context string) (dnsQuery, error) {
-	if len(payload) < dnsHeaderLen {
-		return dnsQuery{}, fmt.Errorf("%s: dns header missing", context)
-	}
-
-	flags := binary.BigEndian.Uint16(payload[2:4])
-	if flags&dnsFlagQR != 0 {
-		return dnsQuery{}, fmt.Errorf("%s: packet is not dns query", context)
-	}
-	if flags&dnsFlagOpcodeMask != 0 {
-		return dnsQuery{}, fmt.Errorf("%s: only standard dns queries are supported", context)
-	}
-
-	if questions := binary.BigEndian.Uint16(payload[4:6]); questions != 1 {
-		return dnsQuery{}, fmt.Errorf("%s: exactly one dns question is required", context)
-	}
-
-	nameEnd, questionEnd, err := scanDNSQuestion(payload, dnsHeaderLen)
-	if err != nil {
-		return dnsQuery{}, fmt.Errorf("%s: %w", context, err)
-	}
-
-	return dnsQuery{
-		id:       binary.BigEndian.Uint16(payload[0:2]),
-		preserve: flags & dnsFlagRD,
-		name:     append([]byte(nil), payload[dnsHeaderLen:nameEnd]...),
-		question: append([]byte(nil), payload[dnsHeaderLen:questionEnd]...),
-		qtype:    binary.BigEndian.Uint16(payload[questionEnd-4 : questionEnd-2]),
-		qclass:   binary.BigEndian.Uint16(payload[questionEnd-2 : questionEnd]),
-	}, nil
-}
 
 func lookupDNSResponseConfig(ruleID uint32, configs *RuleConfigStore, context string) (DNSResponseConfig, error) {
 	config, ok := configs.DNSResponseConfig(ruleID)
@@ -360,15 +79,15 @@ func lookupDNSResponseConfig(ruleID uint32, configs *RuleConfigStore, context st
 	return config, nil
 }
 
-func selectDNSResponseAnswers(query dnsQuery, config DNSResponseConfig, context string) (uint16, []netip.Addr, error) {
+func selectDNSResponseAnswers(qtype, qclass uint16, config DNSResponseConfig, context string) (uint16, []netip.Addr, error) {
 	if len(config.AnswersV4) == 0 && len(config.AnswersV6) == 0 {
 		return 0, nil, nil
 	}
-	if query.qclass != dnsClassIN {
+	if qclass != dnsClassIN {
 		return 0, nil, fmt.Errorf("%s: only dns class IN queries are supported", context)
 	}
 
-	switch query.qtype {
+	switch qtype {
 	case dnsTypeA:
 		if len(config.AnswersV4) == 0 {
 			return 0, nil, fmt.Errorf("%s: dns A query has no configured answers", context)
@@ -396,7 +115,7 @@ func lookupARPReplyConfig(ruleID uint32, defaultHardwareAddr net.HardwareAddr, c
 		if len(defaultHardwareAddr) != 6 {
 			return ARPReplyConfig{}, fmt.Errorf("build arp reply: hardware address is required")
 		}
-		config.HardwareAddr = append(net.HardwareAddr(nil), defaultHardwareAddr...)
+		config.HardwareAddr = defaultHardwareAddr
 	}
 
 	return config, nil
@@ -411,62 +130,530 @@ func lookupTCPSynAckSeq(ruleID uint32, configs *RuleConfigStore) uint32 {
 	return 1
 }
 
-func scanDNSQuestion(payload []byte, offset int) (int, int, error) {
-	idx := offset
-	for {
-		if idx >= len(payload) {
-			return 0, 0, fmt.Errorf("dns question is truncated")
+var (
+	outputLayerEthernet = layers.LayerTypeEthernet
+	outputLayerIPv4     = layers.LayerTypeIPv4
+)
+
+type Builder interface {
+	Build(gopacket.LayerType, uint32, *Packet, BuildOptions, []byte) ([]byte, error)
+}
+
+type builderEntry struct {
+	layerType gopacket.LayerType
+	builder   Builder
+}
+
+type builderRegistry struct {
+	items map[uint16]builderEntry
+}
+
+func newBuilderRegistry() builderRegistry {
+	items := map[uint16]builderEntry{
+		ActionICMPEchoReply: {layerType: layers.LayerTypeICMPv4, builder: &ICMPEchoReply{replyBuilder: newReplyBuilder()}},
+		ActionARPReply:      {layerType: layers.LayerTypeARP, builder: &ARPReply{replyBuilder: newReplyBuilder()}},
+		ActionTCPSynAck:     {layerType: layers.LayerTypeTCP, builder: &TCPSynAck{replyBuilder: newReplyBuilder()}},
+		ActionUDPEchoReply:  {layerType: layers.LayerTypeUDP, builder: &UDPEchoReply{replyBuilder: newReplyBuilder()}},
+		ActionDNSRefused:    {layerType: layers.LayerTypeDNS, builder: &DNSReply{replyBuilder: newReplyBuilder()}},
+		ActionDNSSinkhole:   {layerType: layers.LayerTypeDNS, builder: &DNSReply{replyBuilder: newReplyBuilder()}},
+	}
+	return builderRegistry{items: items}
+}
+
+func (r *builderRegistry) Builder(action uint16, layerType gopacket.LayerType, context string) (Builder, error) {
+	entry, ok := r.items[action]
+	if !ok {
+		return nil, fmt.Errorf("%s: unsupported action %d", context, action)
+	}
+	if entry.layerType != layerType {
+		if name, ok := ResponseActionName(action); ok {
+			return nil, fmt.Errorf("%s: action %q does not apply to %s packets", context, name, layerType)
 		}
-		labelLen := int(payload[idx])
-		idx++
-		switch {
-		case labelLen == 0:
-			if idx+4 > len(payload) {
-				return 0, 0, fmt.Errorf("dns question is truncated")
-			}
-			return idx, idx + 4, nil
-		case labelLen&0xc0 != 0:
-			return 0, 0, fmt.Errorf("compressed dns names are not supported")
-		case labelLen > 63:
-			return 0, 0, fmt.Errorf("dns label length %d out of range", labelLen)
-		case idx+labelLen > len(payload):
-			return 0, 0, fmt.Errorf("dns question is truncated")
-		default:
-			idx += labelLen
-		}
+		return nil, fmt.Errorf("%s: unsupported action %d", context, action)
+	}
+	return entry.builder, nil
+}
+
+func (r *builderRegistry) expectedLayer(action uint16) (gopacket.LayerType, bool) {
+	entry, ok := r.items[action]
+	if !ok {
+		return 0, false
+	}
+	return entry.layerType, true
+}
+
+type serializer struct {
+	small  gopacket.SerializeBuffer
+	medium gopacket.SerializeBuffer
+	large  gopacket.SerializeBuffer
+	opts   gopacket.SerializeOptions
+}
+
+func newSerializer() serializer {
+	return serializer{
+		small:  gopacket.NewSerializeBufferExpectedSize(64, 64),
+		medium: gopacket.NewSerializeBufferExpectedSize(128, 384),
+		large:  gopacket.NewSerializeBufferExpectedSize(256, 1792),
+		opts: gopacket.SerializeOptions{
+			FixLengths:       true,
+			ComputeChecksums: true,
+		},
 	}
 }
 
-func buildDNSResponseFromParsed(meta XSKMetadata, pf *parsedFrame, opts BuildOptions, dst []byte) ([]byte, error) {
-	context := "build dns response"
-	query, err := parseDNSQuery(pf.udp.payload, context)
-	if err != nil {
-		return nil, err
+func (s *serializer) serializeFrame(dst []byte, headerLen, payloadLen int, app, transport, network, link gopacket.SerializableLayer) ([]byte, error) {
+	totalLen := headerLen + payloadLen
+	if totalLen < minEthernetFrameLen {
+		totalLen = minEthernetFrameLen
 	}
-	config, err := lookupDNSResponseConfig(meta.RuleID, opts.RuleConfigs, context)
-	if err != nil {
-		return nil, err
-	}
-	answerType, answers, err := selectDNSResponseAnswers(query, config, context)
-	if err != nil {
-		return nil, err
-	}
-	return buildDNSResponseFrameToBuffer(dst, pf.eth, pf.ip4, pf.udp, query, config, answerType, answers), nil
+	return s.serialize(dst, totalLen, headerLen, app, transport, network, link)
 }
 
-func buildDNSResponseIPv4FromParsed(meta XSKMetadata, pf *parsedFrame, opts BuildOptions, dst []byte) ([]byte, error) {
-	context := "build dns response"
-	query, err := parseDNSQuery(pf.udp.payload, context)
+func (s *serializer) serializeIPv4(dst []byte, headerLen, payloadLen int, app, transport, network gopacket.SerializableLayer) ([]byte, error) {
+	return s.serialize(dst, headerLen+payloadLen, headerLen, app, transport, network, nil)
+}
+
+func (s *serializer) serialize(dst []byte, totalLen, headerLen int, app, transport, network, link gopacket.SerializableLayer) ([]byte, error) {
+	buf := s.buffer(totalLen)
+	if err := buf.Clear(); err != nil {
+		return nil, err
+	}
+
+	if app != nil {
+		if err := serializeLayer(buf, s.opts, app); err != nil {
+			return nil, err
+		}
+	}
+	if transport != nil {
+		if err := serializeLayer(buf, s.opts, transport); err != nil {
+			return nil, err
+		}
+	}
+	if network != nil {
+		if err := serializeLayer(buf, s.opts, network); err != nil {
+			return nil, err
+		}
+	}
+	if link != nil {
+		if err := serializeLayer(buf, s.opts, link); err != nil {
+			return nil, err
+		}
+	}
+	return copySerializedBytes(dst, buf.Bytes()), nil
+}
+
+func serializeLayer(buf gopacket.SerializeBuffer, opts gopacket.SerializeOptions, layer gopacket.SerializableLayer) error {
+	if err := layer.SerializeTo(buf, opts); err != nil {
+		return err
+	}
+	buf.PushLayer(layer.LayerType())
+	return nil
+}
+
+func (s *serializer) buffer(totalLen int) gopacket.SerializeBuffer {
+	switch {
+	case totalLen <= serializeSmallLimit:
+		return s.small
+	case totalLen <= serializeMediumLimit:
+		return s.medium
+	default:
+		return s.large
+	}
+}
+
+func copySerializedBytes(dst []byte, src []byte) []byte {
+	if dst == nil {
+		dst = make([]byte, len(src))
+		copy(dst, src)
+		return dst
+	}
+	if cap(dst) < len(src) {
+		dst = make([]byte, len(src))
+	} else {
+		dst = dst[:len(src)]
+	}
+	copy(dst, src)
+	return dst
+}
+
+type replyBuilder struct {
+	serializer serializer
+	eth        layers.Ethernet
+	ip4        layers.IPv4
+	arp        layers.ARP
+	icmp       layers.ICMPv4
+	tcp        layers.TCP
+	udp        layers.UDP
+	dns        layers.DNS
+}
+
+func newReplyBuilder() replyBuilder {
+	return replyBuilder{serializer: newSerializer()}
+}
+
+func (b *replyBuilder) buildEthernet(srcMAC, dstMAC net.HardwareAddr, etherType layers.EthernetType) *layers.Ethernet {
+	b.eth = layers.Ethernet{
+		SrcMAC:       srcMAC,
+		DstMAC:       dstMAC,
+		EthernetType: etherType,
+	}
+	return &b.eth
+}
+
+func (b *replyBuilder) buildEthernetReply(pkt *Packet, etherType layers.EthernetType) *layers.Ethernet {
+	return b.buildEthernet(pkt.eth.DstMAC, pkt.eth.SrcMAC, etherType)
+}
+
+func (b *replyBuilder) buildIPv4Reply(pkt *Packet, protocol layers.IPProtocol) *layers.IPv4 {
+	b.ip4 = layers.IPv4{
+		Version:  4,
+		IHL:      5,
+		TTL:      defaultIPv4TTL,
+		Id:       pkt.ip4.Id,
+		Protocol: protocol,
+		SrcIP:    pkt.ip4.DstIP,
+		DstIP:    pkt.ip4.SrcIP,
+	}
+	return &b.ip4
+}
+
+func (b *replyBuilder) serializeIPResponse(target gopacket.LayerType, dst []byte, frameHeaderLen, packetHeaderLen, payloadLen int, app, transport gopacket.SerializableLayer) ([]byte, error) {
+	switch target {
+	case outputLayerEthernet:
+		return b.serializer.serializeFrame(dst, frameHeaderLen, payloadLen, app, transport, &b.ip4, &b.eth)
+	case outputLayerIPv4:
+		return b.serializer.serializeIPv4(dst, packetHeaderLen, payloadLen, app, transport, &b.ip4)
+	default:
+		return nil, fmt.Errorf("build response: unsupported output layer %s", target)
+	}
+}
+
+func (b *replyBuilder) serializeARPResponse(dst []byte) ([]byte, error) {
+	return b.serializer.serializeFrame(dst, ethernetARPFrameLen, 0, nil, &b.arp, nil, &b.eth)
+}
+
+type ICMPEchoReply struct {
+	replyBuilder
+}
+
+func (b *ICMPEchoReply) Build(target gopacket.LayerType, _ uint32, pkt *Packet, _ BuildOptions, dst []byte) ([]byte, error) {
+	if pkt.icmp.TypeCode.Type() != layers.ICMPv4TypeEchoRequest || pkt.icmp.TypeCode.Code() != icmpZeroCode {
+		return nil, fmt.Errorf("build icmp echo reply: packet is not echo request")
+	}
+	b.buildEthernetReply(pkt, layers.EthernetTypeIPv4)
+	b.buildIPv4Reply(pkt, layers.IPProtocolICMPv4)
+	transport := b.buildICMP(pkt)
+	payloadLen := len(pkt.icmp.Payload)
+	return b.serializeIPResponse(
+		target,
+		dst,
+		ethernetHeaderLen+minIPv4HeaderLen+minICMPv4HeaderLen,
+		minIPv4HeaderLen+minICMPv4HeaderLen,
+		payloadLen,
+		gopacket.Payload(pkt.icmp.Payload),
+		transport,
+	)
+}
+
+func (b *ICMPEchoReply) buildICMP(pkt *Packet) *layers.ICMPv4 {
+	b.icmp = layers.ICMPv4{
+		TypeCode: icmpEchoReplyTypeCode,
+		Id:       pkt.icmp.Id,
+		Seq:      pkt.icmp.Seq,
+	}
+	return &b.icmp
+}
+
+type ARPReply struct {
+	replyBuilder
+	ipv4 [4]byte
+}
+
+func (b *ARPReply) Build(target gopacket.LayerType, ruleID uint32, pkt *Packet, opts BuildOptions, dst []byte) ([]byte, error) {
+	if target != outputLayerEthernet {
+		return nil, fmt.Errorf("build response ipv4 packet: %w for action %d", errResponseRequiresEthernetFraming, ActionARPReply)
+	}
+	if pkt.arp.Operation != layers.ARPRequest {
+		return nil, fmt.Errorf("build arp reply: packet is not arp request")
+	}
+	config, err := lookupARPReplyConfig(ruleID, opts.HardwareAddr, opts.RuleConfigs)
 	if err != nil {
 		return nil, err
 	}
-	config, err := lookupDNSResponseConfig(meta.RuleID, opts.RuleConfigs, context)
+	b.buildEthernet(config.HardwareAddr, pkt.eth.SrcMAC, layers.EthernetTypeARP)
+	b.buildARP(pkt, config)
+	return b.serializeARPResponse(dst)
+}
+
+func (b *ARPReply) buildARP(pkt *Packet, config ARPReplyConfig) *layers.ARP {
+	sourceProt := pkt.arp.DstProtAddress
+	if config.HasSenderIPv4() {
+		b.ipv4 = config.SenderIPv4.As4()
+		sourceProt = b.ipv4[:]
+	}
+	b.arp = layers.ARP{
+		AddrType:          pkt.arp.AddrType,
+		Protocol:          pkt.arp.Protocol,
+		Operation:         layers.ARPReply,
+		SourceHwAddress:   config.HardwareAddr,
+		SourceProtAddress: sourceProt,
+		DstHwAddress:      pkt.arp.SourceHwAddress,
+		DstProtAddress:    pkt.arp.SourceProtAddress,
+	}
+	return &b.arp
+}
+
+type TCPSynAck struct {
+	replyBuilder
+}
+
+func (b *TCPSynAck) Build(target gopacket.LayerType, ruleID uint32, pkt *Packet, opts BuildOptions, dst []byte) ([]byte, error) {
+	if err := validateTCPSyn(pkt); err != nil {
+		return nil, err
+	}
+	seq := lookupTCPSynAckSeq(ruleID, opts.RuleConfigs)
+	b.buildEthernetReply(pkt, layers.EthernetTypeIPv4)
+	b.buildIPv4Reply(pkt, layers.IPProtocolTCP)
+	transport, err := b.buildTCP(pkt, seq)
 	if err != nil {
 		return nil, err
 	}
-	answerType, answers, err := selectDNSResponseAnswers(query, config, context)
+	return b.serializeIPResponse(
+		target,
+		dst,
+		ethernetHeaderLen+minIPv4HeaderLen+minTCPHeaderLen,
+		minIPv4HeaderLen+minTCPHeaderLen,
+		0,
+		nil,
+		transport,
+	)
+}
+
+func (b *TCPSynAck) buildTCP(pkt *Packet, seq uint32) (*layers.TCP, error) {
+	b.tcp = layers.TCP{
+		SrcPort: pkt.tcp.DstPort,
+		DstPort: pkt.tcp.SrcPort,
+		Seq:     seq,
+		Ack:     pkt.tcp.Seq + 1,
+		SYN:     true,
+		ACK:     true,
+		Window:  defaultTCPWindow,
+	}
+	if err := b.tcp.SetNetworkLayerForChecksum(&b.ip4); err != nil {
+		return nil, err
+	}
+	return &b.tcp, nil
+}
+
+func validateTCPSyn(pkt *Packet) error {
+	if !pkt.tcp.SYN || pkt.tcp.ACK || pkt.tcp.RST || pkt.tcp.FIN {
+		return fmt.Errorf("build tcp syn ack: packet is not initial syn")
+	}
+	if len(pkt.tcp.Payload) > 0 {
+		return fmt.Errorf("build tcp syn ack: syn payload is not supported")
+	}
+	return nil
+}
+
+type UDPEchoReply struct {
+	replyBuilder
+}
+
+func (b *UDPEchoReply) Build(target gopacket.LayerType, _ uint32, pkt *Packet, _ BuildOptions, dst []byte) ([]byte, error) {
+	b.buildEthernetReply(pkt, layers.EthernetTypeIPv4)
+	b.buildIPv4Reply(pkt, layers.IPProtocolUDP)
+	transport, err := b.buildUDP(pkt)
 	if err != nil {
 		return nil, err
 	}
-	return buildDNSResponseIPv4PacketToBuffer(dst, pf.ip4, pf.udp, query, config, answerType, answers), nil
+	payloadLen := len(pkt.udp.Payload)
+	return b.serializeIPResponse(
+		target,
+		dst,
+		ethernetHeaderLen+minIPv4HeaderLen+minUDPHeaderLen,
+		minIPv4HeaderLen+minUDPHeaderLen,
+		payloadLen,
+		gopacket.Payload(pkt.udp.Payload),
+		transport,
+	)
+}
+
+func (b *UDPEchoReply) buildUDP(pkt *Packet) (*layers.UDP, error) {
+	b.udp = layers.UDP{
+		SrcPort: pkt.udp.DstPort,
+		DstPort: pkt.udp.SrcPort,
+	}
+	if err := b.udp.SetNetworkLayerForChecksum(&b.ip4); err != nil {
+		return nil, err
+	}
+	return &b.udp, nil
+}
+
+type DNSReply struct {
+	replyBuilder
+}
+
+func (b *DNSReply) Build(target gopacket.LayerType, ruleID uint32, pkt *Packet, opts BuildOptions, dst []byte) ([]byte, error) {
+	if err := b.validateQuery(pkt); err != nil {
+		return nil, err
+	}
+
+	config, err := lookupDNSResponseConfig(ruleID, opts.RuleConfigs, "build dns response")
+	if err != nil {
+		return nil, err
+	}
+
+	question := pkt.dns.Questions[0]
+	answerType, answers, err := selectDNSResponseAnswers(uint16(question.Type), uint16(question.Class), config, "build dns response")
+	if err != nil {
+		return nil, err
+	}
+
+	b.buildEthernetReply(pkt, layers.EthernetTypeIPv4)
+	b.buildIPv4Reply(pkt, layers.IPProtocolUDP)
+	b.buildUDPReply(pkt)
+	dnsPayloadLen := b.buildDNS(pkt, config, layers.DNSType(answerType), answers)
+
+	return b.serializeIPResponse(
+		target,
+		dst,
+		ethernetHeaderLen+minIPv4HeaderLen+minUDPHeaderLen,
+		minIPv4HeaderLen+minUDPHeaderLen,
+		dnsPayloadLen,
+		&b.dns,
+		&b.udp,
+	)
+}
+
+func (b *DNSReply) validateQuery(pkt *Packet) error {
+	if pkt.layerType != layers.LayerTypeDNS {
+		return fmt.Errorf("build dns response: dns header missing")
+	}
+	dns := &pkt.dns
+	if dns.QR {
+		return fmt.Errorf("build dns response: packet is not dns query")
+	}
+	if dns.OpCode != layers.DNSOpCodeQuery {
+		return fmt.Errorf("build dns response: only standard dns queries are supported")
+	}
+	if len(dns.Questions) != 1 {
+		return fmt.Errorf("build dns response: exactly one dns question is required")
+	}
+	return nil
+}
+
+func (b *DNSReply) buildUDPReply(pkt *Packet) {
+	b.udp = layers.UDP{
+		SrcPort: pkt.udp.DstPort,
+		DstPort: pkt.udp.SrcPort,
+	}
+	_ = b.udp.SetNetworkLayerForChecksum(&b.ip4)
+}
+
+func (b *DNSReply) buildDNS(pkt *Packet, config DNSResponseConfig, answerType layers.DNSType, answers []netip.Addr) int {
+	question := pkt.dns.Questions[0]
+
+	b.dns = layers.DNS{
+		ID:           pkt.dns.ID,
+		QR:           true,
+		OpCode:       layers.DNSOpCodeQuery,
+		RD:           pkt.dns.RD,
+		ResponseCode: layers.DNSResponseCode(config.RCode),
+		QDCount:      1,
+		Questions:    []layers.DNSQuestion{question},
+	}
+
+	if len(answers) > 0 {
+		records := make([]layers.DNSResourceRecord, 0, len(answers))
+		for _, addr := range answers {
+			records = append(records, layers.DNSResourceRecord{
+				Name:  question.Name,
+				Type:  answerType,
+				Class: layers.DNSClassIN,
+				TTL:   config.TTL,
+				IP:    net.IP(addr.AsSlice()),
+			})
+		}
+		b.dns.Answers = records
+	}
+
+	return 12 + len(question.Name) + 6 + len(answers)*(len(question.Name)+16)
+}
+
+type responseEngine struct {
+	registry builderRegistry
+	pkt      Packet
+}
+
+func newResponseEngine() *responseEngine {
+	return &responseEngine{
+		registry: newBuilderRegistry(),
+	}
+}
+
+var responseEnginePool = sync.Pool{
+	New: func() any {
+		return newResponseEngine()
+	},
+}
+
+func getResponseEngine() *responseEngine {
+	return responseEnginePool.Get().(*responseEngine)
+}
+
+func putResponseEngine(item *responseEngine) {
+	if item == nil {
+		return
+	}
+	responseEnginePool.Put(item)
+}
+
+func (e *responseEngine) ResolveBuilder(meta XSKMetadata, frame []byte, context string) (*Packet, Builder, error) {
+	if err := e.pkt.Decode(frame, nil, context); err != nil {
+		return nil, nil, err
+	}
+	if expected, ok := e.registry.expectedLayer(meta.Action); ok && expected == layers.LayerTypeDNS && e.pkt.layerType != layers.LayerTypeDNS {
+		return nil, nil, fmt.Errorf("%s: dns header missing", context)
+	}
+	builder, err := e.registry.Builder(meta.Action, e.pkt.layerType, context)
+	if err != nil {
+		return nil, nil, err
+	}
+	if builder == nil {
+		return nil, nil, fmt.Errorf("%s: builder is not resolved", context)
+	}
+	return &e.pkt, builder, nil
+}
+
+func buildResponseFrame(builder Builder, meta XSKMetadata, pkt *Packet, opts BuildOptions, dst []byte) ([]byte, error) {
+	if builder == nil {
+		return nil, fmt.Errorf("build response: builder is required")
+	}
+	return builder.Build(outputLayerEthernet, meta.RuleID, pkt, opts, dst)
+}
+
+func buildResponseIPv4Packet(builder Builder, meta XSKMetadata, pkt *Packet, opts BuildOptions, dst []byte) ([]byte, error) {
+	if builder == nil {
+		return nil, fmt.Errorf("build response ipv4 packet: builder is required")
+	}
+	return builder.Build(outputLayerIPv4, meta.RuleID, pkt, opts, dst)
+}
+
+func buildContext(action uint16) string {
+	switch action {
+	case ActionICMPEchoReply:
+		return "build icmp echo reply"
+	case ActionARPReply:
+		return "build arp reply"
+	case ActionTCPSynAck:
+		return "build tcp syn ack"
+	case ActionUDPEchoReply:
+		return "build udp echo reply"
+	case ActionDNSRefused:
+		return "build dns refused"
+	case ActionDNSSinkhole:
+		return "build dns sinkhole"
+	default:
+		return "build response"
+	}
 }

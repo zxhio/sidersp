@@ -7,6 +7,8 @@ import (
 	"net"
 	"sync"
 
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
 	"golang.org/x/sys/unix"
 )
 
@@ -85,15 +87,21 @@ func (s *afpacketFrameSender) sendIPv4Packet(ctx context.Context, packet []byte)
 		return err
 	}
 
-	ip4, err := parseIPv4Packet(packet, "send raw ipv4 packet")
-	if err != nil {
-		return err
+	var ip4 layers.IPv4
+	if err := ip4.DecodeFromBytes(packet, gopacket.NilDecodeFeedback); err != nil {
+		return fmt.Errorf("send raw ipv4 packet: %w", err)
 	}
+	if len(ip4.DstIP) < 4 {
+		return fmt.Errorf("send raw ipv4 packet: invalid ipv4 destination")
+	}
+
+	var dst [4]byte
+	copy(dst[:], ip4.DstIP[:4])
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if err := unix.Sendto(s.ipv4FD, packet, 0, &unix.SockaddrInet4{Addr: ip4.dst}); err != nil {
+	if err := unix.Sendto(s.ipv4FD, packet, 0, &unix.SockaddrInet4{Addr: dst}); err != nil {
 		return fmt.Errorf("send raw ipv4 packet on ifindex %d: %w", s.ifindex, err)
 	}
 	return nil

@@ -6,7 +6,7 @@ import (
 	"sidersp/internal/model"
 )
 
-type responseStatsCounters struct {
+type statsCounters struct {
 	responseSent     atomic.Uint64
 	responseFailed   atomic.Uint64
 	afxdpTX          atomic.Uint64
@@ -15,11 +15,11 @@ type responseStatsCounters struct {
 	afpacketTXFailed atomic.Uint64
 }
 
-func newResponseStatsCounters() *responseStatsCounters {
-	return &responseStatsCounters{}
+func newStatsCounters() *statsCounters {
+	return &statsCounters{}
 }
 
-func (c *responseStatsCounters) recordSent(backend TXBackend) {
+func (c *statsCounters) recordSent(backend TXBackend) {
 	if c == nil {
 		return
 	}
@@ -33,7 +33,7 @@ func (c *responseStatsCounters) recordSent(backend TXBackend) {
 	}
 }
 
-func (c *responseStatsCounters) recordFailed(backend TXBackend) {
+func (c *statsCounters) recordFailed(backend TXBackend) {
 	if c == nil {
 		return
 	}
@@ -47,7 +47,7 @@ func (c *responseStatsCounters) recordFailed(backend TXBackend) {
 	}
 }
 
-func (c *responseStatsCounters) snapshot() model.ResponseStats {
+func (c *statsCounters) snapshot() model.ResponseStats {
 	if c == nil {
 		return model.ResponseStats{}
 	}
@@ -62,7 +62,7 @@ func (c *responseStatsCounters) snapshot() model.ResponseStats {
 	}
 }
 
-func (c *responseStatsCounters) reset() {
+func (c *statsCounters) reset() {
 	if c == nil {
 		return
 	}

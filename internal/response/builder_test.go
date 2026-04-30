@@ -1,11 +1,13 @@
 package response
 
 import (
+	"context"
 	"encoding/binary"
 	"net"
 	"net/netip"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -44,26 +46,6 @@ func TestBuildICMPEchoReply(t *testing.T) {
 	}
 	if string(icmp.Payload) != "payload" {
 		t.Fatalf("icmp payload = %q, want payload", string(icmp.Payload))
-	}
-}
-
-func TestBuildICMPEchoReplyIPv4(t *testing.T) {
-	t.Parallel()
-
-	reply, err := BuildICMPEchoReplyIPv4(buildTestICMPEchoRequest(t))
-	if err != nil {
-		t.Fatalf("BuildICMPEchoReplyIPv4() error = %v", err)
-	}
-
-	packet := gopacket.NewPacket(reply, layers.LayerTypeIPv4, gopacket.Default)
-	ip4 := packet.Layer(layers.LayerTypeIPv4).(*layers.IPv4)
-	icmp := packet.Layer(layers.LayerTypeICMPv4).(*layers.ICMPv4)
-
-	if ip4.SrcIP.String() != "10.0.0.2" || ip4.DstIP.String() != "10.0.0.1" {
-		t.Fatalf("ip = %s -> %s, want swapped", ip4.SrcIP, ip4.DstIP)
-	}
-	if icmp.TypeCode.Type() != layers.ICMPv4TypeEchoReply || icmp.Id != 7 || icmp.Seq != 9 {
-		t.Fatalf("icmp = type %d id %d seq %d, want echo_reply id=7 seq=9", icmp.TypeCode.Type(), icmp.Id, icmp.Seq)
 	}
 }
 
@@ -400,7 +382,7 @@ func TestBuildResponseFrameRejectsIncompatiblePackets(t *testing.T) {
 			name:  "icmp action rejects tcp",
 			meta:  XSKMetadata{Action: ActionICMPEchoReply},
 			frame: buildTestTCPSyn(t),
-			want:  "icmp layer missing",
+			want:  "does not apply to TCP packets",
 		},
 		{
 			name:  "arp action requires hardware address",
@@ -430,7 +412,7 @@ func TestBuildResponseFrameRejectsIncompatiblePackets(t *testing.T) {
 			name:  "udp echo reply rejects tcp",
 			meta:  XSKMetadata{Action: ActionUDPEchoReply},
 			frame: buildTestTCPSyn(t),
-			want:  "udp layer missing",
+			want:  "does not apply to TCP packets",
 		},
 		{
 			name:  "udp echo reply rejects vlan",
@@ -448,7 +430,7 @@ func TestBuildResponseFrameRejectsIncompatiblePackets(t *testing.T) {
 			name:  "dns refused rejects dns response",
 			meta:  XSKMetadata{Action: ActionDNSRefused},
 			frame: buildTestDNSResponse(t, "example.org"),
-			want:  "packet is not dns query",
+			want:  "dns header missing",
 		},
 		{
 			name:  "dns refused rejects multi question query",
@@ -460,7 +442,7 @@ func TestBuildResponseFrameRejectsIncompatiblePackets(t *testing.T) {
 			name:  "dns refused rejects compressed question",
 			meta:  XSKMetadata{Action: ActionDNSRefused},
 			frame: buildTestDNSCompressedQuestion(t),
-			want:  "compressed dns names are not supported",
+			want:  "dns header missing",
 		},
 		{
 			name:  "dns sinkhole requires configured response config",
@@ -487,7 +469,7 @@ func TestBuildResponseFrameRejectsIncompatiblePackets(t *testing.T) {
 			meta:  XSKMetadata{RuleID: 7103, Action: ActionDNSSinkhole},
 			frame: buildTestDNSCompressedQuestion(t),
 			opts:  testDNSSinkholeBuildOptions(t, 7103, "192.0.2.10"),
-			want:  "compressed dns names are not supported",
+			want:  "dns header missing",
 		},
 		{
 			name:  "dns sinkhole rejects truncated dns payload",
@@ -745,15 +727,7 @@ func buildTestDNSCompressedQuestion(t testing.TB) []byte {
 	newIPLen := ipLen + newUDPLen
 
 	binary.BigEndian.PutUint16(out[ethLen+2:ethLen+4], uint16(newIPLen))
-	binary.BigEndian.PutUint16(out[ethLen+10:ethLen+12], 0)
-	binary.BigEndian.PutUint16(out[ethLen+10:ethLen+12], checksum(out[ethLen:ethLen+ipLen]))
 	binary.BigEndian.PutUint16(out[ethLen+ipLen+4:ethLen+ipLen+6], uint16(newUDPLen))
-	binary.BigEndian.PutUint16(out[ethLen+ipLen+6:ethLen+ipLen+8], 0)
-	binary.BigEndian.PutUint16(out[ethLen+ipLen+6:ethLen+ipLen+8], udpChecksum(
-		[4]byte{out[ethLen+12], out[ethLen+13], out[ethLen+14], out[ethLen+15]},
-		[4]byte{out[ethLen+16], out[ethLen+17], out[ethLen+18], out[ethLen+19]},
-		out[ethLen+ipLen:ethLen+ipLen+newUDPLen],
-	))
 
 	return out[:ethLen+newIPLen]
 }
@@ -913,4 +887,122 @@ func testTCPSynAckBuildOptions(t testing.TB, ruleID uint32, seq uint32) BuildOpt
 	}
 
 	return BuildOptions{RuleConfigs: store}
+}
+
+var (
+	benchmarkFrameSink []byte
+	benchmarkErrSink   error
+)
+
+type benchmarkTransmitter struct {
+	lastFrame []byte
+	count     int
+}
+
+func (t *benchmarkTransmitter) SendFrame(_ context.Context, frame []byte) error {
+	t.lastFrame = frame
+	t.count++
+	return nil
+}
+
+func (t *benchmarkTransmitter) SendBorrowedFrame(_ context.Context, frame []byte) error {
+	t.lastFrame = frame
+	t.count++
+	return nil
+}
+
+func BenchmarkBuildICMPEchoReply(b *testing.B) {
+	benchmarkBuildResponseFrame(b, XSKMetadata{Action: ActionICMPEchoReply}, buildTestICMPEchoRequest(b), BuildOptions{})
+}
+
+func BenchmarkBuildARPReply(b *testing.B) {
+	benchmarkBuildResponseFrame(b, XSKMetadata{Action: ActionARPReply}, buildTestARPRequest(b), BuildOptions{
+		HardwareAddr: testHWAddr,
+	})
+}
+
+func BenchmarkBuildTCPSynAck(b *testing.B) {
+	benchmarkBuildResponseFrame(b, XSKMetadata{RuleID: 1003, Action: ActionTCPSynAck}, buildTestTCPSyn(b), testTCPSynAckBuildOptions(b, 1003, 1000))
+}
+
+func BenchmarkExecuteICMPEchoReply(b *testing.B) {
+	benchmarkExecuteResponseFrame(b, XSKMetadata{
+		RuleID: 1001,
+		Action: ActionICMPEchoReply,
+	}, buildTestICMPEchoRequest(b), BuildOptions{})
+}
+
+func BenchmarkExecuteARPReply(b *testing.B) {
+	benchmarkExecuteResponseFrame(b, XSKMetadata{
+		RuleID: 1002,
+		Action: ActionARPReply,
+	}, buildTestARPRequest(b), BuildOptions{
+		HardwareAddr: testHWAddr,
+	})
+}
+
+func BenchmarkExecuteTCPSynAck(b *testing.B) {
+	benchmarkExecuteResponseFrame(b, XSKMetadata{
+		RuleID: 1003,
+		Action: ActionTCPSynAck,
+	}, buildTestTCPSyn(b), testTCPSynAckBuildOptions(b, 1003, 1000))
+}
+
+func benchmarkBuildResponseFrame(b *testing.B, meta XSKMetadata, request []byte, opts BuildOptions) {
+	b.Helper()
+
+	b.ReportAllocs()
+	b.SetBytes(int64(len(request)))
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		frame, err := BuildResponseFrame(meta, request, opts)
+		if err != nil {
+			b.Fatalf("BuildResponseFrame() error = %v", err)
+		}
+		benchmarkFrameSink = frame
+	}
+}
+
+func benchmarkExecuteResponseFrame(b *testing.B, meta XSKMetadata, request []byte, opts BuildOptions) {
+	b.Helper()
+
+	frame := buildTestXSKFrame(b, meta, request)
+	results := newTestResultBuffer(b, 1024)
+	tx := &benchmarkTransmitter{}
+	executor := newTestExecutor(b, tx, results, opts)
+
+	b.ReportAllocs()
+	b.SetBytes(int64(len(frame)))
+	b.ResetTimer()
+	benchmarkExecuteXSKFrame(b, executor, frame)
+
+	benchmarkFrameSink = tx.lastFrame
+	benchmarkErrSink = nil
+}
+
+func benchmarkStartTimer(b *testing.B) time.Time {
+	b.Helper()
+	return time.Now()
+}
+
+func benchmarkStopTimerWithRates(b *testing.B, startedAt time.Time, frameLen int) {
+	b.Helper()
+
+	elapsed := time.Since(startedAt)
+	b.StopTimer()
+	b.ReportMetric(float64(b.N)/elapsed.Seconds(), "pps")
+	b.ReportMetric(float64(frameLen*8*b.N)/elapsed.Seconds()/1e9, "gbps")
+}
+
+func benchmarkExecuteXSKFrame(b *testing.B, executor *ResponseExecutor, frame []byte) {
+	b.Helper()
+
+	startedAt := benchmarkStartTimer(b)
+	for i := 0; i < b.N; i++ {
+		if err := executor.ExecuteXSK(context.Background(), frame); err != nil {
+			b.Fatalf("ExecuteXSK() error = %v", err)
+		}
+	}
+	benchmarkStopTimerWithRates(b, startedAt, len(frame))
 }

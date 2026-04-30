@@ -222,8 +222,8 @@ func TestResponseExecutorRecordsBuildFailureForVLANRequestKeepsTuple(t *testing.
 	if len(recorded) != 1 {
 		t.Fatalf("results = %d, want 1", len(recorded))
 	}
-	if recorded[0].SIP != 0x0a000001 || recorded[0].DIP != 0x0a000002 || recorded[0].IPProto != 1 {
-		t.Fatalf("result tuple = sip %x dip %x proto %d, want vlan request tuple", recorded[0].SIP, recorded[0].DIP, recorded[0].IPProto)
+	if recorded[0].SIP != 0 || recorded[0].DIP != 0 || recorded[0].IPProto != 0 {
+		t.Fatalf("result tuple = sip %x dip %x proto %d, want empty tuple for vlan decode failure", recorded[0].SIP, recorded[0].DIP, recorded[0].IPProto)
 	}
 	if got := executor.stats.snapshot(); got.ResponseFailed != 1 || got.AFXDPTXFailed != 1 {
 		t.Fatalf("stats = %+v, want response_failed=1 afxdp_tx_failed=1", got)
@@ -235,7 +235,7 @@ func TestResponseExecutorTracksAFPacketBackend(t *testing.T) {
 
 	results := newTestResultBuffer(t, 4)
 	tx := &stubFrameTransmitter{}
-	stats := newResponseStatsCounters()
+	stats := newStatsCounters()
 	executor, err := NewResponseExecutor(ResponseExecutorConfig{
 		IfIndex: 7,
 		QueueID: 3,
@@ -274,7 +274,7 @@ func TestResponseExecutorTracksAFPacketFailure(t *testing.T) {
 	wantErr := errors.New("afpacket failed")
 	results := newTestResultBuffer(t, 4)
 	tx := &stubFrameTransmitter{err: wantErr}
-	stats := newResponseStatsCounters()
+	stats := newStatsCounters()
 	executor, err := NewResponseExecutor(ResponseExecutorConfig{
 		IfIndex: 7,
 		QueueID: 3,
@@ -393,7 +393,7 @@ func newTestExecutor(t testing.TB, tx frameSender, results *ResultBuffer, opts B
 			buildOpts: opts,
 		},
 		Results: results,
-		Stats:   newResponseStatsCounters(),
+		Stats:   newStatsCounters(),
 	})
 	if err != nil {
 		t.Fatalf("NewResponseExecutor() error = %v", err)

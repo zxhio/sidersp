@@ -7,7 +7,7 @@ import (
 )
 
 type responseSender interface {
-	Send(context.Context, XSKMetadata, []byte, *parsedFrame) error
+	Send(context.Context, XSKMetadata, Builder, []byte, *Packet) error
 	Backend() TXBackend
 }
 
@@ -35,17 +35,17 @@ type pooledFrameBuffer struct {
 	buf []byte
 }
 
-var responseFramePool = sync.Pool{
+var frameBufferPool = sync.Pool{
 	New: func() any {
 		return &pooledFrameBuffer{buf: make([]byte, 0, 2048)}
 	},
 }
 
-func acquireResponseFrameBuffer() *pooledFrameBuffer {
-	return responseFramePool.Get().(*pooledFrameBuffer)
+func acquireFrameBuffer() *pooledFrameBuffer {
+	return frameBufferPool.Get().(*pooledFrameBuffer)
 }
 
-func releaseResponseFrameBuffer(item *pooledFrameBuffer) {
+func releaseFrameBuffer(item *pooledFrameBuffer) {
 	if item == nil {
 		return
 	}
@@ -54,37 +54,43 @@ func releaseResponseFrameBuffer(item *pooledFrameBuffer) {
 	} else {
 		item.buf = item.buf[:0]
 	}
-	responseFramePool.Put(item)
+	frameBufferPool.Put(item)
 }
 
-func (s *afxdpSender) Send(ctx context.Context, meta XSKMetadata, frame []byte, pf *parsedFrame) error {
-	return sendResponseFrame(ctx, s.out, meta, frame, s.buildOpts, pf)
+func (s *afxdpSender) Send(ctx context.Context, meta XSKMetadata, builder Builder, frame []byte, pkt *Packet) error {
+	return sendResponseFrame(ctx, s.out, meta, builder, frame, s.buildOpts, pkt)
 }
 
 func (s *afxdpSender) Backend() TXBackend {
 	return TXBackendAFXDP
 }
 
-func (s *afpacketSender) Send(ctx context.Context, meta XSKMetadata, frame []byte, pf *parsedFrame) error {
-	return sendResponseFrame(ctx, s.out, meta, frame, s.buildOpts, pf)
-}
-
 func (s *afpacketSender) Backend() TXBackend {
 	return TXBackendAFPacket
 }
 
-func sendResponseFrame(ctx context.Context, out frameSender, meta XSKMetadata, frame []byte, buildOpts BuildOptions, pf *parsedFrame) error {
-	if borrowedIPv4, ok := out.(borrowedIPv4PacketSender); ok {
-		buf := acquireResponseFrameBuffer()
-		defer releaseResponseFrameBuffer(buf)
+func (s *afpacketSender) Send(ctx context.Context, meta XSKMetadata, builder Builder, frame []byte, pkt *Packet) error {
+	return sendResponseFrame(ctx, s.out, meta, builder, frame, s.buildOpts, pkt)
+}
 
-		var responsePacket []byte
+func sendResponseFrame(ctx context.Context, out frameSender, meta XSKMetadata, builder Builder, frame []byte, buildOpts BuildOptions, pkt *Packet) error {
+	if pkt == nil || builder == nil {
+		engine := getResponseEngine()
+		defer putResponseEngine(engine)
+
+		context := buildContext(meta.Action)
 		var err error
-		if pf != nil {
-			responsePacket, err = BuildResponseIPv4PacketFromParsed(meta, pf, buildOpts, buf.buf)
-		} else {
-			responsePacket, err = BuildResponseIPv4PacketToBuffer(meta, frame, buildOpts, buf.buf)
+		pkt, builder, err = engine.ResolveBuilder(meta, frame, context)
+		if err != nil {
+			return err
 		}
+	}
+
+	if borrowedIPv4, ok := out.(borrowedIPv4PacketSender); ok {
+		buf := acquireFrameBuffer()
+		defer releaseFrameBuffer(buf)
+
+		responsePacket, err := buildResponseIPv4Packet(builder, meta, pkt, buildOpts, buf.buf)
 		if err == nil {
 			buf.buf = responsePacket
 			return borrowedIPv4.SendBorrowedIPv4Packet(ctx, responsePacket)
@@ -95,16 +101,10 @@ func sendResponseFrame(ctx context.Context, out frameSender, meta XSKMetadata, f
 	}
 
 	if borrowed, ok := out.(borrowedFrameSender); ok {
-		buf := acquireResponseFrameBuffer()
-		defer releaseResponseFrameBuffer(buf)
+		buf := acquireFrameBuffer()
+		defer releaseFrameBuffer(buf)
 
-		var responseFrame []byte
-		var err error
-		if pf != nil {
-			responseFrame, err = BuildResponseFrameFromParsed(meta, pf, buildOpts, buf.buf)
-		} else {
-			responseFrame, err = BuildResponseFrameToBuffer(meta, frame, buildOpts, buf.buf)
-		}
+		responseFrame, err := buildResponseFrame(builder, meta, pkt, buildOpts, buf.buf)
 		if err != nil {
 			return err
 		}
@@ -112,13 +112,7 @@ func sendResponseFrame(ctx context.Context, out frameSender, meta XSKMetadata, f
 		return borrowed.SendBorrowedFrame(ctx, responseFrame)
 	}
 
-	var responseFrame []byte
-	var err error
-	if pf != nil {
-		responseFrame, err = BuildResponseFrameFromParsed(meta, pf, buildOpts, nil)
-	} else {
-		responseFrame, err = BuildResponseFrame(meta, frame, buildOpts)
-	}
+	responseFrame, err := buildResponseFrame(builder, meta, pkt, buildOpts, nil)
 	if err != nil {
 		return err
 	}

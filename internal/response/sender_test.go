@@ -65,7 +65,7 @@ func TestAFXDPSenderBuildsAndSendsFrame(t *testing.T) {
 		buildOpts: BuildOptions{},
 	}
 
-	if err := sender.Send(context.Background(), XSKMetadata{Action: ActionICMPEchoReply}, buildTestICMPEchoRequest(t), nil); err != nil {
+	if err := sender.Send(context.Background(), XSKMetadata{Action: ActionICMPEchoReply}, nil, buildTestICMPEchoRequest(t), nil); err != nil {
 		t.Fatalf("Send() error = %v", err)
 	}
 	if len(out.frames) != 1 {
@@ -84,7 +84,7 @@ func TestAFPacketSenderBuildsAndSendsFrame(t *testing.T) {
 		},
 	}
 
-	if err := sender.Send(context.Background(), XSKMetadata{Action: ActionARPReply}, buildTestARPRequest(t), nil); err != nil {
+	if err := sender.Send(context.Background(), XSKMetadata{Action: ActionARPReply}, nil, buildTestARPRequest(t), nil); err != nil {
 		t.Fatalf("Send() error = %v", err)
 	}
 	if len(out.frames) != 1 {
@@ -101,7 +101,7 @@ func TestAFXDPSenderReturnsFrameSendError(t *testing.T) {
 		buildOpts: BuildOptions{},
 	}
 
-	err := sender.Send(context.Background(), XSKMetadata{Action: ActionICMPEchoReply}, buildTestICMPEchoRequest(t), nil)
+	err := sender.Send(context.Background(), XSKMetadata{Action: ActionICMPEchoReply}, nil, buildTestICMPEchoRequest(t), nil)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("Send() error = %v, want %v", err, wantErr)
 	}
@@ -118,7 +118,7 @@ func TestAFPacketSenderUsesARPBuildOptions(t *testing.T) {
 		},
 	}
 
-	if err := sender.Send(context.Background(), XSKMetadata{Action: ActionARPReply}, buildTestARPRequest(t), nil); err != nil {
+	if err := sender.Send(context.Background(), XSKMetadata{Action: ActionARPReply}, nil, buildTestARPRequest(t), nil); err != nil {
 		t.Fatalf("Send() error = %v", err)
 	}
 	if len(out.frames) != 1 {
@@ -135,7 +135,7 @@ func TestAFPacketSenderUsesIPv4PacketPathForICMPEchoReply(t *testing.T) {
 		buildOpts: BuildOptions{},
 	}
 
-	if err := sender.Send(context.Background(), XSKMetadata{Action: ActionICMPEchoReply}, buildTestICMPEchoRequest(t), nil); err != nil {
+	if err := sender.Send(context.Background(), XSKMetadata{Action: ActionICMPEchoReply}, nil, buildTestICMPEchoRequest(t), nil); err != nil {
 		t.Fatalf("Send() error = %v", err)
 	}
 	if len(out.ipv4Packets) != 1 {
@@ -157,7 +157,7 @@ func TestAFPacketSenderFallsBackToFramePathForARPReply(t *testing.T) {
 		},
 	}
 
-	if err := sender.Send(context.Background(), XSKMetadata{Action: ActionARPReply}, buildTestARPRequest(t), nil); err != nil {
+	if err := sender.Send(context.Background(), XSKMetadata{Action: ActionARPReply}, nil, buildTestARPRequest(t), nil); err != nil {
 		t.Fatalf("Send() error = %v", err)
 	}
 	if len(out.frames) != 1 {
@@ -178,10 +178,10 @@ func TestAFXDPSenderDoesNotReuseBufferForNonBorrowedSender(t *testing.T) {
 	}
 	request := buildTestICMPEchoRequest(t)
 
-	if err := sender.Send(context.Background(), XSKMetadata{Action: ActionICMPEchoReply}, request, nil); err != nil {
+	if err := sender.Send(context.Background(), XSKMetadata{Action: ActionICMPEchoReply}, nil, request, nil); err != nil {
 		t.Fatalf("first Send() error = %v", err)
 	}
-	if err := sender.Send(context.Background(), XSKMetadata{Action: ActionICMPEchoReply}, request, nil); err != nil {
+	if err := sender.Send(context.Background(), XSKMetadata{Action: ActionICMPEchoReply}, nil, request, nil); err != nil {
 		t.Fatalf("second Send() error = %v", err)
 	}
 	if len(out.frames) != 2 {
