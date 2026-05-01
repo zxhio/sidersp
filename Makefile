@@ -31,6 +31,9 @@ build: build-xdp build-web
 
 build-web:
 	cd web && npm ci && npm run build
+	mkdir -p internal/console/static/assets
+	printf '\n' > internal/console/static/.keep
+	printf '\n' > internal/console/static/assets/.keep
 
 build-xdp:
 	go generate ./internal/dataplane
