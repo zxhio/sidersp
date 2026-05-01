@@ -211,7 +211,7 @@ console:
 	}
 }
 
-func TestLoadXSKConfig(t *testing.T) {
+func TestLoadResponseAndXSKConfig(t *testing.T) {
 	t.Parallel()
 
 	path := writeConfigFile(t, `controlplane:
@@ -225,14 +225,15 @@ egress:
   vlan_mode: access
   failure_verdict: drop
 
+response:
+  result_buffer_size: 2048
+
 xsk:
-  runtime:
-    enabled: true
-    queues: [0, 1]
-    result_buffer_size: 2048
-    afxdp:
-      frame_size: 4096
-      tx_frame_reserve: 256
+  enabled: true
+  queues: [0, 1]
+  afxdp:
+    frame_size: 4096
+    tx_frame_reserve: 256
 
 console:
   listen_addr: 127.0.0.1:8080
@@ -243,22 +244,22 @@ console:
 		t.Fatalf("Load() error = %v", err)
 	}
 
-	if !cfg.XSK.Runtime.Enabled {
-		t.Fatal("XSK.Runtime.Enabled = false, want true")
+	if !cfg.XSK.Enabled {
+		t.Fatal("XSK.Enabled = false, want true")
 	}
-	if got := cfg.XSK.Runtime.Queues; len(got) != 2 || got[0] != 0 || got[1] != 1 {
-		t.Fatalf("XSK.Runtime.Queues = %+v, want [0 1]", got)
+	if got := cfg.XSK.Queues; len(got) != 2 || got[0] != 0 || got[1] != 1 {
+		t.Fatalf("XSK.Queues = %+v, want [0 1]", got)
 	}
-	if cfg.XSK.Runtime.ResultBufferSize != 2048 {
-		t.Fatalf("XSK.Runtime.ResultBufferSize = %d, want 2048", cfg.XSK.Runtime.ResultBufferSize)
+	if cfg.Response.ResultBufferSize != 2048 {
+		t.Fatalf("Response.ResultBufferSize = %d, want 2048", cfg.Response.ResultBufferSize)
 	}
 	if cfg.Egress.Interface != "eth1" ||
 		normalizeVLANMode(cfg.Egress.VLANMode) != "access" ||
 		normalizeFailureVerdict(cfg.Egress.FailureVerdict) != "drop" {
 		t.Fatalf("Egress = %+v, want egress-interface/access/drop", cfg.Egress)
 	}
-	if cfg.XSK.Runtime.AFXDP.FrameSize != 4096 || cfg.XSK.Runtime.AFXDP.TXFrameReserve != 256 {
-		t.Fatalf("AFXDP = %+v, want frame_size=4096 tx_frame_reserve=256", cfg.XSK.Runtime.AFXDP)
+	if cfg.XSK.AFXDP.FrameSize != 4096 || cfg.XSK.AFXDP.TXFrameReserve != 256 {
+		t.Fatalf("AFXDP = %+v, want frame_size=4096 tx_frame_reserve=256", cfg.XSK.AFXDP)
 	}
 }
 
@@ -433,18 +434,18 @@ func TestLoadRejectsInvalidXSKConfig(t *testing.T) {
 		},
 		{
 			name: "negative queue",
-			body: "runtime:\n    queues: [-1]",
-			want: "xsk: runtime: queue -1 out of range",
+			body: "queues: [-1]",
+			want: "xsk: queue -1 out of range",
 		},
 		{
 			name: "duplicate queue",
-			body: "runtime:\n    queues: [0, 0]",
-			want: "xsk: runtime: duplicate queue 0",
+			body: "queues: [0, 0]",
+			want: "xsk: duplicate queue 0",
 		},
 		{
-			name: "negative result buffer",
-			body: "runtime:\n    result_buffer_size: -1",
-			want: "xsk: runtime: result_buffer_size must be >= 0",
+			name: "reject response result buffer on xsk block",
+			body: "result_buffer_size: -1",
+			want: "field result_buffer_size not found",
 		},
 		{
 			name: "reject old actions block",
@@ -457,19 +458,19 @@ func TestLoadRejectsInvalidXSKConfig(t *testing.T) {
 			want: "field tx not found",
 		},
 		{
-			name: "reject old flat runtime enabled",
-			body: "enabled: true",
-			want: "field enabled not found",
-		},
-		{
-			name: "reject old flat afxdp field",
-			body: "frame_count: 4096",
-			want: "field frame_count not found",
+			name: "reject old nested runtime block",
+			body: "runtime:\n    enabled: true",
+			want: "field runtime not found",
 		},
 		{
 			name: "reject old flat action block",
 			body: "arp_reply:\n    hardware_addr: nope",
 			want: "field arp_reply not found",
+		},
+		{
+			name: "reject unknown nested key under xsk",
+			body: "socket:\n    frame_count: 4096",
+			want: "field socket not found",
 		},
 	}
 
@@ -531,8 +532,59 @@ console:
 	if err == nil {
 		t.Fatal("Load() error = nil, want legacy response block rejection")
 	}
-	if !strings.Contains(err.Error(), `field response not found`) {
+	if !strings.Contains(err.Error(), `field runtime not found`) {
 		t.Fatalf("Load() error = %q, want legacy response block rejection", err)
+	}
+}
+
+func TestLoadRejectsLegacyXSKRuntimeBlock(t *testing.T) {
+	t.Parallel()
+
+	path := writeConfigFile(t, `controlplane:
+  rules_path: configs/rules.example.yaml
+
+dataplane:
+  interface: eth0
+
+xsk:
+  runtime:
+    enabled: true
+
+console:
+  listen_addr: 127.0.0.1:8080
+`)
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load() error = nil, want legacy xsk runtime rejection")
+	}
+	if !strings.Contains(err.Error(), `field runtime not found`) {
+		t.Fatalf("Load() error = %q, want legacy xsk runtime rejection", err)
+	}
+}
+
+func TestLoadRejectsInvalidResponseConfig(t *testing.T) {
+	t.Parallel()
+
+	path := writeConfigFile(t, `controlplane:
+  rules_path: configs/rules.example.yaml
+
+dataplane:
+  interface: eth0
+
+response:
+  result_buffer_size: -1
+
+console:
+  listen_addr: 127.0.0.1:8080
+`)
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load() error = nil, want response validation error")
+	}
+	if !strings.Contains(err.Error(), `response: result_buffer_size must be >= 0`) {
+		t.Fatalf("Load() error = %q, want response result_buffer_size validation", err)
 	}
 }
 

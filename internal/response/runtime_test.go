@@ -64,6 +64,7 @@ func TestNewOptionsDisabledReturnsDisabledOptions(t *testing.T) {
 	opts, err := NewOptions(
 		config.DataplaneConfig{Interface: "eth0", CombinedChannels: 2},
 		config.EgressConfig{},
+		config.ResponseConfig{},
 		config.XSKConfig{},
 	)
 	if err != nil {

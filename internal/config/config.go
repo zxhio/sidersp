@@ -17,6 +17,7 @@ type Config struct {
 	Egress       EgressConfig       `yaml:"egress"`
 	ControlPlane ControlPlaneConfig `yaml:"controlplane"`
 	Console      ConsoleConfig      `yaml:"console"`
+	Response     ResponseConfig     `yaml:"response"`
 	XSK          XSKConfig          `yaml:"xsk"`
 	Logging      LoggingConfig      `yaml:"logging"`
 }
@@ -43,15 +44,14 @@ type EgressConfig struct {
 	FailureVerdict string `yaml:"failure_verdict"`
 }
 
-type XSKConfig struct {
-	Runtime XSKRuntimeConfig `yaml:"runtime"`
+type ResponseConfig struct {
+	ResultBufferSize int `yaml:"result_buffer_size"`
 }
 
-type XSKRuntimeConfig struct {
-	Enabled          bool        `yaml:"enabled"`
-	Queues           []int       `yaml:"queues"`
-	ResultBufferSize int         `yaml:"result_buffer_size"`
-	AFXDP            AFXDPConfig `yaml:"afxdp"`
+type XSKConfig struct {
+	Enabled bool        `yaml:"enabled"`
+	Queues  []int       `yaml:"queues"`
+	AFXDP   AFXDPConfig `yaml:"afxdp"`
 }
 
 type AFXDPConfig struct {
@@ -138,6 +138,9 @@ func (c Config) validate() error {
 	if _, err := c.Console.ParsedStats(); err != nil {
 		return fmt.Errorf("console.stats: %w", err)
 	}
+	if err := c.Response.validate(); err != nil {
+		return fmt.Errorf("response: %w", err)
+	}
 	if err := c.XSK.validate(); err != nil {
 		return fmt.Errorf("xsk: %w", err)
 	}
@@ -185,16 +188,6 @@ func (c DataplaneConfig) validate() error {
 }
 
 func (c XSKConfig) validate() error {
-	if err := c.Runtime.validate(); err != nil {
-		return fmt.Errorf("runtime: %w", err)
-	}
-	return nil
-}
-
-func (c XSKRuntimeConfig) validate() error {
-	if c.ResultBufferSize < 0 {
-		return fmt.Errorf("result_buffer_size must be >= 0")
-	}
 	seenQueues := make(map[int]struct{}, len(c.Queues))
 	for _, queue := range c.Queues {
 		if queue < 0 {
@@ -204,6 +197,13 @@ func (c XSKRuntimeConfig) validate() error {
 			return fmt.Errorf("duplicate queue %d", queue)
 		}
 		seenQueues[queue] = struct{}{}
+	}
+	return nil
+}
+
+func (c ResponseConfig) validate() error {
+	if c.ResultBufferSize < 0 {
+		return fmt.Errorf("result_buffer_size must be >= 0")
 	}
 	return nil
 }

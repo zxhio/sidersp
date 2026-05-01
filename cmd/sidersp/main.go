@@ -59,7 +59,7 @@ func main() {
 		cancel()
 	}()
 
-	responseOpts, err := response.NewOptions(cfg.Dataplane, cfg.Egress, cfg.XSK)
+	responseOpts, err := response.NewOptions(cfg.Dataplane, cfg.Egress, cfg.Response, cfg.XSK)
 	if err != nil {
 		logs.App().WithError(err).Fatal("Fail to build response options")
 	}
@@ -78,7 +78,7 @@ func main() {
 	}
 
 	var analysisRuntime *analysis.Runtime
-	if cfg.XSK.Runtime.Enabled {
+	if cfg.XSK.Enabled {
 		analysisRuntime, err = analysis.NewRuntime(analysis.Options{})
 		if err != nil {
 			logs.App().WithError(err).Fatal("Fail to build analysis runtime")
@@ -152,7 +152,7 @@ func main() {
 		}()
 	}
 
-	if cfg.XSK.Runtime.Enabled {
+	if cfg.XSK.Enabled {
 		go func() {
 			if err := dp.RunXSK(ctx); err != nil {
 				errCh <- fmt.Errorf("run xsk runtime: %w", err)

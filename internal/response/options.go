@@ -18,10 +18,10 @@ type Options struct {
 	EgressInterface  string
 }
 
-func NewOptions(dataplaneCfg config.DataplaneConfig, egressCfg config.EgressConfig, xskCfg config.XSKConfig) (Options, error) {
+func NewOptions(dataplaneCfg config.DataplaneConfig, egressCfg config.EgressConfig, responseCfg config.ResponseConfig, xskCfg config.XSKConfig) (Options, error) {
 	interfaceName := strings.TrimSpace(dataplaneCfg.Interface)
 	opts := Options{
-		Enabled:         xskCfg.Runtime.Enabled,
+		Enabled:         xskCfg.Enabled,
 		EgressInterface: strings.TrimSpace(egressCfg.Interface),
 	}
 	if !opts.Enabled {
@@ -40,7 +40,7 @@ func NewOptions(dataplaneCfg config.DataplaneConfig, egressCfg config.EgressConf
 		}
 	}
 	opts.IfIndex = iface.Index
-	opts.ResultBufferSize = normalizedResultBufferSize(xskCfg.Runtime.ResultBufferSize)
+	opts.ResultBufferSize = normalizedResultBufferSize(responseCfg.ResultBufferSize)
 
 	hardwareAddr, err := resolveTXHardwareAddr(*txIface)
 	if err != nil {

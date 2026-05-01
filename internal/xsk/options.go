@@ -19,7 +19,7 @@ type Options struct {
 func NewOptions(dataplaneCfg config.DataplaneConfig, xskCfg config.XSKConfig) (Options, error) {
 	interfaceName := strings.TrimSpace(dataplaneCfg.Interface)
 	opts := Options{
-		Enabled: xskCfg.Runtime.Enabled,
+		Enabled: xskCfg.Enabled,
 	}
 	if !opts.Enabled {
 		return opts, nil
@@ -30,9 +30,9 @@ func NewOptions(dataplaneCfg config.DataplaneConfig, xskCfg config.XSKConfig) (O
 		return Options{}, fmt.Errorf("lookup xsk interface: %w", err)
 	}
 	opts.IfIndex = iface.Index
-	opts.Queues = normalizedWorkerQueues(xskCfg.Runtime.Queues, dataplaneCfg.CombinedChannels)
+	opts.Queues = normalizedWorkerQueues(xskCfg.Queues, dataplaneCfg.CombinedChannels)
 
-	afxdpCfg := newAFXDPConfig(xskCfg.Runtime.AFXDP, iface.Index)
+	afxdpCfg := newAFXDPConfig(xskCfg.AFXDP, iface.Index)
 	if err := afxdpCfg.Validate(); err != nil {
 		return Options{}, err
 	}

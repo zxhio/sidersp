@@ -239,13 +239,15 @@ is not part of the current `/stats` contract.
 
 ## Runtime Configuration
 
-The config layer parses a top-level `egress` block plus the nested
-`xsk.runtime` block. User-space response execution remains disabled unless
-`xsk.runtime.enabled` is true. Worker queues default to queue `0` when omitted.
-If `dataplane.combined_channels` is configured to a positive value and
-`xsk.runtime.queues` is omitted, the runtime derives sequential worker queues
-`0..combined_channels-1`. The local result buffer defaults to capacity `1024`
-when `xsk.runtime.result_buffer_size` is omitted or zero.
+The config layer parses top-level `egress`, `response`, and `xsk` blocks.
+User-space response execution remains disabled unless `xsk.enabled` is true.
+Worker queues default to queue `0` when omitted. If
+`dataplane.combined_channels` is configured to a positive value and
+`xsk.queues` is omitted, the runtime derives sequential worker queues
+`0..combined_channels-1`. The local response result buffer defaults to
+capacity `1024` when `response.result_buffer_size` is omitted or zero. The
+`xsk` block is reserved for user-space transport settings; response result
+buffering lives under `response`.
 
 ```yaml
 dataplane:
@@ -257,19 +259,20 @@ egress:
   vlan_mode: preserve
   failure_verdict: pass
 
+response:
+  result_buffer_size: 1024
+
 xsk:
-  runtime:
-    enabled: false
-    queues: [0]
-    result_buffer_size: 1024
-    afxdp:
-      frame_size: 4096
-      frame_count: 4096
-      fill_ring_size: 2048
-      completion_ring_size: 2048
-      rx_ring_size: 2048
-      tx_ring_size: 2048
-      tx_frame_reserve: 256
+  enabled: false
+  queues: [0]
+  afxdp:
+    frame_size: 4096
+    frame_count: 4096
+    fill_ring_size: 2048
+    completion_ring_size: 2048
+    rx_ring_size: 2048
+    tx_ring_size: 2048
+    tx_frame_reserve: 256
 ```
 
 `egress` config fields:
