@@ -6,15 +6,20 @@ import (
 	"strings"
 
 	"sidersp/internal/config"
+	"sidersp/internal/xsk"
 )
 
-func NewOptions(dataplaneCfg config.DataplaneConfig, egressCfg config.EgressConfig) (Options, error) {
+func NewOptions(dataplaneCfg config.DataplaneConfig, egressCfg config.EgressConfig, xskCfg config.XSKConfig) (Options, error) {
 	interfaceName := strings.TrimSpace(dataplaneCfg.Interface)
 	ingressVerdict, err := normalizedIngressVerdict(dataplaneCfg.IngressVerdict)
 	if err != nil {
 		return Options{}, err
 	}
 	xdpResponse, err := newXDPResponseOptions(egressCfg)
+	if err != nil {
+		return Options{}, err
+	}
+	xskOpts, err := xsk.NewOptions(dataplaneCfg, xskCfg)
 	if err != nil {
 		return Options{}, err
 	}
@@ -25,6 +30,7 @@ func NewOptions(dataplaneCfg config.DataplaneConfig, egressCfg config.EgressConf
 		CombinedChannels: normalizedCombinedChannels(dataplaneCfg.CombinedChannels),
 		IngressVerdict:   ingressVerdict,
 		XDPResponse:      xdpResponse,
+		XSK:              xskOpts,
 	}, nil
 }
 

@@ -78,9 +78,9 @@ response:
 | `action` | yes | Snake-case action name |
 | `params` | no | Action-specific response parameters; schema depends on `action` |
 
-`response.params` is not encoded into BPF `rule_meta`. The control plane validates
-it per action and the response runtime uses it only for actions that require
-user-space response parameters.
+`response.params` is not encoded into BPF `rule_meta`. The control plane
+validates it per action and the response consumer uses it only for actions that
+require user-space response parameters.
 
 Parameter schema:
 
@@ -108,15 +108,15 @@ Execution path is not exposed as a rule field. The control plane validates `resp
 | `none` | `0` | dataplane | Match silently; final host-stack disposition follows runtime `dataplane.ingress_verdict` |
 | `alert` | `1` | dataplane | Emit an observation event; final host-stack disposition follows runtime `dataplane.ingress_verdict` |
 | `tcp_reset` | `2` | dataplane kernel TX | Build TCP RST in BPF and send by configured same-interface or egress-interface TX mode |
-| `icmp_echo_reply` | `3` | XSK RX + user-space TX | Redirect original packet to XSK; user space builds ICMP echo reply and transmits through same-interface XSK TX or configured shared TX egress |
-| `arp_reply` | `4` | XSK RX + user-space TX | Redirect original packet to XSK; user space builds ARP reply and transmits through same-interface XSK TX or configured shared TX egress, with optional per-rule sender MAC / sender IPv4 override |
-| `tcp_syn_ack` | `5` | XSK RX + user-space TX | Redirect original packet to XSK; user space builds TCP SYN-ACK, with optional per-rule `response.params.tcp_seq` override |
+| `icmp_echo_reply` | `3` | XSK RX + user-space TX | Redirect original packet to XSK; the dataplane-owned XSK runtime dispatches it to the response consumer, which builds ICMP echo reply and transmits through same-interface XSK TX or configured shared TX egress |
+| `arp_reply` | `4` | XSK RX + user-space TX | Redirect original packet to XSK; the dataplane-owned XSK runtime dispatches it to the response consumer, which builds ARP reply and transmits through same-interface XSK TX or configured shared TX egress, with optional per-rule sender MAC / sender IPv4 override |
+| `tcp_syn_ack` | `5` | XSK RX + user-space TX | Redirect original packet to XSK; the dataplane-owned XSK runtime dispatches it to the response consumer, which builds TCP SYN-ACK, with optional per-rule `response.params.tcp_seq` override |
 | `icmp_port_unreachable` | `6` | dataplane kernel TX | Build ICMP destination-unreachable / port-unreachable in BPF and send by configured same-interface or egress-interface TX mode |
-| `udp_echo_reply` | `7` | XSK RX + user-space TX | Redirect original packet to XSK; user space swaps the UDP tuple and echoes the original payload |
-| `dns_refused` | `8` | XSK RX + user-space TX | Redirect original packet to XSK; user space returns a DNS refusal-style response for a compatible UDP DNS query, with `rcode` chosen from `refused`, `nxdomain`, or `servfail` |
+| `udp_echo_reply` | `7` | XSK RX + user-space TX | Redirect original packet to XSK; the dataplane-owned XSK runtime dispatches it to the response consumer, which swaps the UDP tuple and echoes the original payload |
+| `dns_refused` | `8` | XSK RX + user-space TX | Redirect original packet to XSK; the dataplane-owned XSK runtime dispatches it to the response consumer, which returns a DNS refusal-style response for a compatible UDP DNS query, with `rcode` chosen from `refused`, `nxdomain`, or `servfail` |
 | `icmp_host_unreachable` | `9` | dataplane kernel TX | Build ICMP destination-unreachable / host-unreachable in BPF and send by configured same-interface or egress-interface TX mode |
 | `icmp_admin_prohibited` | `10` | dataplane kernel TX | Build ICMP destination-unreachable / administratively-prohibited in BPF and send by configured same-interface or egress-interface TX mode |
-| `dns_sinkhole` | `11` | XSK RX + user-space TX | Redirect original packet to XSK; user space returns a DNS `NOERROR` response with A and/or AAAA answers selected from `response.params` by query type |
+| `dns_sinkhole` | `11` | XSK RX + user-space TX | Redirect original packet to XSK; the dataplane-owned XSK runtime dispatches it to the response consumer, which returns a DNS `NOERROR` response with A and/or AAAA answers selected from `response.params` by query type |
 
 External rules must not expose implementation details such as `xdp`, `xsk`, or `user_space` as fields.
 `dataplane.ingress_verdict` is a runtime dataplane setting, not a per-rule field.

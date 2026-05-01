@@ -19,7 +19,7 @@ egress:
   # Values: pass, drop. Mirror-port deployments commonly use drop.
   failure_verdict: pass
 
-response:
+xsk:
   runtime:
     enabled: false
     # Optional: when omitted, the runtime uses queues [0] by default, or [0..combined_channels-1]

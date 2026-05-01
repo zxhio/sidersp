@@ -77,12 +77,16 @@ Used by `icmp_echo_reply`, `arp_reply`, `tcp_syn_ack`, `udp_echo_reply`, `dns_re
 
 ```text
 packet -> BPF parse/match -> write xsk_meta into XDP metadata -> XDP_REDIRECT to XSK
-AF_XDP backend -> expose xsk_meta as an 8-byte prefix to the worker
-XSK worker -> read xsk_meta -> parse full original packet -> build response -> AF_XDP TX or AF_PACKET TX
+AF_XDP backend -> expose xsk_meta as an 8-byte prefix to the XSK runtime
+XSK runtime -> decode xsk_meta -> dispatch envelope -> response consumer -> parse full original packet -> AF_XDP TX or AF_PACKET TX
 ```
 
 XSK redirect is for actions that need full original packet context. Ringbuf
 must not be used to carry packet fields required for response construction.
+
+The same decoded envelope may also be submitted to `analysis`. Analysis
+submission is best-effort and must not block response handling or queue
+progress.
 
 `xsk_redirected` dataplane statistics and `verdict=xsk` observation events mean
 BPF successfully submitted the original packet to XSK. They do not mean the
@@ -150,22 +154,21 @@ u16 reserved
 
 `xsk_meta` carries only dispatch metadata. The AF_XDP backend reads it from
 reserved XDP metadata headroom and exposes it as an 8-byte prefix to the XSK
-worker. The worker must parse the redirected original packet for MAC, ARP,
-ICMP, TCP sequence, ACK, option, and payload context.
+runtime. The response consumer must parse the redirected original packet for
+MAC, ARP, ICMP, TCP sequence, ACK, option, and payload context.
 
-The XSK worker must strip these 8 bytes before parsing the original Ethernet
-frame. If BPF cannot allocate metadata or cannot submit the redirect, the
-packet falls back to `dataplane.ingress_verdict` and the XSK redirect failure
-counter is incremented.
+The XSK runtime must strip these 8 bytes before dispatching the original
+Ethernet frame. If BPF cannot allocate metadata or cannot submit the redirect,
+the packet falls back to `dataplane.ingress_verdict` and the XSK redirect
+failure counter is incremented.
 
 ## Response Result
 
-Full user-space response results are owned by the XSK worker path. The current
-implementation provides a response result model, bounded in-memory result
-buffer, response execution core, worker lifecycle, runtime assembly, Linux
-AF_XDP socket IO, and runtime TX counters. Dataplane ringbuf events remain
-observation events with numeric verdict codes for `observe`, `tx`, `xsk`, and
-`redirect_tx`.
+Full user-space response results are owned by the XSK response path. The
+current implementation provides dataplane-owned XSK runtime lifecycle, AF_XDP
+socket IO, queue workers, response result buffering, response execution, and
+runtime TX counters. Dataplane ringbuf events remain observation events with
+numeric verdict codes for `observe`, `tx`, `xsk`, and `redirect_tx`.
 
 Current response result shape:
 
@@ -237,13 +240,12 @@ is not part of the current `/stats` contract.
 ## Runtime Configuration
 
 The config layer parses a top-level `egress` block plus the nested
-`response.runtime` block. User-space response execution remains disabled unless
-`response.runtime.enabled` is true. Worker queues
-default to queue `0` when omitted. If `dataplane.combined_channels` is configured
-to a positive value and `response.runtime.queues` is omitted, the runtime
-derives sequential worker queues `0..combined_channels-1`. The local result
-buffer defaults to capacity `1024` when
-`response.runtime.result_buffer_size` is omitted or zero.
+`xsk.runtime` block. User-space response execution remains disabled unless
+`xsk.runtime.enabled` is true. Worker queues default to queue `0` when omitted.
+If `dataplane.combined_channels` is configured to a positive value and
+`xsk.runtime.queues` is omitted, the runtime derives sequential worker queues
+`0..combined_channels-1`. The local result buffer defaults to capacity `1024`
+when `xsk.runtime.result_buffer_size` is omitted or zero.
 
 ```yaml
 dataplane:
@@ -255,7 +257,7 @@ egress:
   vlan_mode: preserve
   failure_verdict: pass
 
-response:
+xsk:
   runtime:
     enabled: false
     queues: [0]

@@ -13,7 +13,8 @@ This document defines the system module contract. For the short agent-facing sum
 | `logging` | `internal/logs/` | active | Runtime log output setup, file rotation, and log-level management |
 | `model` | `internal/model/` | active | Shared data models used across modules |
 | `rule` | `internal/rule/` | active | Shared rule schema used by controlplane, console, and dataplane compilation |
-| `analysis` | `internal/analysis/` | planned | Deep analysis task submission and result ingestion |
+| `xsk` | `internal/xsk/` | active | AF_XDP transport, XSK metadata decode, queue workers, and XSK consumer dispatch |
+| `analysis` | `internal/analysis/` | active | Deep analysis task submission and result ingestion |
 | `response` | `internal/response/` | active | User-space response execution and result feedback |
 
 Deployment artifacts under `deploy/`, `scripts/`, and deployment documents are
@@ -29,6 +30,9 @@ Allowed direction:
 ```text
 console/web -> controlplane -> dataplane
 console/controlplane/dataplane -> rule
+dataplane -> xsk
+xsk -> analysis
+xsk -> response
 cmd/console -> logging
 controlplane -> analysis
 controlplane -> response
@@ -39,6 +43,7 @@ Hard rules:
 
 - `dataplane` must not depend on `console`, `web`, or presentation logic
 - `dataplane` must not own policy orchestration
+- `xsk` must not decide whether a response or analysis should happen
 - `console` / `web` must not perform rule matching, analysis decisions, or response decisions
 - `analysis` must not manage rules or execute responses
 - `response` must not decide whether a response should happen
@@ -55,7 +60,7 @@ Owns:
 - Lightweight rule matching
 - XDP verdict selection
 - Kernel TX actions such as `tcp_reset` and `icmp_port_unreachable`, including same-interface `XDP_TX` and configured egress-interface redirect
-- XSK redirect and XSK fd registration for actions that need full packet context
+- XSK redirect, XSK fd registration, and XSK runtime lifecycle for actions that need full packet context
 - Observation event output
 - Dataplane interface setup required for packet capture, including promiscuous
   mode
@@ -66,6 +71,25 @@ Does not own:
 - Complex workflow orchestration
 - Deep analysis
 - User-space response execution
+- Presentation or query APIs
+
+## XSK
+
+Responsible for user-space packet transport after dataplane redirect.
+
+Owns:
+
+- AF_XDP socket create, close, and queue binding
+- XSK metadata decode
+- Queue worker loops
+- Queue-parallel dispatch to response and analysis consumers
+
+Does not own:
+
+- Rule matching
+- Rule lifecycle management
+- Response packet construction
+- Analysis decisions
 - Presentation or query APIs
 
 ## Controlplane
@@ -111,11 +135,12 @@ Does not own:
 
 ## Analysis
 
-Planned module for deep analysis integration.
+Module for deep analysis integration.
 
 Owns:
 
 - Analysis task submission
+- XSK analysis-envelope consumption
 - Analysis input/output normalization
 - Analysis result ingestion
 
@@ -129,18 +154,18 @@ Does not own:
 
 Module for active user-space response execution.
 
-Current implementation status: XSK metadata decoding, response packet builders,
-response execution, bounded in-memory response result buffering, worker-group
-lifecycle, runtime assembly, Linux AF_XDP ingress socket IO, and shared TX
-backend selection exist. Same-interface builders still reject VLAN-tagged
-frames and TCP SYN payloads until those response semantics are implemented.
-Management-plane response result streaming is still planned.
+Current implementation status: XSK response consumer dispatch, response packet
+builders, response execution, bounded in-memory response result buffering, and
+shared TX backend selection exist. Same-interface builders still reject
+VLAN-tagged frames and TCP SYN payloads until those response semantics are
+implemented. Management-plane response result streaming is still planned.
 
 Owns:
 
 - User-space TX response execution
-- AF_XDP RX worker loops, same-interface XSK TX handling, and alternate-egress
+- Response-side sender selection for same-interface XSK TX and alternate-egress
   TX backend selection for supported actions
+- XSK response-envelope consumption
 - Response result recording
 - Failure feedback
 

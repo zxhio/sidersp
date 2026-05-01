@@ -1,4 +1,4 @@
-package response
+package xsk
 
 import (
 	"context"
@@ -11,29 +11,28 @@ import (
 	"sidersp/internal/logs"
 )
 
-type XSKRegistrar interface {
+type Registrar interface {
 	RegisterXSK(queueID int, fd uint32) error
 }
 
-// XSKHandler processes a single metadata-prefixed XSK frame.
-type XSKHandler func(ctx context.Context, frame []byte) error
-
-type XSKSocket interface {
+type Socket interface {
 	FD() uint32
 	Receive(context.Context) ([]byte, error)
-	frameSender
+	SendFrame(context.Context, []byte) error
 	io.Closer
 }
 
-type XSKWorker struct {
+type FrameHandler func(ctx context.Context, queueID int, socket Socket, frame []byte) error
+
+type Worker struct {
 	ifindex   int
 	queueID   int
-	registrar XSKRegistrar
-	socket    XSKSocket
-	handler   XSKHandler
+	registrar Registrar
+	socket    Socket
+	handler   FrameHandler
 }
 
-func NewXSKWorker(ifindex, queueID int, registrar XSKRegistrar, socket XSKSocket, handler XSKHandler) (*XSKWorker, error) {
+func NewWorker(ifindex, queueID int, registrar Registrar, socket Socket, handler FrameHandler) (*Worker, error) {
 	if registrar == nil {
 		return nil, fmt.Errorf("create xsk worker: registrar is required")
 	}
@@ -46,7 +45,7 @@ func NewXSKWorker(ifindex, queueID int, registrar XSKRegistrar, socket XSKSocket
 	if queueID < 0 {
 		return nil, fmt.Errorf("create xsk worker: queue %d out of range", queueID)
 	}
-	return &XSKWorker{
+	return &Worker{
 		ifindex:   ifindex,
 		queueID:   queueID,
 		registrar: registrar,
@@ -55,7 +54,7 @@ func NewXSKWorker(ifindex, queueID int, registrar XSKRegistrar, socket XSKSocket
 	}, nil
 }
 
-func (w *XSKWorker) Run(ctx context.Context) error {
+func (w *Worker) Run(ctx context.Context) error {
 	if w == nil {
 		return fmt.Errorf("run xsk worker: nil worker")
 	}
@@ -84,7 +83,7 @@ func (w *XSKWorker) Run(ctx context.Context) error {
 		if len(frame) == 0 {
 			continue
 		}
-		if err := w.handler(ctx, frame); err != nil {
+		if err := w.handler(ctx, w.queueID, w.socket, frame); err != nil {
 			logs.App().WithFields(logrus.Fields{
 				"ifindex": w.ifindex,
 				"queue":   w.queueID,

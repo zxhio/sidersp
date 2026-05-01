@@ -2,32 +2,34 @@ package response
 
 import (
 	"context"
-	"errors"
 	"net"
 	"testing"
 
 	"sidersp/internal/config"
 	"sidersp/internal/model"
+	"sidersp/internal/xsk"
 )
 
-type runtimeStubRegistrar struct {
-	queueID int
-	fd      uint32
-	err     error
-	calls   int
+type stubXSKSocket struct {
+	fd         uint32
+	closeCalls int
+	txFrames   [][]byte
 }
 
-func (s *runtimeStubRegistrar) RegisterXSK(queueID int, fd uint32) error {
-	s.queueID = queueID
-	s.fd = fd
-	s.calls++
-	return s.err
+func (s *stubXSKSocket) FD() uint32 { return s.fd }
+
+func (s *stubXSKSocket) Receive(context.Context) ([]byte, error) {
+	return nil, context.Canceled
 }
 
-type stubBackendFactory struct {
-	err      error
-	backends map[int]*stubBackend
-	queues   []int
+func (s *stubXSKSocket) SendFrame(_ context.Context, frame []byte) error {
+	s.txFrames = append(s.txFrames, append([]byte(nil), frame...))
+	return nil
+}
+
+func (s *stubXSKSocket) Close() error {
+	s.closeCalls++
+	return nil
 }
 
 func normalizeTestOptions(opts Options) Options {
@@ -35,91 +37,18 @@ func normalizeTestOptions(opts Options) Options {
 	if opts.IfIndex <= 0 {
 		opts.IfIndex = 7
 	}
+	if len(opts.HardwareAddr) == 0 {
+		opts.HardwareAddr = append(net.HardwareAddr(nil), testHWAddr...)
+	}
 	return opts
-}
-
-func (s *stubBackendFactory) newFunc() NewXSKFunc {
-	return func(queueID int) (XSKSocket, error) {
-		s.queues = append(s.queues, queueID)
-		if s.err != nil {
-			return nil, s.err
-		}
-		backend := &stubBackend{fd: uint32(queueID + 10)}
-		if s.backends == nil {
-			s.backends = make(map[int]*stubBackend)
-		}
-		s.backends[queueID] = backend
-		return backend, nil
-	}
-}
-
-type stubBackend struct {
-	fd           uint32
-	receiveCalls int
-	closeCalls   int
-	txFrames     [][]byte
-}
-
-func (s *stubBackend) FD() uint32 { return s.fd }
-
-func (s *stubBackend) Receive(context.Context) ([]byte, error) {
-	s.receiveCalls++
-	return nil, context.Canceled
-}
-
-func (s *stubBackend) SendFrame(_ context.Context, frame []byte) error {
-	s.txFrames = append(s.txFrames, append([]byte(nil), frame...))
-	return nil
-}
-
-func (s *stubBackend) Close() error {
-	s.closeCalls++
-	return nil
-}
-
-func TestNewRuntimeBuildsWorkersForQueues(t *testing.T) {
-	t.Parallel()
-
-	registrar := &runtimeStubRegistrar{}
-	factory := &stubBackendFactory{}
-	runtime, err := NewRuntime(normalizeTestOptions(Options{
-		IfIndex:      7,
-		Queues:       []int{0, 1},
-		HardwareAddr: testHWAddr,
-		Registrar:    registrar,
-		NewXSK:       factory.newFunc(),
-	}))
-	if err != nil {
-		t.Fatalf("NewRuntime() error = %v", err)
-	}
-
-	if err := runtime.Run(context.Background()); err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-	if len(factory.backends) != 2 || factory.backends[0].receiveCalls != 1 || factory.backends[1].receiveCalls != 1 {
-		t.Fatalf("backend receive calls = %+v, want both queues receive once", factory.backends)
-	}
-	if registrar.calls != 2 {
-		t.Fatalf("registrar calls = %d, want 2", registrar.calls)
-	}
-	if factory.backends[0].closeCalls != 1 || factory.backends[1].closeCalls != 1 {
-		t.Fatalf("backend close calls = %d,%d; want 1,1", factory.backends[0].closeCalls, factory.backends[1].closeCalls)
-	}
 }
 
 func TestNewRuntimeUsesDefaults(t *testing.T) {
 	t.Parallel()
 
-	factory := &stubBackendFactory{}
-	runtime, err := NewRuntime(normalizeTestOptions(Options{
-		Registrar: &runtimeStubRegistrar{},
-		NewXSK:    factory.newFunc(),
-	}))
+	runtime, err := NewRuntime(normalizeTestOptions(Options{}))
 	if err != nil {
 		t.Fatalf("NewRuntime() error = %v", err)
-	}
-	if len(factory.queues) != 1 || factory.queues[0] != 0 {
-		t.Fatalf("factory queues = %+v, want [0]", factory.queues)
 	}
 	if runtime.results.capacity != 1024 {
 		t.Fatalf("result capacity = %d, want 1024", runtime.results.capacity)
@@ -135,8 +64,7 @@ func TestNewOptionsDisabledReturnsDisabledOptions(t *testing.T) {
 	opts, err := NewOptions(
 		config.DataplaneConfig{Interface: "eth0", CombinedChannels: 2},
 		config.EgressConfig{},
-		config.ResponseConfig{},
-		&runtimeStubRegistrar{},
+		config.XSKConfig{},
 	)
 	if err != nil {
 		t.Fatalf("NewOptions() error = %v", err)
@@ -163,27 +91,42 @@ func TestResolveTXHardwareAddrUsesInterfaceDefault(t *testing.T) {
 	}
 }
 
-func TestNewRuntimeReturnsBackendError(t *testing.T) {
+func TestRuntimeHandleXSKSendsResponse(t *testing.T) {
 	t.Parallel()
 
-	wantErr := errors.New("backend failed")
-	_, err := NewRuntime(normalizeTestOptions(Options{
-		Queues:    []int{3},
-		Registrar: &runtimeStubRegistrar{},
-		NewXSK:    (&stubBackendFactory{err: wantErr}).newFunc(),
-	}))
-	if !errors.Is(err, wantErr) {
-		t.Fatalf("NewRuntime() error = %v, want %v", err, wantErr)
+	runtime, err := NewRuntime(normalizeTestOptions(Options{}))
+	if err != nil {
+		t.Fatalf("NewRuntime() error = %v", err)
+	}
+
+	socket := &stubXSKSocket{fd: 42}
+	envelope := xsk.Envelope{
+		QueueID: 3,
+		Metadata: xsk.Metadata{
+			RuleID: 1001,
+			Action: ActionICMPEchoReply,
+		},
+		Frame: buildTestICMPEchoRequest(t),
+	}
+	if err := runtime.HandleXSK(context.Background(), envelope, socket); err != nil {
+		t.Fatalf("HandleXSK() error = %v", err)
+	}
+	if len(socket.txFrames) != 1 {
+		t.Fatalf("tx frames = %d, want 1", len(socket.txFrames))
+	}
+	results := runtime.Results()
+	if len(results) != 1 {
+		t.Fatalf("results len = %d, want 1", len(results))
+	}
+	if results[0].RXQueue != 3 || results[0].RuleID != 1001 || results[0].Result != ResultSent {
+		t.Fatalf("result = %+v, want queue=3 rule=1001 sent", results[0])
 	}
 }
 
 func TestRuntimeResultsReturnsCopy(t *testing.T) {
 	t.Parallel()
 
-	runtime, err := NewRuntime(normalizeTestOptions(Options{
-		Registrar: &runtimeStubRegistrar{},
-		NewXSK:    (&stubBackendFactory{}).newFunc(),
-	}))
+	runtime, err := NewRuntime(normalizeTestOptions(Options{}))
 	if err != nil {
 		t.Fatalf("NewRuntime() error = %v", err)
 	}
@@ -207,10 +150,7 @@ func TestRuntimeResultsReturnsCopy(t *testing.T) {
 func TestRuntimeReadStatsReturnsResponseCounters(t *testing.T) {
 	t.Parallel()
 
-	runtime, err := NewRuntime(normalizeTestOptions(Options{
-		Registrar: &runtimeStubRegistrar{},
-		NewXSK:    (&stubBackendFactory{}).newFunc(),
-	}))
+	runtime, err := NewRuntime(normalizeTestOptions(Options{}))
 	if err != nil {
 		t.Fatalf("NewRuntime() error = %v", err)
 	}
@@ -235,10 +175,7 @@ func TestRuntimeReadStatsReturnsResponseCounters(t *testing.T) {
 func TestRuntimeResetStatsClearsResponseCounters(t *testing.T) {
 	t.Parallel()
 
-	runtime, err := NewRuntime(normalizeTestOptions(Options{
-		Registrar: &runtimeStubRegistrar{},
-		NewXSK:    (&stubBackendFactory{}).newFunc(),
-	}))
+	runtime, err := NewRuntime(normalizeTestOptions(Options{}))
 	if err != nil {
 		t.Fatalf("NewRuntime() error = %v", err)
 	}
@@ -257,10 +194,7 @@ func TestRuntimeResetStatsClearsResponseCounters(t *testing.T) {
 func TestNewRuntimeRejectsUnnormalizedOptions(t *testing.T) {
 	t.Parallel()
 
-	_, err := NewRuntime(Options{
-		Registrar: &runtimeStubRegistrar{},
-		NewXSK:    (&stubBackendFactory{}).newFunc(),
-	})
+	_, err := NewRuntime(Options{})
 	if err == nil {
 		t.Fatal("NewRuntime() error = nil, want validation error")
 	}

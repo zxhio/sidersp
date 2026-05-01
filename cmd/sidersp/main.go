@@ -12,6 +12,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
+	"sidersp/internal/analysis"
 	"sidersp/internal/config"
 	"sidersp/internal/console"
 	"sidersp/internal/controlplane"
@@ -58,22 +59,7 @@ func main() {
 		cancel()
 	}()
 
-	dpOpts, err := dataplane.NewOptions(cfg.Dataplane, cfg.Egress)
-	if err != nil {
-		logs.App().WithError(err).Fatal("Fail to build dataplane options")
-	}
-
-	dp, err := dataplane.Open(dpOpts)
-	if err != nil {
-		logs.App().WithError(err).Fatal("Fail to open dataplane")
-	}
-	defer func() {
-		if err := dp.Close(); err != nil {
-			logs.App().WithError(err).WithField("interface", cfg.Dataplane.Interface).Error("Fail to close dataplane")
-		}
-	}()
-
-	responseOpts, err := response.NewOptions(cfg.Dataplane, cfg.Egress, cfg.Response, dp)
+	responseOpts, err := response.NewOptions(cfg.Dataplane, cfg.Egress, cfg.XSK)
 	if err != nil {
 		logs.App().WithError(err).Fatal("Fail to build response options")
 	}
@@ -84,7 +70,38 @@ func main() {
 		if err != nil {
 			logs.App().WithError(err).Fatal("Fail to build response runtime")
 		}
+		defer func() {
+			if err := responseRuntime.Close(); err != nil {
+				logs.App().WithError(err).Error("Fail to close response runtime")
+			}
+		}()
 	}
+
+	var analysisRuntime *analysis.Runtime
+	if cfg.XSK.Runtime.Enabled {
+		analysisRuntime, err = analysis.NewRuntime(analysis.Options{})
+		if err != nil {
+			logs.App().WithError(err).Fatal("Fail to build analysis runtime")
+		}
+	}
+
+	dpOpts, err := dataplane.NewOptions(cfg.Dataplane, cfg.Egress, cfg.XSK)
+	if err != nil {
+		logs.App().WithError(err).Fatal("Fail to build dataplane options")
+	}
+
+	dp, err := dataplane.Open(dpOpts, dataplane.XSKConsumers{
+		Response: responseRuntime,
+		Analysis: analysisRuntime,
+	})
+	if err != nil {
+		logs.App().WithError(err).Fatal("Fail to open dataplane")
+	}
+	defer func() {
+		if err := dp.Close(); err != nil {
+			logs.App().WithError(err).WithField("interface", cfg.Dataplane.Interface).Error("Fail to close dataplane")
+		}
+	}()
 	// Apply dataplane first so a failed dataplane sync never leaves user-space
 	// response params ahead of the active redirect rules.
 	syncer := ruleSyncFanout{targets: []controlplane.RuleSyncer{dp}}
@@ -110,7 +127,7 @@ func main() {
 		"interface":   cfg.Dataplane.Interface,
 	}).Info("Started service")
 
-	errCh := make(chan error, 3)
+	errCh := make(chan error, 4)
 
 	go func() {
 		if err := cp.Run(ctx); err != nil {
@@ -126,10 +143,19 @@ func main() {
 		}
 	}()
 
-	if responseRuntime != nil {
+	if analysisRuntime != nil {
 		go func() {
-			if err := responseRuntime.Run(ctx); err != nil {
-				errCh <- fmt.Errorf("run response runtime: %w", err)
+			if err := analysisRuntime.Run(ctx); err != nil {
+				errCh <- fmt.Errorf("run analysis runtime: %w", err)
+				cancel()
+			}
+		}()
+	}
+
+	if cfg.XSK.Runtime.Enabled {
+		go func() {
+			if err := dp.RunXSK(ctx); err != nil {
+				errCh <- fmt.Errorf("run xsk runtime: %w", err)
 				cancel()
 			}
 		}()

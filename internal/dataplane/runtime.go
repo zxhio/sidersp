@@ -20,6 +20,7 @@ import (
 	"sidersp/internal/logs"
 	"sidersp/internal/model"
 	"sidersp/internal/rule"
+	"sidersp/internal/xsk"
 )
 
 type Runtime struct {
@@ -27,6 +28,7 @@ type Runtime struct {
 	xdpLink     link.Link
 	iface       string
 	opts        Options
+	xskRuntime  xskRuntime
 	promiscSet  bool
 	matchMu     sync.RWMutex
 	matchCounts map[uint32]uint64
@@ -38,6 +40,7 @@ type Options struct {
 	CombinedChannels int
 	IngressVerdict   string
 	XDPResponse      XDPResponseOptions
+	XSK              xsk.Options
 }
 
 type XDPResponseOptions struct {
@@ -46,7 +49,17 @@ type XDPResponseOptions struct {
 	FailureVerdict string
 }
 
-func Open(opts Options) (*Runtime, error) {
+type XSKConsumers struct {
+	Response xsk.ResponseConsumer
+	Analysis xsk.AnalysisSubmitter
+}
+
+type xskRuntime interface {
+	Run(context.Context) error
+	Close() error
+}
+
+func Open(opts Options, consumers XSKConsumers) (*Runtime, error) {
 	if err := rlimit.RemoveMemlock(); err != nil {
 		return nil, fmt.Errorf("remove memlock limit: %w", err)
 	}
@@ -69,13 +82,36 @@ func Open(opts Options) (*Runtime, error) {
 		_ = r.objs.Close()
 		return nil, err
 	}
+	if opts.XSK.Enabled {
+		runtime, err := xsk.NewRuntime(opts.XSK, xsk.RuntimeDeps{
+			Registrar: r,
+			Consumers: xsk.Consumers{
+				Response: consumers.Response,
+				Analysis: consumers.Analysis,
+			},
+		})
+		if err != nil {
+			_ = r.objs.Close()
+			return nil, err
+		}
+		r.xskRuntime = runtime
+	}
 	return r, nil
 }
 
 func (r *Runtime) Close() error {
+	if r == nil {
+		return nil
+	}
 	var closeErr error
+	if r.xskRuntime != nil {
+		if err := r.xskRuntime.Close(); err != nil {
+			closeErr = err
+		}
+		r.xskRuntime = nil
+	}
 	if r.xdpLink != nil {
-		if err := r.xdpLink.Close(); err != nil {
+		if err := r.xdpLink.Close(); err != nil && closeErr == nil {
 			closeErr = fmt.Errorf("detach xdp from %s: %w", r.iface, err)
 		}
 	}
@@ -94,6 +130,16 @@ func (r *Runtime) Close() error {
 	}
 
 	return closeErr
+}
+
+func (r *Runtime) RunXSK(ctx context.Context) error {
+	if r == nil {
+		return fmt.Errorf("run xsk runtime: nil dataplane runtime")
+	}
+	if r.xskRuntime == nil {
+		return nil
+	}
+	return r.xskRuntime.Run(ctx)
 }
 
 func (r *Runtime) RunEventStream(ctx context.Context) error {

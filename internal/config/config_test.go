@@ -211,7 +211,7 @@ console:
 	}
 }
 
-func TestLoadResponseConfig(t *testing.T) {
+func TestLoadXSKConfig(t *testing.T) {
 	t.Parallel()
 
 	path := writeConfigFile(t, `controlplane:
@@ -225,7 +225,7 @@ egress:
   vlan_mode: access
   failure_verdict: drop
 
-response:
+xsk:
   runtime:
     enabled: true
     queues: [0, 1]
@@ -243,22 +243,22 @@ console:
 		t.Fatalf("Load() error = %v", err)
 	}
 
-	if !cfg.Response.Runtime.Enabled {
-		t.Fatal("Response.Runtime.Enabled = false, want true")
+	if !cfg.XSK.Runtime.Enabled {
+		t.Fatal("XSK.Runtime.Enabled = false, want true")
 	}
-	if got := cfg.Response.Runtime.Queues; len(got) != 2 || got[0] != 0 || got[1] != 1 {
-		t.Fatalf("Response.Runtime.Queues = %+v, want [0 1]", got)
+	if got := cfg.XSK.Runtime.Queues; len(got) != 2 || got[0] != 0 || got[1] != 1 {
+		t.Fatalf("XSK.Runtime.Queues = %+v, want [0 1]", got)
 	}
-	if cfg.Response.Runtime.ResultBufferSize != 2048 {
-		t.Fatalf("Response.Runtime.ResultBufferSize = %d, want 2048", cfg.Response.Runtime.ResultBufferSize)
+	if cfg.XSK.Runtime.ResultBufferSize != 2048 {
+		t.Fatalf("XSK.Runtime.ResultBufferSize = %d, want 2048", cfg.XSK.Runtime.ResultBufferSize)
 	}
 	if cfg.Egress.Interface != "eth1" ||
 		normalizeVLANMode(cfg.Egress.VLANMode) != "access" ||
 		normalizeFailureVerdict(cfg.Egress.FailureVerdict) != "drop" {
 		t.Fatalf("Egress = %+v, want egress-interface/access/drop", cfg.Egress)
 	}
-	if cfg.Response.Runtime.AFXDP.FrameSize != 4096 || cfg.Response.Runtime.AFXDP.TXFrameReserve != 256 {
-		t.Fatalf("AFXDP = %+v, want frame_size=4096 tx_frame_reserve=256", cfg.Response.Runtime.AFXDP)
+	if cfg.XSK.Runtime.AFXDP.FrameSize != 4096 || cfg.XSK.Runtime.AFXDP.TXFrameReserve != 256 {
+		t.Fatalf("AFXDP = %+v, want frame_size=4096 tx_frame_reserve=256", cfg.XSK.Runtime.AFXDP)
 	}
 }
 
@@ -418,7 +418,7 @@ console:
 	}
 }
 
-func TestLoadRejectsInvalidResponseConfig(t *testing.T) {
+func TestLoadRejectsInvalidXSKConfig(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -434,17 +434,17 @@ func TestLoadRejectsInvalidResponseConfig(t *testing.T) {
 		{
 			name: "negative queue",
 			body: "runtime:\n    queues: [-1]",
-			want: "response: runtime: queue -1 out of range",
+			want: "xsk: runtime: queue -1 out of range",
 		},
 		{
 			name: "duplicate queue",
 			body: "runtime:\n    queues: [0, 0]",
-			want: "response: runtime: duplicate queue 0",
+			want: "xsk: runtime: duplicate queue 0",
 		},
 		{
 			name: "negative result buffer",
 			body: "runtime:\n    result_buffer_size: -1",
-			want: "response: runtime: result_buffer_size must be >= 0",
+			want: "xsk: runtime: result_buffer_size must be >= 0",
 		},
 		{
 			name: "reject old actions block",
@@ -492,7 +492,7 @@ dataplane:
 
 			path := writeConfigFile(t, prefix+`
 
-response:
+xsk:
   `+responseBody+`
 
 console:
@@ -501,12 +501,38 @@ console:
 
 			_, err := Load(path)
 			if err == nil {
-				t.Fatal("Load() error = nil, want response validation error")
+				t.Fatal("Load() error = nil, want xsk validation error")
 			}
 			if !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("Load() error = %q, want %q", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestLoadRejectsLegacyResponseRuntimeBlock(t *testing.T) {
+	t.Parallel()
+
+	path := writeConfigFile(t, `controlplane:
+  rules_path: configs/rules.example.yaml
+
+dataplane:
+  interface: eth0
+
+response:
+  runtime:
+    enabled: true
+
+console:
+  listen_addr: 127.0.0.1:8080
+`)
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load() error = nil, want legacy response block rejection")
+	}
+	if !strings.Contains(err.Error(), `field response not found`) {
+		t.Fatalf("Load() error = %q, want legacy response block rejection", err)
 	}
 }
 

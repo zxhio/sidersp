@@ -1,4 +1,4 @@
-package response
+package xsk
 
 import (
 	"context"
@@ -56,22 +56,26 @@ func (s *stubSocket) Close() error {
 }
 
 type handledFrame struct {
-	data []byte
+	queueID int
+	data    []byte
 }
 
-func newStubHandler() (*[]handledFrame, XSKHandler) {
+func newStubHandler() (*[]handledFrame, FrameHandler) {
 	frames := &[]handledFrame{}
-	return frames, func(_ context.Context, data []byte) error {
-		*frames = append(*frames, handledFrame{data: append([]byte(nil), data...)})
+	return frames, func(_ context.Context, queueID int, _ Socket, data []byte) error {
+		*frames = append(*frames, handledFrame{
+			queueID: queueID,
+			data:    append([]byte(nil), data...),
+		})
 		return nil
 	}
 }
 
-func newStubHandlerWithError(err error) XSKHandler {
-	return func(_ context.Context, _ []byte) error { return err }
+func newStubHandlerWithError(err error) FrameHandler {
+	return func(_ context.Context, _ int, _ Socket, _ []byte) error { return err }
 }
 
-func TestXSKWorkerRegistersBeforeReceive(t *testing.T) {
+func TestWorkerRegistersBeforeReceive(t *testing.T) {
 	t.Parallel()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -79,10 +83,10 @@ func TestXSKWorkerRegistersBeforeReceive(t *testing.T) {
 
 	registrar := &stubRegistrar{}
 	socket := &stubSocket{fd: 42, onEmpty: cancel}
-	handler := func(_ context.Context, _ []byte) error { return nil }
-	worker, err := NewXSKWorker(7, 3, registrar, socket, handler)
+	handler := func(_ context.Context, _ int, _ Socket, _ []byte) error { return nil }
+	worker, err := NewWorker(7, 3, registrar, socket, handler)
 	if err != nil {
-		t.Fatalf("NewXSKWorker() error = %v", err)
+		t.Fatalf("NewWorker() error = %v", err)
 	}
 
 	if err := worker.Run(ctx); err != nil {
@@ -96,15 +100,15 @@ func TestXSKWorkerRegistersBeforeReceive(t *testing.T) {
 	}
 }
 
-func TestXSKWorkerReturnsRegisterError(t *testing.T) {
+func TestWorkerReturnsRegisterError(t *testing.T) {
 	t.Parallel()
 
 	wantErr := errors.New("register failed")
 	registrar := &stubRegistrar{err: wantErr}
 	socket := &stubSocket{fd: 42}
-	worker, err := NewXSKWorker(7, 3, registrar, socket, func(_ context.Context, _ []byte) error { return nil })
+	worker, err := NewWorker(7, 3, registrar, socket, func(_ context.Context, _ int, _ Socket, _ []byte) error { return nil })
 	if err != nil {
-		t.Fatalf("NewXSKWorker() error = %v", err)
+		t.Fatalf("NewWorker() error = %v", err)
 	}
 
 	err = worker.Run(context.Background())
@@ -116,7 +120,7 @@ func TestXSKWorkerReturnsRegisterError(t *testing.T) {
 	}
 }
 
-func TestXSKWorkerDispatchesSocketFrames(t *testing.T) {
+func TestWorkerDispatchesSocketFrames(t *testing.T) {
 	t.Parallel()
 
 	registrar := &stubRegistrar{}
@@ -129,9 +133,9 @@ func TestXSKWorkerDispatchesSocketFrames(t *testing.T) {
 	}
 
 	frames, handler := newStubHandler()
-	worker, err := NewXSKWorker(7, 3, registrar, socket, handler)
+	worker, err := NewWorker(7, 3, registrar, socket, handler)
 	if err != nil {
-		t.Fatalf("NewXSKWorker() error = %v", err)
+		t.Fatalf("NewWorker() error = %v", err)
 	}
 
 	if err := worker.Run(ctx); err != nil {
@@ -140,12 +144,15 @@ func TestXSKWorkerDispatchesSocketFrames(t *testing.T) {
 	if len(*frames) != 2 {
 		t.Fatalf("handler frames = %d, want 2", len(*frames))
 	}
+	if (*frames)[0].queueID != 3 || (*frames)[1].queueID != 3 {
+		t.Fatalf("handler queue IDs = %+v, want queue 3", *frames)
+	}
 	if string((*frames)[0].data) != string([]byte{0x01, 0x02}) || string((*frames)[1].data) != string([]byte{0x03, 0x04}) {
 		t.Fatalf("handler frames = %v, want dispatched socket frames", *frames)
 	}
 }
 
-func TestXSKWorkerContinuesAfterFrameHandlerError(t *testing.T) {
+func TestWorkerContinuesAfterFrameHandlerError(t *testing.T) {
 	t.Parallel()
 
 	wantErr := errors.New("handle failed")
@@ -157,9 +164,9 @@ func TestXSKWorkerContinuesAfterFrameHandlerError(t *testing.T) {
 		frames:  [][]byte{{0x01, 0x02}, {0x03, 0x04}},
 		onEmpty: cancel,
 	}
-	worker, err := NewXSKWorker(7, 3, registrar, socket, newStubHandlerWithError(wantErr))
+	worker, err := NewWorker(7, 3, registrar, socket, newStubHandlerWithError(wantErr))
 	if err != nil {
-		t.Fatalf("NewXSKWorker() error = %v", err)
+		t.Fatalf("NewWorker() error = %v", err)
 	}
 
 	if err := worker.Run(ctx); err != nil {
@@ -170,16 +177,16 @@ func TestXSKWorkerContinuesAfterFrameHandlerError(t *testing.T) {
 	}
 }
 
-func TestNewXSKWorkerValidation(t *testing.T) {
+func TestNewWorkerValidation(t *testing.T) {
 	t.Parallel()
 
-	noopHandler := XSKHandler(func(_ context.Context, _ []byte) error { return nil })
+	noopHandler := FrameHandler(func(_ context.Context, _ int, _ Socket, _ []byte) error { return nil })
 
 	tests := []struct {
 		name      string
-		registrar XSKRegistrar
-		socket    XSKSocket
-		handler   XSKHandler
+		registrar Registrar
+		socket    Socket
+		handler   FrameHandler
 		queueID   int
 		want      string
 	}{
@@ -219,12 +226,12 @@ func TestNewXSKWorkerValidation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := NewXSKWorker(7, tc.queueID, tc.registrar, tc.socket, tc.handler)
+			_, err := NewWorker(7, tc.queueID, tc.registrar, tc.socket, tc.handler)
 			if err == nil {
-				t.Fatal("NewXSKWorker() error = nil, want validation error")
+				t.Fatal("NewWorker() error = nil, want validation error")
 			}
 			if !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("NewXSKWorker() error = %q, want %q", err, tc.want)
+				t.Fatalf("NewWorker() error = %q, want %q", err, tc.want)
 			}
 		})
 	}

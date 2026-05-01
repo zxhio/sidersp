@@ -20,8 +20,9 @@ import (
 	"sidersp/internal/dataplane"
 	"sidersp/internal/logs"
 	"sidersp/internal/response"
-	"sidersp/internal/response/afxdp"
 	"sidersp/internal/rule"
+	"sidersp/internal/xsk"
+	"sidersp/internal/xsk/afxdp"
 )
 
 const (
@@ -366,16 +367,6 @@ func (h *loopHarness) waitForProbe(run func() error) error {
 }
 
 func (h *loopHarness) startSideRSP() error {
-	dp, err := dataplane.Open(dataplane.Options{
-		Interface:      h.env.ingressIfName,
-		AttachMode:     "generic",
-		IngressVerdict: "drop",
-	})
-	if err != nil {
-		return fmt.Errorf("open dataplane runtime: %w", err)
-	}
-	h.dataplane = dp
-
 	hostIf, err := net.InterfaceByName(h.env.ingressIfName)
 	if err != nil {
 		return fmt.Errorf("lookup ingress interface %s: %w", h.env.ingressIfName, err)
@@ -385,20 +376,34 @@ func (h *loopHarness) startSideRSP() error {
 	afxdpCfg.IfIndex = hostIf.Index
 
 	resp, err := response.NewRuntime(response.Options{
-		IfIndex:          afxdpCfg.IfIndex,
-		Queues:           []int{0},
+		IfIndex:          hostIf.Index,
 		ResultBufferSize: 1024,
 		HardwareAddr:     append(net.HardwareAddr(nil), h.env.bridgeMAC...),
 		EgressInterface:  h.env.bridgeIfName,
-		Registrar:        dp,
-		NewXSK: func(queueID int) (response.XSKSocket, error) {
-			return afxdp.NewSocket(afxdpCfg, queueID)
-		},
 	})
 	if err != nil {
 		return fmt.Errorf("create response runtime: %w", err)
 	}
 	h.response = resp
+
+	dp, err := dataplane.Open(dataplane.Options{
+		Interface:      h.env.ingressIfName,
+		AttachMode:     "generic",
+		IngressVerdict: "drop",
+		XSK: xsk.Options{
+			Enabled: true,
+			IfIndex: hostIf.Index,
+			Queues:  []int{0},
+			AFXDP:   afxdpCfg,
+		},
+	}, dataplane.XSKConsumers{
+		Response: resp,
+	})
+	if err != nil {
+		_ = resp.Close()
+		return fmt.Errorf("open dataplane runtime: %w", err)
+	}
+	h.dataplane = dp
 
 	rules := sideRSPRuleSet()
 	if err := resp.ReplaceRules(rules); err != nil {
@@ -409,7 +414,7 @@ func (h *loopHarness) startSideRSP() error {
 	h.cancel = cancel
 	h.responseErr = make(chan error, 1)
 	go func() {
-		h.responseErr <- resp.Run(ctx)
+		h.responseErr <- dp.RunXSK(ctx)
 	}()
 
 	time.Sleep(loopWarmupDelay)
