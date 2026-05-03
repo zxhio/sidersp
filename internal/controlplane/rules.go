@@ -213,32 +213,23 @@ func normalizeRule(r *rule.Rule) error {
 }
 
 func validateActionMatch(action string, r *rule.Rule) error {
-	switch action {
-	case "icmp_echo_reply":
-		if r.Match.Protocol != "icmp" {
-			return fmt.Errorf("response.action icmp_echo_reply requires match.protocol icmp")
-		}
-		if r.Match.ICMP == nil || r.Match.ICMP.Type != "echo_request" {
-			return fmt.Errorf("response.action icmp_echo_reply requires match.icmp.type echo_request")
-		}
-	case "arp_reply":
-		if r.Match.Protocol != "arp" {
-			return fmt.Errorf("response.action arp_reply requires match.protocol arp")
-		}
-		if r.Match.ARP == nil || r.Match.ARP.Operation != "request" {
-			return fmt.Errorf("response.action arp_reply requires match.arp.operation request")
-		}
-	case "tcp_syn_ack":
-		if r.Match.Protocol != "tcp" {
-			return fmt.Errorf("response.action tcp_syn_ack requires match.protocol tcp")
-		}
-		if r.Match.TCPFlags.SYN == nil || !*r.Match.TCPFlags.SYN {
-			return fmt.Errorf("response.action tcp_syn_ack requires match.tcp_flags.syn true")
-		}
-	case "icmp_port_unreachable", "icmp_host_unreachable", "icmp_admin_prohibited", "udp_echo_reply", "dns_refused", "dns_sinkhole":
-		if r.Match.Protocol != "udp" {
-			return fmt.Errorf("response.action %s requires match.protocol udp", action)
-		}
+	spec, ok := rule.ActionSpecForName(action)
+	if !ok {
+		return fmt.Errorf("response.action %q is not allowed", action)
+	}
+
+	req := spec.Match
+	if req.Protocol != "" && r.Match.Protocol != req.Protocol {
+		return fmt.Errorf("response.action %s requires match.protocol %s", action, req.Protocol)
+	}
+	if req.ICMPType != "" && (r.Match.ICMP == nil || r.Match.ICMP.Type != req.ICMPType) {
+		return fmt.Errorf("response.action %s requires match.icmp.type %s", action, req.ICMPType)
+	}
+	if req.ARPOperation != "" && (r.Match.ARP == nil || r.Match.ARP.Operation != req.ARPOperation) {
+		return fmt.Errorf("response.action %s requires match.arp.operation %s", action, req.ARPOperation)
+	}
+	if req.RequireTCPSYN && (r.Match.TCPFlags.SYN == nil || !*r.Match.TCPFlags.SYN) {
+		return fmt.Errorf("response.action %s requires match.tcp_flags.syn true", action)
 	}
 	return nil
 }

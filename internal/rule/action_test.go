@@ -58,3 +58,23 @@ func TestUserSpaceResponseActionName(t *testing.T) {
 		t.Fatal("IsUserSpaceResponseActionName(tcp_reset) = true, want false")
 	}
 }
+
+func TestActionSpecForName(t *testing.T) {
+	t.Parallel()
+
+	spec, ok := ActionSpecForName("tcp_syn_ack")
+	if !ok {
+		t.Fatal("ActionSpecForName(tcp_syn_ack) = false, want true")
+	}
+	if spec.Match.Protocol != "tcp" || !spec.Match.RequireTCPSYN {
+		t.Fatalf("ActionSpecForName(tcp_syn_ack) match = %+v, want tcp + syn requirement", spec.Match)
+	}
+
+	spec, ok = ActionSpecForName("dns_refused")
+	if !ok {
+		t.Fatal("ActionSpecForName(dns_refused) = false, want true")
+	}
+	if spec.Match.Protocol != "udp" || spec.Match.RequireTCPSYN {
+		t.Fatalf("ActionSpecForName(dns_refused) match = %+v, want udp only", spec.Match)
+	}
+}
