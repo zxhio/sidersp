@@ -587,12 +587,13 @@ func requireVnetBenchEnv(tb testingTB) {
 
 func logLatencySummary(tb testingTB, label string, summary latencySummary) {
 	tb.Helper()
-	tb.Logf("%s_avg_ms=%s min_ms=%s p50_ms=%s p95_ms=%s max_ms=%s count=%d",
+	tb.Logf("%s_avg_ms=%s min_ms=%s p50_ms=%s p95_ms=%s p99_ms=%s max_ms=%s count=%d",
 		label,
 		formatDurationMS(summary.Avg),
 		formatDurationMS(summary.Min),
 		formatDurationMS(summary.P50),
 		formatDurationMS(summary.P95),
+		formatDurationMS(summary.P99),
 		formatDurationMS(summary.Max),
 		summary.Count,
 	)

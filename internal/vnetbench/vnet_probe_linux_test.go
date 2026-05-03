@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"sort"
 	"sync"
+	"testing"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -55,6 +56,7 @@ type latencySummary struct {
 	Avg   time.Duration
 	P50   time.Duration
 	P95   time.Duration
+	P99   time.Duration
 	Max   time.Duration
 }
 
@@ -671,7 +673,28 @@ func summarizeLatencies(latencies []time.Duration) latencySummary {
 		Avg:   total / time.Duration(len(sorted)),
 		P50:   percentileDuration(sorted, 50),
 		P95:   percentileDuration(sorted, 95),
+		P99:   percentileDuration(sorted, 99),
 		Max:   sorted[len(sorted)-1],
+	}
+}
+
+func TestSummarizeLatenciesIncludesP99(t *testing.T) {
+	t.Parallel()
+
+	latencies := make([]time.Duration, 100)
+	for i := range latencies {
+		latencies[i] = time.Duration(i+1) * time.Millisecond
+	}
+
+	summary := summarizeLatencies(latencies)
+	if summary.P50 != 50*time.Millisecond {
+		t.Fatalf("P50 = %s, want 50ms", summary.P50)
+	}
+	if summary.P95 != 95*time.Millisecond {
+		t.Fatalf("P95 = %s, want 95ms", summary.P95)
+	}
+	if summary.P99 != 99*time.Millisecond {
+		t.Fatalf("P99 = %s, want 99ms", summary.P99)
 	}
 }
 

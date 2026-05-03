@@ -16,6 +16,32 @@ performance measurements. Use the smallest layer that matches the change.
 `make test-privileged` runs the kernel and vnet integration layers together.
 Use it only on a host that already satisfies the vnet setup requirements.
 
+## Performance Goals
+
+Performance work in SideRSP protects the fast path first. Measure every change
+against the path it can interfere with, not only against aggregate throughput.
+
+Required reporting for end-to-end latency runs:
+
+- Success count and failure count
+- Average latency
+- `p50`, `p95`, and `p99` latency
+- Max latency
+- PPS for the successful responses
+
+Comparison matrix for Step 1:
+
+| Scenario | Baseline | SideRSP path | Required comparison |
+| --- | --- | --- | --- |
+| Kernel reset | host baseline loop | `tcp_reset` in BPF | `make bench`, `make test-bpf`, and vnet loop comparison |
+| User-space same-interface reply | host baseline loop | AF_XDP reply path | `make bench` packet-processing group plus vnet loop comparison |
+| User-space egress reply | same request with no egress indirection | AF_PACKET egress reply path | `make bench` real-send group with `RESPONSE_SEND_IFACE=<iface>` |
+| Analysis interference | analysis disabled | analysis export enabled on the same host profile | Compare `p95`/`p99` deltas and note whether response latency regresses |
+
+Until analysis interference has a dedicated automated benchmark, record that
+comparison as a host-level before/after run with the same traffic pattern,
+queue layout, and attach mode.
+
 ## Test Environment
 
 | Item | Value |
@@ -58,6 +84,10 @@ tests and microbenchmarks.
 
 `make bench-vnet` creates a fixed `bridge + veth + netns` topology and then
 runs the vnet latency check plus the end-to-end packet benchmarks.
+
+`make test-vnet` logs `avg`, `min`, `p50`, `p95`, `p99`, `max`, and `count`
+for each loop scenario. Keep those values with the corresponding `BENCHTIME`,
+`VNET_SAMPLES`, attach mode, queue layout, and egress mode when comparing runs.
 
 ## Benchmark Scenarios
 
