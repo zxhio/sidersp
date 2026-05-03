@@ -64,6 +64,7 @@ func BenchmarkBPFKernelTCPReset(b *testing.B) {
 
 func requireBPFBenchmarkEnv(b *testing.B) {
 	b.Helper()
+	// This is the kernel microbenchmark layer, not a default correctness check.
 	if testing.Short() {
 		b.Skip("skip benchmark in short mode")
 	}

@@ -1,4 +1,20 @@
-# Benchmark and Hotspot Analysis
+# Test Layers and Benchmarks
+
+This document separates correctness checks, privileged integration paths, and
+performance measurements. Use the smallest layer that matches the change.
+
+## Execution Layers
+
+| Layer | Command | Scope | Requirements |
+| --- | --- | --- | --- |
+| Correctness | `make test` | Default Go correctness checks across packages. Privileged tests stay skipped unless their env gate is enabled. | Linux build deps for `go generate ./internal/dataplane` |
+| Kernel integration | `make test-bpf` | Dataplane BPF integration tests under `internal/dataplane/` | Linux, root or matching capabilities, `SIDERSP_RUN_BPF_TESTS=1` |
+| VNET integration | `sudo make test-vnet` | End-to-end vnet latency matrix under `internal/vnetbench/` | Linux, root, `SIDERSP_RUN_VNET_BENCH=1`, prepared netns/bridge/veth env |
+| Microbenchmarks | `make bench` | Kernel dataplane microbenchmarks plus userspace build/execute/send benchmarks | Benchmark env vars as needed |
+| End-to-end performance | `sudo make bench-vnet` | VNET-backed latency and throughput loops | Linux, root, prepared vnet env |
+
+`make test-privileged` runs the kernel and vnet integration layers together.
+Use it only on a host that already satisfies the vnet setup requirements.
 
 ## Test Environment
 
@@ -13,6 +29,11 @@
 ## Entry Points
 
 ```bash
+# correctness
+make test
+make test-bpf
+sudo make test-vnet
+
 # pure benchmark aggregation
 make bench
 
@@ -20,7 +41,16 @@ make bench
 sudo make bench-vnet
 ```
 
-`make bench` runs three groups in sequence:
+`make test` is the default correctness layer. It keeps normal package tests in
+one entry point and relies on env-gated skips for host-specific paths.
+
+`make test-bpf` isolates privileged dataplane correctness from the rest of the
+Go suite.
+
+`make test-vnet` isolates the vnet-backed integration chain from both unit-ish
+tests and microbenchmarks.
+
+`make bench` runs three performance groups in sequence:
 
 - kernel `tcp_reset`
 - packet build and packet processing

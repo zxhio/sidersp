@@ -59,6 +59,7 @@ func BenchmarkExecuteTCPSynAckAFPacketSend(b *testing.B) {
 
 func requireAFPacketBenchmarkEnv(b *testing.B) {
 	b.Helper()
+	// This is a real-send benchmark layer for user-space TX, not a default test path.
 	if testing.Short() {
 		b.Skip("skip AF_PACKET benchmark in short mode")
 	}

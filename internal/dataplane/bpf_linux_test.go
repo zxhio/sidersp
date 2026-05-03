@@ -31,7 +31,7 @@ const (
 // Environment gating
 // ---------------------------------------------------------------------------
 
-// requireBPFTestEnv skips the test unless SIDERSP_RUN_BPF_TESTS=1.
+// requireBPFTestEnv gates the privileged kernel integration layer.
 // BPF kernel tests need Linux + root/CAP_BPF and the XDP object compiled.
 func requireBPFTestEnv(t *testing.T) {
 	t.Helper()

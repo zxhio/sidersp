@@ -572,6 +572,7 @@ func requireVnetBenchEnv(tb testingTB) {
 	if testing.Short() {
 		tb.Skipf("skip loop benchmark in short mode")
 	}
+	// This gates the vnet-backed integration and end-to-end performance layer.
 	if os.Getenv(envRunVnetBench) != "1" {
 		tb.Skipf("set %s=1 to run vnet benchmark tests", envRunVnetBench)
 	}
