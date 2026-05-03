@@ -228,6 +228,9 @@ egress:
 response:
   result_buffer_size: 2048
 
+analysis:
+  interface: eth2
+
 xsk:
   enabled: true
   queues: [0, 1]
@@ -252,6 +255,9 @@ console:
 	}
 	if cfg.Response.ResultBufferSize != 2048 {
 		t.Fatalf("Response.ResultBufferSize = %d, want 2048", cfg.Response.ResultBufferSize)
+	}
+	if cfg.Analysis.Interface != "eth2" {
+		t.Fatalf("Analysis.Interface = %q, want %q", cfg.Analysis.Interface, "eth2")
 	}
 	if cfg.Egress.Interface != "eth1" ||
 		normalizeVLANMode(cfg.Egress.VLANMode) != "access" ||
@@ -585,6 +591,31 @@ console:
 	}
 	if !strings.Contains(err.Error(), `response: result_buffer_size must be >= 0`) {
 		t.Fatalf("Load() error = %q, want response result_buffer_size validation", err)
+	}
+}
+
+func TestLoadRejectsAnalysisInterfaceWithoutXSK(t *testing.T) {
+	t.Parallel()
+
+	path := writeConfigFile(t, `controlplane:
+  rules_path: configs/rules.example.yaml
+
+dataplane:
+  interface: eth0
+
+analysis:
+  interface: eth2
+
+console:
+  listen_addr: 127.0.0.1:8080
+`)
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load() error = nil, want analysis validation error")
+	}
+	if !strings.Contains(err.Error(), `analysis: interface requires xsk.enabled=true`) {
+		t.Fatalf("Load() error = %q, want analysis interface validation", err)
 	}
 }
 

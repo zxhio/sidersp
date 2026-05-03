@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 
+	"sidersp/internal/afpacket"
 	"sidersp/internal/model"
 	"sidersp/internal/rule"
 	"sidersp/internal/xsk"
@@ -78,7 +79,7 @@ func openAFPacketFrameSender(ifaceName string) (frameSender, error) {
 	if ifaceName == "" {
 		return nil, nil
 	}
-	frameSender, err := newAFPacketFrameSender(ifaceName)
+	frameSender, err := afpacket.New(ifaceName)
 	if err != nil {
 		return nil, fmt.Errorf("create af_packet sender: %w", err)
 	}

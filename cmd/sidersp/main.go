@@ -77,12 +77,22 @@ func main() {
 		}()
 	}
 
+	analysisOpts, err := analysis.NewOptions(cfg.Analysis, cfg.XSK)
+	if err != nil {
+		logs.App().WithError(err).Fatal("Fail to build analysis options")
+	}
+
 	var analysisRuntime *analysis.Runtime
-	if cfg.XSK.Enabled {
-		analysisRuntime, err = analysis.NewRuntime(analysis.Options{})
+	if analysisOpts.Enabled {
+		analysisRuntime, err = analysis.NewRuntime(analysisOpts)
 		if err != nil {
 			logs.App().WithError(err).Fatal("Fail to build analysis runtime")
 		}
+		defer func() {
+			if err := analysisRuntime.Close(); err != nil {
+				logs.App().WithError(err).Error("Fail to close analysis runtime")
+			}
+		}()
 	}
 
 	dpOpts, err := dataplane.NewOptions(cfg.Dataplane, cfg.Egress, cfg.XSK)

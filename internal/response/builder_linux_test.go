@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/google/gopacket/layers"
+
+	"sidersp/internal/afpacket"
 )
 
 const defaultAFPacketBenchmarkInterface = "lo"
@@ -19,9 +21,9 @@ func BenchmarkExecuteTCPSynAckAFPacketSend(b *testing.B) {
 		ifaceName = defaultAFPacketBenchmarkInterface
 	}
 
-	out, err := newAFPacketFrameSender(ifaceName)
+	out, err := afpacket.New(ifaceName)
 	if err != nil {
-		b.Fatalf("newAFPacketFrameSender(%q) error = %v", ifaceName, err)
+		b.Fatalf("afpacket.New(%q) error = %v", ifaceName, err)
 	}
 	defer func() {
 		if err := out.Close(); err != nil {

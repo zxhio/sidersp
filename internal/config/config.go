@@ -17,6 +17,7 @@ type Config struct {
 	Egress       EgressConfig       `yaml:"egress"`
 	ControlPlane ControlPlaneConfig `yaml:"controlplane"`
 	Console      ConsoleConfig      `yaml:"console"`
+	Analysis     AnalysisConfig     `yaml:"analysis"`
 	Response     ResponseConfig     `yaml:"response"`
 	XSK          XSKConfig          `yaml:"xsk"`
 	Logging      LoggingConfig      `yaml:"logging"`
@@ -46,6 +47,10 @@ type EgressConfig struct {
 
 type ResponseConfig struct {
 	ResultBufferSize int `yaml:"result_buffer_size"`
+}
+
+type AnalysisConfig struct {
+	Interface string `yaml:"interface"`
 }
 
 type XSKConfig struct {
@@ -144,6 +149,9 @@ func (c Config) validate() error {
 	if err := c.XSK.validate(); err != nil {
 		return fmt.Errorf("xsk: %w", err)
 	}
+	if err := c.Analysis.validate(c.XSK); err != nil {
+		return fmt.Errorf("analysis: %w", err)
+	}
 	if err := c.Logging.validate(); err != nil {
 		return fmt.Errorf("logging: %w", err)
 	}
@@ -204,6 +212,16 @@ func (c XSKConfig) validate() error {
 func (c ResponseConfig) validate() error {
 	if c.ResultBufferSize < 0 {
 		return fmt.Errorf("result_buffer_size must be >= 0")
+	}
+	return nil
+}
+
+func (c AnalysisConfig) validate(xskCfg XSKConfig) error {
+	if strings.TrimSpace(c.Interface) == "" {
+		return nil
+	}
+	if !xskCfg.Enabled {
+		return fmt.Errorf("interface requires xsk.enabled=true")
 	}
 	return nil
 }

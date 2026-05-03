@@ -8,10 +8,32 @@ import (
 	"sidersp/internal/xsk"
 )
 
+type stubPacketSender struct {
+	sendCalls  int
+	closeCalls int
+	frames     [][]byte
+	sendErr    error
+	sendHook   func([]byte)
+}
+
+func (s *stubPacketSender) SendFrame(_ context.Context, frame []byte) error {
+	s.sendCalls++
+	s.frames = append(s.frames, append([]byte(nil), frame...))
+	if s.sendHook != nil {
+		s.sendHook(frame)
+	}
+	return s.sendErr
+}
+
+func (s *stubPacketSender) Close() error {
+	s.closeCalls++
+	return nil
+}
+
 func TestRuntimeSubmitRejectsFullQueue(t *testing.T) {
 	t.Parallel()
 
-	runtime, err := NewRuntime(Options{QueueSize: 1})
+	runtime, err := NewRuntime(Options{QueueSize: 1, sender: &stubPacketSender{}})
 	if err != nil {
 		t.Fatalf("NewRuntime() error = %v", err)
 	}
@@ -28,7 +50,7 @@ func TestRuntimeSubmitRejectsFullQueue(t *testing.T) {
 func TestRuntimeRunStopsOnCancel(t *testing.T) {
 	t.Parallel()
 
-	runtime, err := NewRuntime(Options{})
+	runtime, err := NewRuntime(Options{sender: &stubPacketSender{}})
 	if err != nil {
 		t.Fatalf("NewRuntime() error = %v", err)
 	}
@@ -37,5 +59,64 @@ func TestRuntimeRunStopsOnCancel(t *testing.T) {
 
 	if err := runtime.Run(ctx); err != nil {
 		t.Fatalf("Run() error = %v", err)
+	}
+}
+
+func TestNewRuntimeUsesDefaultQueueSize(t *testing.T) {
+	t.Parallel()
+
+	runtime, err := NewRuntime(Options{sender: &stubPacketSender{}})
+	if err != nil {
+		t.Fatalf("NewRuntime() error = %v", err)
+	}
+	if cap(runtime.queue) != defaultQueueSize {
+		t.Fatalf("queue cap = %d, want %d", cap(runtime.queue), defaultQueueSize)
+	}
+}
+
+func TestRuntimeRunExportsFrames(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	sender := &stubPacketSender{
+		sendHook: func(_ []byte) {
+			cancel()
+		},
+	}
+	runtime, err := NewRuntime(Options{sender: sender})
+	if err != nil {
+		t.Fatalf("NewRuntime() error = %v", err)
+	}
+	if err := runtime.SubmitXSK(ctx, xsk.Envelope{
+		QueueID: 1,
+		Frame:   []byte{1, 2, 3, 4},
+	}); err != nil {
+		t.Fatalf("SubmitXSK() error = %v", err)
+	}
+
+	if err := runtime.Run(ctx); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if sender.sendCalls != 1 {
+		t.Fatalf("send calls = %d, want 1", sender.sendCalls)
+	}
+	if len(sender.frames) != 1 || len(sender.frames[0]) != 4 {
+		t.Fatalf("frames = %+v, want one exported frame", sender.frames)
+	}
+}
+
+func TestRuntimeCloseClosesSender(t *testing.T) {
+	t.Parallel()
+
+	sender := &stubPacketSender{}
+	runtime, err := NewRuntime(Options{sender: sender})
+	if err != nil {
+		t.Fatalf("NewRuntime() error = %v", err)
+	}
+	if err := runtime.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if sender.closeCalls != 1 {
+		t.Fatalf("close calls = %d, want 1", sender.closeCalls)
 	}
 }

@@ -1,4 +1,4 @@
-package response
+package afpacket
 
 import (
 	"context"
@@ -12,14 +12,14 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-type afpacketFrameSender struct {
+type Sender struct {
 	ifindex int
 	frameFD int
 	ipv4FD  int
 	mu      sync.Mutex
 }
 
-func newAFPacketFrameSender(ifaceName string) (*afpacketFrameSender, error) {
+func New(ifaceName string) (*Sender, error) {
 	iface, err := net.InterfaceByName(ifaceName)
 	if err != nil {
 		return nil, fmt.Errorf("lookup af_packet interface %s: %w", ifaceName, err)
@@ -46,26 +46,26 @@ func newAFPacketFrameSender(ifaceName string) (*afpacketFrameSender, error) {
 		return nil, fmt.Errorf("enable raw ipv4 hdrincl on %s: %w", ifaceName, err)
 	}
 
-	return &afpacketFrameSender{
+	return &Sender{
 		ifindex: iface.Index,
 		frameFD: fd,
 		ipv4FD:  ipv4FD,
 	}, nil
 }
 
-func (s *afpacketFrameSender) SendFrame(ctx context.Context, frame []byte) error {
+func (s *Sender) SendFrame(ctx context.Context, frame []byte) error {
 	return s.send(ctx, frame)
 }
 
-func (s *afpacketFrameSender) SendBorrowedFrame(ctx context.Context, frame []byte) error {
+func (s *Sender) SendBorrowedFrame(ctx context.Context, frame []byte) error {
 	return s.send(ctx, frame)
 }
 
-func (s *afpacketFrameSender) SendBorrowedIPv4Packet(ctx context.Context, packet []byte) error {
+func (s *Sender) SendBorrowedIPv4Packet(ctx context.Context, packet []byte) error {
 	return s.sendIPv4Packet(ctx, packet)
 }
 
-func (s *afpacketFrameSender) send(ctx context.Context, frame []byte) error {
+func (s *Sender) send(ctx context.Context, frame []byte) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -82,7 +82,7 @@ func (s *afpacketFrameSender) send(ctx context.Context, frame []byte) error {
 	return nil
 }
 
-func (s *afpacketFrameSender) sendIPv4Packet(ctx context.Context, packet []byte) error {
+func (s *Sender) sendIPv4Packet(ctx context.Context, packet []byte) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -107,7 +107,7 @@ func (s *afpacketFrameSender) sendIPv4Packet(ctx context.Context, packet []byte)
 	return nil
 }
 
-func (s *afpacketFrameSender) Close() error {
+func (s *Sender) Close() error {
 	if s == nil {
 		return nil
 	}
