@@ -141,6 +141,27 @@ source hardware address settings before starting the service. AF_XDP setup
 failures will fail service startup and systemd will restart according to the
 unit policy.
 
+## Analysis Export Notes
+
+The default example config keeps `analysis.interface` empty. Set it to one
+external analysis interface only when XSK is enabled and the host should export
+selected XSK packets to downstream tooling such as Suricata:
+
+```yaml
+analysis:
+  interface: eth2
+
+xsk:
+  enabled: true
+```
+
+Analysis export is best-effort. Export failures are logged locally and must not
+block dataplane progress or response execution.
+
+If `analysis.interface` is set while `xsk.enabled` is `false`, config
+validation fails and the service does not start. Startup also fails if the
+configured analysis interface cannot be opened.
+
 ## Shared Response TX Egress
 
 For a pure switch mirror/SPAN destination port, do not rely on same-port

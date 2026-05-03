@@ -140,8 +140,8 @@ Does not own:
 
 Module for external analysis export.
 
-Current implementation status: placeholder queue handling exists. External
-packet export is not implemented yet.
+Current implementation status: selected XSK packets are exported best-effort to
+one configured analysis interface.
 
 Owns:
 

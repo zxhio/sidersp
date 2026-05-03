@@ -65,9 +65,11 @@ func TestDispatcherIgnoresAnalysisError(t *testing.T) {
 	t.Parallel()
 
 	wantErr := errors.New("response failed")
+	analysis := &stubAnalysisSubmitter{err: errors.New("queue full")}
+	response := &stubResponseConsumer{err: wantErr}
 	dispatcher, err := NewDispatcher(Consumers{
-		Response: &stubResponseConsumer{err: wantErr},
-		Analysis: &stubAnalysisSubmitter{err: errors.New("queue full")},
+		Response: response,
+		Analysis: analysis,
 	})
 	if err != nil {
 		t.Fatalf("NewDispatcher() error = %v", err)
@@ -78,6 +80,12 @@ func TestDispatcherIgnoresAnalysisError(t *testing.T) {
 	err = dispatcher.Dispatch(context.Background(), 0, socket, frame)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("Dispatch() error = %v, want %v", err, wantErr)
+	}
+	if len(response.envelopes) != 1 {
+		t.Fatalf("response envelopes = %d, want 1", len(response.envelopes))
+	}
+	if len(analysis.envelopes) != 1 {
+		t.Fatalf("analysis envelopes = %d, want 1", len(analysis.envelopes))
 	}
 }
 
