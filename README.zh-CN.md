@@ -169,14 +169,13 @@ Web 规则页遵循 [specs/RULES.md](specs/RULES.md) 的当前契约，编辑字
 是替代上层平台的统一规则控制台。
 
 页面支持的动作值为 `none`、`alert`、`tcp_reset`、
-`icmp_port_unreachable`、`udp_echo_reply`、`dns_refused`、
-`icmp_echo_reply`、`arp_reply` 和 `tcp_syn_ack`。前端只做基础可用性校验，
-后端校验仍然是最终依据。
+`icmp_port_unreachable`、`icmp_host_unreachable`、
+`icmp_admin_prohibited`、`udp_echo_reply`、`dns_refused`、
+`dns_sinkhole`、`icmp_echo_reply`、`arp_reply` 和 `tcp_syn_ack`。
+前端只做基础可用性校验，后端校验仍然是最终依据。
 
 暂不包含：
 
-- 完整 AF_XDP 用户态 TX worker
-- 单网口外部分析导出实现
 - 面向协议的 HTTP 回复族和 HTTPS 确认后的用户态 `tcp_reset`
 - 持久化数据库存储
 - 分布式部署或集群能力

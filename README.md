@@ -173,14 +173,13 @@ The built-in rule page is a debug and validation surface for this service. It
 is intended to integrate with, not replace, an upstream platform UI.
 
 Supported actions in the UI are `none`, `alert`, `tcp_reset`,
-`icmp_port_unreachable`, `udp_echo_reply`, `dns_refused`,
+`icmp_port_unreachable`, `icmp_host_unreachable`,
+`icmp_admin_prohibited`, `udp_echo_reply`, `dns_refused`, `dns_sinkhole`,
 `icmp_echo_reply`, `arp_reply`, and `tcp_syn_ack`. The UI performs basic
 compatibility checks, but backend validation remains authoritative.
 
 Not included yet:
 
-- Full AF_XDP user-space TX worker
-- One-interface external analysis export implementation
 - Protocol-aware HTTP reply family and HTTPS-confirmed user-space `tcp_reset`
 - Persistent database storage
 - Distributed deployment or clustering

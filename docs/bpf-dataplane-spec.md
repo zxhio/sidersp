@@ -53,9 +53,11 @@ The program returns one of three outcomes:
 | `XDP_REDIRECT` | Packet was submitted to XSK or to a configured `tcp_reset` egress interface |
 
 Response behavior is fixed by action code plus local runtime configuration.
-`tcp_reset` is built in BPF and can use same-interface `XDP_TX` or configured
-egress-interface redirect. ICMP echo reply, ARP reply, and TCP SYN-ACK spoof
-require full original-packet context and are handled through XSK.
+`tcp_reset`, `icmp_port_unreachable`, `icmp_host_unreachable`, and
+`icmp_admin_prohibited` are built in BPF and can use same-interface `XDP_TX`
+or configured egress-interface redirect. `icmp_echo_reply`, `arp_reply`,
+`tcp_syn_ack`, `udp_echo_reply`, `dns_refused`, and `dns_sinkhole` require
+full original-packet context and are handled through XSK.
 
 ## 3. Rule Matching Semantics
 
@@ -310,16 +312,23 @@ Values are `per-CPU uint64` — sum across CPUs for total.
 | ACTION_NONE | 0 | active | No response |
 | ACTION_ALERT | 1 | active | Observation only |
 | ACTION_TCP_RESET | 2 | active | Build TCP RST in BPF and send by configured kernel TX mode |
-| ACTION_ICMP_ECHO_REPLY | 3 | BPF redirect active, worker planned | Submit original packet to XSK for user-space TX |
-| ACTION_ARP_REPLY | 4 | BPF redirect active, worker planned | Submit original packet to XSK for user-space TX |
-| ACTION_TCP_SYN_ACK | 5 | BPF redirect active, worker planned | Submit original packet to XSK for user-space TX |
+| ACTION_ICMP_ECHO_REPLY | 3 | active | Submit original packet to XSK for user-space TX |
+| ACTION_ARP_REPLY | 4 | active | Submit original packet to XSK for user-space TX |
+| ACTION_TCP_SYN_ACK | 5 | active | Submit original packet to XSK for user-space TX |
+| ACTION_ICMP_PORT_UNREACHABLE | 6 | active | Build ICMP destination-unreachable / port-unreachable in BPF and send by configured kernel TX mode |
+| ACTION_UDP_ECHO_REPLY | 7 | active | Submit original packet to XSK for user-space TX |
+| ACTION_DNS_REFUSED | 8 | active | Submit original packet to XSK for user-space TX |
+| ACTION_ICMP_HOST_UNREACHABLE | 9 | active | Build ICMP destination-unreachable / host-unreachable in BPF and send by configured kernel TX mode |
+| ACTION_ICMP_ADMIN_PROHIBITED | 10 | active | Build ICMP destination-unreachable / administratively-prohibited in BPF and send by configured kernel TX mode |
+| ACTION_DNS_SINKHOLE | 11 | active | Submit original packet to XSK for user-space TX |
 
 Rule sync rules:
 
 - The control plane validates action names; there is no separate path field.
 - The dataplane sync path compiles action names into numeric action codes.
-- `tcp_reset` uses local runtime config to choose same-interface `XDP_TX` or
-  egress-interface redirect; spoof actions use XSK and user-space TX.
+- `tcp_reset`, `icmp_port_unreachable`, `icmp_host_unreachable`, and
+  `icmp_admin_prohibited` use local runtime config to choose same-interface
+  `XDP_TX` or egress-interface redirect; XSK actions use XSK and user-space TX.
 - Rule YAML uses snake_case action strings; BPF maps use numeric action codes.
 
 ## 7. TCP Reset Kernel TX
@@ -366,9 +375,9 @@ Sequence/acknowledgement rule:
 
 ## 8. XSK TX Response
 
-Spoof actions do not require expanding ringbuf events with packet fields. The
-BPF path redirects the original packet to AF_XDP; full user-space TX response
-construction is planned behind the XSK worker boundary:
+XSK actions do not require expanding ringbuf events with packet fields. The
+BPF path redirects the original packet to AF_XDP; current user-space TX
+response construction happens behind the XSK worker boundary:
 
 ```text
 BPF match -> write xsk_meta into XDP metadata -> XSK RX
