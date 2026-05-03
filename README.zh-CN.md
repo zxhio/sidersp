@@ -14,7 +14,7 @@
 - 内核态 TX 响应支持同口 XDP_TX 或配置的独立出口网卡
 - XSK 重定向通道，用于用户态 spoof 响应
 - ringbuf 观测事件输出
-- 基础状态、规则和统计 Web 管理页
+- 面向调试的状态、规则和统计 Web 页面
 - 规则页与 `specs/RULES.md` 对齐，支持 `protocol`、VLAN/IP/端口过滤、`tcp_flags`、`icmp.type`、`arp.operation` 和 snake_case 动作
 
 ## 架构
@@ -27,7 +27,7 @@ flowchart LR
             tx["同口 / 出口网卡"]
         end
 
-        subgraph xsk["xsk-worker planned"]
+        subgraph xsk["xsk worker"]
             redirect["XDP_REDIRECT"]
         end
     end
@@ -42,9 +42,12 @@ flowchart LR
 
 - `dataplane`：XDP 包解析、规则匹配、内核态 TX action 执行、事件输出和 XSK redirect。
 - `controlplane`：规则/配置加载、运行状态维护、统计聚合和流程协调。
-- `console` / `web`：REST API 和轻量管理页面。
+- `console` / `web`：REST API 和面向本地验证、联调的轻量调试页面。
 - `config`、`rule` 和 `model`：当前模块共享的本地配置、规则 schema 和数据模型。
-- `specs/`：模块、规则、事件和响应语义的系统合约。
+- `specs/`：模块、规则、分析导出、事件和响应语义的系统合约。
+
+SideRSP 的定位是更大平台中的一个服务。内置 Web 页面主要用于本地调试、
+集成联调和契约校验，不作为上层平台的主控制台。
 
 ## 运行要求
 
@@ -151,8 +154,9 @@ skills/     本地 agent 指引
 - 镜像流量入口处理
 - 基于规则的分类和动作选择
 - 主动响应执行路径
+- 单网口外部分析导出
 - 事件和统计可视化
-- 基础管理页面
+- 面向调试的管理页面
 
 ## 规则页契约
 
@@ -160,6 +164,9 @@ Web 规则页遵循 [specs/RULES.md](specs/RULES.md) 的当前契约，编辑字
 `protocol`、`vlans`、`src_prefixes`、`dst_prefixes`、`src_ports`、
 `dst_ports`、`tcp_flags`、`icmp.type`、`arp.operation` 和
 `response.action`。
+
+内置规则页是这个服务自己的调试和校验界面，定位是辅助接入上层平台，而不
+是替代上层平台的统一规则控制台。
 
 页面支持的动作值为 `none`、`alert`、`tcp_reset`、
 `icmp_port_unreachable`、`udp_echo_reply`、`dns_refused`、
@@ -169,7 +176,8 @@ Web 规则页遵循 [specs/RULES.md](specs/RULES.md) 的当前契约，编辑字
 暂不包含：
 
 - 完整 AF_XDP 用户态 TX worker
-- 深度分析后端接入
+- 单网口外部分析导出实现
+- 面向协议的 HTTP 回复族和 HTTPS 确认后的用户态 `tcp_reset`
 - 持久化数据库存储
 - 分布式部署或集群能力
-- 生产级策略编排
+- 独立的平台级控制台

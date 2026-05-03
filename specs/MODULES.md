@@ -8,13 +8,13 @@ This document defines the system module contract. For the short agent-facing sum
 |--------|------|--------|----------------|
 | `dataplane` | `internal/dataplane/`, `bpf/` | active | Fast-path packet parsing, classification, rule matching, XDP verdicts, kernel TX, XSK redirect, event output |
 | `controlplane` | `internal/controlplane/` | active | Rule loading, rule validation, runtime state, statistics aggregation, workflow orchestration |
-| `console` | `internal/console/`, `web/` | active | REST API, status display, statistics view, rule CRUD |
+| `console` | `internal/console/`, `web/` | active | REST API, local debug UI, status display, statistics view, rule CRUD |
 | `config` | `internal/config/` | active | Local configuration loading and validation |
 | `logging` | `internal/logs/` | active | Runtime log output setup, file rotation, and log-level management |
 | `model` | `internal/model/` | active | Shared data models used across modules |
 | `rule` | `internal/rule/` | active | Shared rule schema used by controlplane, console, and dataplane compilation |
 | `xsk` | `internal/xsk/` | active | AF_XDP transport, XSK metadata decode, queue workers, and XSK consumer dispatch |
-| `analysis` | `internal/analysis/` | active | Deep analysis task submission and result ingestion |
+| `analysis` | `internal/analysis/` | active | Selected packet export to one external analysis interface |
 | `response` | `internal/response/` | active | User-space response execution and result feedback |
 
 Deployment artifacts under `deploy/`, `scripts/`, and deployment documents are
@@ -48,6 +48,7 @@ Hard rules:
 - `analysis` must not manage rules or execute responses
 - `response` must not decide whether a response should happen
 - `logging` must not perform rule matching, analysis decisions, response decisions, or pipeline orchestration
+- `web` is a local debug and integration aid; it must not evolve into the primary upstream platform control plane for this service
 
 ## Dataplane
 
@@ -119,6 +120,7 @@ Responsible for management and visibility.
 Owns:
 
 - REST API
+- Local debug and validation UI
 - Status display
 - Rule CRUD
 - Statistics view
@@ -132,23 +134,32 @@ Does not own:
 - Analysis decisions
 - Response decisions
 - Core pipeline orchestration
+- Upstream multi-service platform control
 
 ## Analysis
 
-Module for deep analysis integration.
+Module for external analysis export.
+
+Current implementation status: placeholder queue handling exists. External
+packet export is not implemented yet.
 
 Owns:
 
-- Analysis task submission
 - XSK analysis-envelope consumption
-- Analysis input/output normalization
-- Analysis result ingestion
+- Original-packet normalization for export
+- Best-effort packet export to one configured analysis interface
+- Export failure accounting and feedback
 
 Does not own:
 
 - Front-path classification
 - Rule management
 - Response execution
+- Downstream Suricata, Joy, or any other external analysis lifecycle
+- Analysis result storage or ingestion
+
+The analysis module boundary stops at packet export. Downstream processing on
+that interface belongs to other modules or external systems.
 
 ## Response
 
@@ -158,7 +169,7 @@ Current implementation status: XSK response consumer dispatch, response packet
 builders, response execution, bounded in-memory response result buffering, and
 shared TX backend selection exist. Same-interface builders still reject
 VLAN-tagged frames and TCP SYN payloads until those response semantics are
-implemented. Management-plane response result streaming is still planned.
+implemented.
 
 Owns:
 
@@ -177,6 +188,7 @@ Does not own:
 
 ## Contract Documents
 
+- Analysis export semantics: `ANALYSIS.md`
 - Rule semantics: `RULES.md`
 - Event structure: `EVENTS.md`
 - Response action model: `RESPONSES.md`

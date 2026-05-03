@@ -99,7 +99,12 @@ Parameter schema:
 | `dns_refused` | optional `rcode` string: `refused`, `nxdomain`, or `servfail`; omitted defaults to `refused` |
 | `dns_sinkhole` | required `family` string: `ipv4`, `ipv6`, or `dual`; `answers_v4` is required for `ipv4` and `dual`; `answers_v6` is required for `ipv6` and `dual`; optional `ttl` integer in `0..2147483647`, omitted defaults to `60` |
 
-Execution path is not exposed as a rule field. The control plane validates `response.action`; dataplane compilation encodes it into the numeric action code. Dataplane and response modules own the configured execution path for each action. For kernel TX actions such as `tcp_reset` and `icmp_port_unreachable`, local runtime config selects same-interface `XDP_TX` or egress-interface redirect for all rules.
+Execution path is not exposed as a rule field. The control plane validates
+`response.action`; dataplane compilation encodes it into the numeric action
+code. Dataplane and response modules own the configured execution path for each
+action. For kernel TX actions such as `tcp_reset` and `icmp_port_unreachable`,
+local runtime config selects same-interface `XDP_TX` or egress-interface
+redirect for the rules that stay on the kernel-TX path.
 
 ## Actions
 
@@ -206,6 +211,7 @@ Final dataplane match check:
 
 ## Related Contracts
 
+- Analysis export boundary: `ANALYSIS.md`
 - Module boundaries: `MODULES.md`
 - Event structure: `EVENTS.md`
 - Response execution: `RESPONSES.md`

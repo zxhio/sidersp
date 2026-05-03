@@ -14,7 +14,7 @@ Lightweight side-path traffic pre-decision and active response service.
 - Kernel TX responses via same-interface XDP_TX or a configured egress interface
 - XSK redirect path for user-space spoof responses
 - Ringbuf observation event output
-- Basic Web console for status, rules, and statistics
+- Debug-oriented Web console for status, rules, and statistics
 - Rule UI aligned with `specs/RULES.md`, including `protocol`, VLAN/IP/port filters, `tcp_flags`, `icmp.type`, `arp.operation`, and snake_case response actions
 
 ## Architecture
@@ -27,7 +27,7 @@ flowchart LR
             tx["same interface / egress interface"]
         end
 
-        subgraph xsk["xsk-worker planned"]
+        subgraph xsk["xsk worker"]
             redirect["XDP_REDIRECT"]
         end
     end
@@ -42,9 +42,13 @@ flowchart LR
 
 - `dataplane`: XDP packet parsing, rule matching, kernel TX action execution, event output, and XSK redirect.
 - `controlplane`: rule/config loading, runtime state, statistics aggregation, and coordination.
-- `console` / `web`: REST API and lightweight management UI.
+- `console` / `web`: REST API and lightweight debug UI for local validation and integration.
 - `config`, `rule`, and `model`: shared local configuration, rule schema, and data models used by the active modules.
-- `specs/`: system contracts for modules, rules, events, and response semantics.
+- `specs/`: system contracts for modules, rules, analysis export, events, and response semantics.
+
+SideRSP is intended to run as a service inside a larger platform. The built-in
+Web UI is for local debugging, integration testing, and contract validation; it
+is not the primary upstream platform control plane.
 
 ## Requirements
 
@@ -154,8 +158,9 @@ Current focus:
 - Mirrored-traffic ingress handling
 - Rule-driven classification and action selection
 - Active response execution paths
+- One-interface external analysis export
 - Event/statistics visibility
-- Basic management UI
+- Debug-oriented management UI
 
 ## Rule Console
 
@@ -163,6 +168,9 @@ The Web rule page follows the current contract in [specs/RULES.md](specs/RULES.m
 It edits `protocol`, `vlans`, `src_prefixes`, `dst_prefixes`, `src_ports`,
 `dst_ports`, `tcp_flags`, `icmp.type`, `arp.operation`, and
 `response.action`.
+
+The built-in rule page is a debug and validation surface for this service. It
+is intended to integrate with, not replace, an upstream platform UI.
 
 Supported actions in the UI are `none`, `alert`, `tcp_reset`,
 `icmp_port_unreachable`, `udp_echo_reply`, `dns_refused`,
@@ -172,7 +180,8 @@ compatibility checks, but backend validation remains authoritative.
 Not included yet:
 
 - Full AF_XDP user-space TX worker
-- Deep analysis backend integration
+- One-interface external analysis export implementation
+- Protocol-aware HTTP reply family and HTTPS-confirmed user-space `tcp_reset`
 - Persistent database storage
 - Distributed deployment or clustering
-- Production-grade policy orchestration
+- Standalone platform control plane

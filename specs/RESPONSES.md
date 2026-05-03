@@ -210,8 +210,6 @@ Result values:
 
 The in-memory result buffer is a local process buffer. It stores the newest
 records up to its configured capacity and evicts the oldest records when full.
-Durable response result storage and management-plane query APIs are planned
-separate changes.
 
 ## Response TX Stats
 
