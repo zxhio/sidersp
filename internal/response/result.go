@@ -7,6 +7,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"sidersp/internal/logs"
+	"sidersp/internal/rule"
 )
 
 type ResultStatus string
@@ -38,22 +39,7 @@ type ResponseResult struct {
 }
 
 func ResponseActionName(action uint16) (string, bool) {
-	switch action {
-	case ActionICMPEchoReply:
-		return "icmp_echo_reply", true
-	case ActionARPReply:
-		return "arp_reply", true
-	case ActionTCPSynAck:
-		return "tcp_syn_ack", true
-	case ActionUDPEchoReply:
-		return "udp_echo_reply", true
-	case ActionDNSRefused:
-		return "dns_refused", true
-	case ActionDNSSinkhole:
-		return "dns_sinkhole", true
-	default:
-		return "", false
-	}
+	return rule.UserSpaceResponseActionName(action)
 }
 
 type ResultBuffer struct {
@@ -105,7 +91,7 @@ func validateResult(result ResponseResult) error {
 	if result.Action == "" {
 		return fmt.Errorf("record response result: action is required")
 	}
-	if !isResponseAction(result.Action) {
+	if !rule.IsUserSpaceResponseActionName(result.Action) {
 		return fmt.Errorf("record response result: unsupported action %q", result.Action)
 	}
 	switch result.Result {
@@ -122,15 +108,6 @@ func validateResult(result ResponseResult) error {
 		return fmt.Errorf("record response result: rx_queue %d out of range", result.RXQueue)
 	}
 	return nil
-}
-
-func isResponseAction(action string) bool {
-	switch action {
-	case "icmp_echo_reply", "arp_reply", "tcp_syn_ack", "udp_echo_reply", "dns_refused", "dns_sinkhole":
-		return true
-	default:
-		return false
-	}
 }
 
 func (b *ResultBuffer) recordTrusted(result *ResponseResult) error {

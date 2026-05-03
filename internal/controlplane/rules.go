@@ -17,21 +17,6 @@ import (
 	"sidersp/internal/rule"
 )
 
-var allowedActions = map[string]struct{}{
-	"none":                  {},
-	"alert":                 {},
-	"tcp_reset":             {},
-	"icmp_echo_reply":       {},
-	"arp_reply":             {},
-	"tcp_syn_ack":           {},
-	"icmp_port_unreachable": {},
-	"udp_echo_reply":        {},
-	"dns_refused":           {},
-	"icmp_host_unreachable": {},
-	"icmp_admin_prohibited": {},
-	"dns_sinkhole":          {},
-}
-
 var allowedProtocols = map[string]struct{}{
 	"tcp":  {},
 	"udp":  {},
@@ -200,12 +185,12 @@ func normalizeRule(r *rule.Rule) error {
 		}
 	}
 
-	action := strings.ToLower(strings.TrimSpace(r.Response.Action))
-	if action == "" {
-		return fmt.Errorf("response.action is required")
-	}
-	if _, ok := allowedActions[action]; !ok {
-		return fmt.Errorf("response.action %q is not allowed", action)
+	action, ok := rule.NormalizeActionName(r.Response.Action)
+	if !ok {
+		if strings.TrimSpace(r.Response.Action) == "" {
+			return fmt.Errorf("response.action is required")
+		}
+		return fmt.Errorf("response.action %q is not allowed", r.Response.Action)
 	}
 	r.Match.Protocol = protocol
 	if err := validateActionMatch(action, r); err != nil {
