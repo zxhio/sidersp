@@ -1,7 +1,10 @@
 # Minimal local config for the first control-plane skeleton.
+
+# Service control.
 controlplane:
   rules_path: configs/rules.example.yaml
 
+# Packet path.
 dataplane:
   interface: eth0
   attach_mode: generic
@@ -19,15 +22,6 @@ egress:
   # Values: pass, drop. Mirror-port deployments commonly use drop.
   failure_verdict: pass
 
-response:
-  # Optional: bounded in-memory response result buffer capacity. 0 uses the runtime default.
-  result_buffer_size: 1024
-
-analysis:
-  # Optional: write selected packets to one external analysis interface.
-  # Leave empty to disable analysis export.
-  interface: ""
-
 xsk:
   enabled: false
   # Optional: when omitted, the runtime uses queues [0] by default, or [0..combined_channels-1]
@@ -42,6 +36,17 @@ xsk:
     tx_ring_size: 2048
     tx_frame_reserve: 256
 
+# User-space execution.
+response:
+  # Optional: bounded in-memory response result buffer capacity. 0 uses the runtime default.
+  result_buffer_size: 1024
+
+analysis:
+  # Optional: write selected packets to one external analysis interface.
+  # Leave empty to disable analysis export.
+  interface: ""
+
+# Ops and visibility.
 logging:
   app:
     level: info

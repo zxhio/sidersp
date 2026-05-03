@@ -13,13 +13,29 @@ import (
 )
 
 type Config struct {
-	Dataplane    DataplaneConfig    `yaml:"dataplane"`
-	Egress       EgressConfig       `yaml:"egress"`
+	PacketPathConfig      `yaml:",inline"`
+	AnalysisRuntimeConfig `yaml:",inline"`
+	ResponseRuntimeConfig `yaml:",inline"`
+	ServiceConfig         `yaml:",inline"`
+}
+
+type PacketPathConfig struct {
+	Dataplane DataplaneConfig `yaml:"dataplane"`
+	Egress    EgressConfig    `yaml:"egress"`
+	XSK       XSKConfig       `yaml:"xsk"`
+}
+
+type AnalysisRuntimeConfig struct {
+	Analysis AnalysisConfig `yaml:"analysis"`
+}
+
+type ResponseRuntimeConfig struct {
+	Response ResponseConfig `yaml:"response"`
+}
+
+type ServiceConfig struct {
 	ControlPlane ControlPlaneConfig `yaml:"controlplane"`
 	Console      ConsoleConfig      `yaml:"console"`
-	Analysis     AnalysisConfig     `yaml:"analysis"`
-	Response     ResponseConfig     `yaml:"response"`
-	XSK          XSKConfig          `yaml:"xsk"`
 	Logging      LoggingConfig      `yaml:"logging"`
 }
 
@@ -116,12 +132,31 @@ func Load(path string) (Config, error) {
 }
 
 func (c *Config) applyDefaults() {
-	c.Dataplane.applyDefaults()
-	c.Console.applyDefaults()
-	c.Logging.applyDefaults()
+	c.PacketPathConfig.applyDefaults()
+	c.ServiceConfig.applyDefaults()
 }
 
 func (c Config) validate() error {
+	if err := c.PacketPathConfig.validate(); err != nil {
+		return err
+	}
+	if err := c.ResponseRuntimeConfig.validate(); err != nil {
+		return err
+	}
+	if err := c.AnalysisRuntimeConfig.validate(c.PacketPathConfig); err != nil {
+		return err
+	}
+	if err := c.ServiceConfig.validate(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *PacketPathConfig) applyDefaults() {
+	c.Dataplane.applyDefaults()
+}
+
+func (c PacketPathConfig) validate() error {
 	if strings.TrimSpace(c.Dataplane.Interface) == "" {
 		return fmt.Errorf("dataplane.interface is required")
 	}
@@ -134,6 +169,32 @@ func (c Config) validate() error {
 	if err := c.Egress.validate(); err != nil {
 		return fmt.Errorf("egress: %w", err)
 	}
+	if err := c.XSK.validate(); err != nil {
+		return fmt.Errorf("xsk: %w", err)
+	}
+	return nil
+}
+
+func (c ResponseRuntimeConfig) validate() error {
+	if err := c.Response.validate(); err != nil {
+		return fmt.Errorf("response: %w", err)
+	}
+	return nil
+}
+
+func (c AnalysisRuntimeConfig) validate(packetPathCfg PacketPathConfig) error {
+	if err := c.Analysis.validate(packetPathCfg.XSK); err != nil {
+		return fmt.Errorf("analysis: %w", err)
+	}
+	return nil
+}
+
+func (c *ServiceConfig) applyDefaults() {
+	c.Console.applyDefaults()
+	c.Logging.applyDefaults()
+}
+
+func (c ServiceConfig) validate() error {
 	if strings.TrimSpace(c.ControlPlane.RulesPath) == "" {
 		return fmt.Errorf("controlplane.rules_path is required")
 	}
@@ -143,19 +204,9 @@ func (c Config) validate() error {
 	if _, err := c.Console.ParsedStats(); err != nil {
 		return fmt.Errorf("console.stats: %w", err)
 	}
-	if err := c.Response.validate(); err != nil {
-		return fmt.Errorf("response: %w", err)
-	}
-	if err := c.XSK.validate(); err != nil {
-		return fmt.Errorf("xsk: %w", err)
-	}
-	if err := c.Analysis.validate(c.XSK); err != nil {
-		return fmt.Errorf("analysis: %w", err)
-	}
 	if err := c.Logging.validate(); err != nil {
 		return fmt.Errorf("logging: %w", err)
 	}
-
 	return nil
 }
 

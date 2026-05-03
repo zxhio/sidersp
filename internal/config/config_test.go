@@ -30,9 +30,15 @@ console:
 	if cfg.ControlPlane.RulesPath != "configs/rules.example.yaml" {
 		t.Fatalf("ControlPlane.RulesPath = %q, want %q", cfg.ControlPlane.RulesPath, "configs/rules.example.yaml")
 	}
+	if cfg.ServiceConfig.ControlPlane.RulesPath != "configs/rules.example.yaml" {
+		t.Fatalf("ServiceConfig.ControlPlane.RulesPath = %q, want %q", cfg.ServiceConfig.ControlPlane.RulesPath, "configs/rules.example.yaml")
+	}
 
 	if cfg.Dataplane.Interface != "eth0" {
 		t.Fatalf("Dataplane.Interface = %q, want %q", cfg.Dataplane.Interface, "eth0")
+	}
+	if cfg.PacketPathConfig.Dataplane.Interface != "eth0" {
+		t.Fatalf("PacketPathConfig.Dataplane.Interface = %q, want %q", cfg.PacketPathConfig.Dataplane.Interface, "eth0")
 	}
 	if got := normalizeIngressVerdict(cfg.Dataplane.IngressVerdict); got != "pass" {
 		t.Fatalf("normalizeIngressVerdict(%q) = %q, want pass", cfg.Dataplane.IngressVerdict, got)
