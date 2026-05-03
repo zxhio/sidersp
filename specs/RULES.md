@@ -209,6 +209,12 @@ Final dataplane match check:
 (pkt_conds & required_mask) == required_mask
 ```
 
+For blocking kernel-TX actions `tcp_reset`, `icmp_port_unreachable`,
+`icmp_host_unreachable`, and `icmp_admin_prohibited`, the dataplane may cache
+the chosen action for a short-lived same-direction TCP/UDP flow entry. A cache
+hit replays the same action semantics without repeating the full index walk.
+The cache is runtime-local, expires automatically, and is cleared on rule sync.
+
 ## Related Contracts
 
 - Analysis export boundary: `ANALYSIS.md`

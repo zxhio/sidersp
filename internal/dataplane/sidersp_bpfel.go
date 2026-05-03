@@ -13,6 +13,24 @@ import (
 	"github.com/cilium/ebpf"
 )
 
+type siderspFlowCacheEntry struct {
+	_           structs.HostLayout
+	ExpiresAtNs uint64
+	RuleId      uint32
+	Action      uint16
+	Reserved    uint16
+}
+
+type siderspFlowCacheKey struct {
+	_        structs.HostLayout
+	Saddr    uint32
+	Daddr    uint32
+	Sport    uint16
+	Dport    uint16
+	IpProto  uint8
+	Reserved [3]uint8
+}
+
 type siderspGlobalCfg struct {
 	_                      structs.HostLayout
 	AllActiveRules         siderspMaskT
@@ -105,6 +123,7 @@ type siderspMapSpecs struct {
 	DstPortIndexMap *ebpf.MapSpec `ebpf:"dst_port_index_map"`
 	DstPrefixLpmMap *ebpf.MapSpec `ebpf:"dst_prefix_lpm_map"`
 	EventRingbuf    *ebpf.MapSpec `ebpf:"event_ringbuf"`
+	FlowCacheMap    *ebpf.MapSpec `ebpf:"flow_cache_map"`
 	GlobalCfgMap    *ebpf.MapSpec `ebpf:"global_cfg_map"`
 	RuleIndexMap    *ebpf.MapSpec `ebpf:"rule_index_map"`
 	SrcPortIndexMap *ebpf.MapSpec `ebpf:"src_port_index_map"`
@@ -144,6 +163,7 @@ type siderspMaps struct {
 	DstPortIndexMap *ebpf.Map `ebpf:"dst_port_index_map"`
 	DstPrefixLpmMap *ebpf.Map `ebpf:"dst_prefix_lpm_map"`
 	EventRingbuf    *ebpf.Map `ebpf:"event_ringbuf"`
+	FlowCacheMap    *ebpf.Map `ebpf:"flow_cache_map"`
 	GlobalCfgMap    *ebpf.Map `ebpf:"global_cfg_map"`
 	RuleIndexMap    *ebpf.Map `ebpf:"rule_index_map"`
 	SrcPortIndexMap *ebpf.Map `ebpf:"src_port_index_map"`
@@ -159,6 +179,7 @@ func (m *siderspMaps) Close() error {
 		m.DstPortIndexMap,
 		m.DstPrefixLpmMap,
 		m.EventRingbuf,
+		m.FlowCacheMap,
 		m.GlobalCfgMap,
 		m.RuleIndexMap,
 		m.SrcPortIndexMap,

@@ -446,6 +446,9 @@ func (r *Runtime) resetMaps() error {
 	if err := clearPrefixMap(r.objs.DstPrefixLpmMap); err != nil {
 		return fmt.Errorf("reset dst_prefix_lpm_map: %w", err)
 	}
+	if err := clearFlowCacheMap(r.objs.FlowCacheMap); err != nil {
+		return fmt.Errorf("reset flow_cache_map: %w", err)
+	}
 	if err := writeGlobalConfig(r.objs.GlobalCfgMap, siderspGlobalCfg{}); err != nil {
 		return fmt.Errorf("reset global_cfg_map: %w", err)
 	}
@@ -667,6 +670,25 @@ func clearPrefixMap(m *ebpf.Map) error {
 	var value siderspMaskT
 	iter := m.Iterate()
 	var keys []siderspIpv4LpmKey
+	for iter.Next(&key, &value) {
+		keys = append(keys, key)
+	}
+	if err := iter.Err(); err != nil {
+		return err
+	}
+	for _, key := range keys {
+		if err := m.Delete(key); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func clearFlowCacheMap(m *ebpf.Map) error {
+	var key siderspFlowCacheKey
+	var value siderspFlowCacheEntry
+	iter := m.Iterate()
+	var keys []siderspFlowCacheKey
 	for iter.Next(&key, &value) {
 		keys = append(keys, key)
 	}

@@ -19,6 +19,9 @@
  *   │  dst_prefix_lpm_map   LPM_TRIE<lpm_key, mask_t>          │
  *   │    longest-prefix match → cumulative candidate bitmap    │
  *   ├──────────────────────────────────────────────────────────┤
+ *   │  flow_cache_map       LRU_HASH<flow_key, flow_entry>     │
+ *   │    short-lived cached action for repeated TCP/UDP flows  │
+ *   ├──────────────────────────────────────────────────────────┤
  *   │  event_ringbuf        RINGBUF    [16 MB]                 │
  *   ├──────────────────────────────────────────────────────────┤
  *   │  stats_map            PERCPU_ARRAY<u32, u64>  [STAT_COUNT]│
@@ -102,6 +105,13 @@ struct {
     /* Same cumulative-mask contract as src_prefix_lpm_map. */
     __type(value, mask_t);
 } dst_prefix_lpm_map SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 65536);
+    __type(key, struct flow_cache_key);
+    __type(value, struct flow_cache_entry);
+} flow_cache_map SEC(".maps");
 
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);

@@ -1052,6 +1052,51 @@ func TestBPFTCPResetTXSemantics(t *testing.T) {
 	})
 }
 
+func TestBPFBlockingFlowCacheReplaysCachedAction(t *testing.T) {
+	requireBPFTestEnv(t)
+	rules := []rule.Rule{
+		{
+			ID:       2101,
+			Name:     "cacheable_reset_tcp_80",
+			Enabled:  true,
+			Priority: 100,
+			Match: rule.RuleMatch{
+				Protocol:    "tcp",
+				DstPorts:    []int{80},
+				DstPrefixes: []string{"10.0.5.2/32"},
+			},
+			Response: rule.RuleResponse{Action: "tcp_reset"},
+		},
+	}
+	objs, reader := setupBPFRuntime(t, rules)
+	defer reader.Close()
+	defer objs.Close()
+
+	pkt := buildEthernetPkt(ip("10.0.1.100"), ip("10.0.5.2"), 54321, 80, "tcp_syn")
+
+	beforeCandidates := readStat(t, objs, statRuleCandidates)
+	beforeMatch := readStat(t, objs, statMatchedRules)
+	ret, _, err := objs.XdpSidersp.Test(pkt)
+	require.NoError(t, err, "prog.Test()")
+	require.Equal(t, uint32(xdpTX), ret, "first packet should populate flow cache")
+	require.Equal(t, beforeCandidates+1, readStat(t, objs, statRuleCandidates), "rule_candidates after first packet")
+	require.Equal(t, beforeMatch+1, readStat(t, objs, statMatchedRules), "matched_rules after first packet")
+	evt := mustReadEvent(t, reader)
+	require.Equal(t, uint32(2101), evt.RuleID, "first packet event rule_id")
+
+	require.NoError(t, writeGlobalConfig(objs.GlobalCfgMap, siderspGlobalCfg{}), "clear global config after cache fill")
+
+	beforeCandidates = readStat(t, objs, statRuleCandidates)
+	beforeMatch = readStat(t, objs, statMatchedRules)
+	ret, _, err = objs.XdpSidersp.Test(pkt)
+	require.NoError(t, err, "prog.Test()")
+	require.Equal(t, uint32(xdpTX), ret, "cached packet should bypass cleared rule config")
+	require.Equal(t, beforeCandidates+1, readStat(t, objs, statRuleCandidates), "rule_candidates after cache hit")
+	require.Equal(t, beforeMatch+1, readStat(t, objs, statMatchedRules), "matched_rules after cache hit")
+	evt = mustReadEvent(t, reader)
+	require.Equal(t, uint32(2101), evt.RuleID, "cache-hit event rule_id")
+}
+
 // ---------------------------------------------------------------------------
 // Abnormal resource path: empty rule set
 // ---------------------------------------------------------------------------

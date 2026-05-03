@@ -16,6 +16,7 @@
 #include "mask.h"
 
 #define VLAN_ID_NONE 0xffff
+#define FLOW_CACHE_TTL_NS (5ULL * 1000000000ULL)
 
 /*
  * Packet condition bits — set while parsing in prog.c.
@@ -156,6 +157,22 @@ struct tx_config {
     __u32 tcp_reset_egress_ifindex;
     __u32 tcp_reset_vlan_mode;
     __u32 tcp_reset_failure_verdict;
+};
+
+struct flow_cache_key {
+    __be32 saddr;
+    __be32 daddr;
+    __be16 sport;
+    __be16 dport;
+    __u8 ip_proto;
+    __u8 reserved[3];
+};
+
+struct flow_cache_entry {
+    __u64 expires_at_ns;
+    __u32 rule_id;
+    __u16 action;
+    __u16 reserved;
 };
 
 struct ipv4_lpm_key {

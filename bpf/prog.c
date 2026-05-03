@@ -44,6 +44,10 @@
 #define TCP_FLAG_TO_COND(flags, flag, cond) \
     (((__u32)((flags) & (flag))) << (__builtin_ctz(cond) - __builtin_ctz(flag)))
 
+#define FLOW_CACHE_STABLE_CONDS (COND_PROTO_TCP | COND_PROTO_UDP | \
+                                 COND_SRC_PREFIX | COND_DST_PREFIX | \
+                                 COND_SRC_PORT | COND_DST_PORT)
+
 struct arp_eth_ipv4 {
     __u8 sha[ETH_ALEN];
     __u8 sip[4];
@@ -160,6 +164,87 @@ static __always_inline void emit_event(const struct pkt_ctx *ctx,
     evt->ip_proto = ctx->ip_proto;
 
     bpf_ringbuf_submit(evt, 0);
+}
+
+static __always_inline int is_flow_cacheable_action(__u16 action)
+{
+    switch (action) {
+    case ACTION_TCP_RESET:
+    case ACTION_ICMP_PORT_UNREACHABLE:
+    case ACTION_ICMP_HOST_UNREACHABLE:
+    case ACTION_ICMP_ADMIN_PROHIBITED:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+static __always_inline int is_flow_cacheable_rule(const struct rule_meta *rule)
+{
+    if (!is_flow_cacheable_action(rule->action))
+        return 0;
+    return (rule->required_mask & ~FLOW_CACHE_STABLE_CONDS) == 0;
+}
+
+static __always_inline int build_flow_cache_key(const struct pkt_ctx *ctx,
+                                                struct flow_cache_key *key)
+{
+    if (ctx->ip_proto != IPPROTO_TCP && ctx->ip_proto != IPPROTO_UDP)
+        return 0;
+
+    key->saddr = ctx->saddr;
+    key->daddr = ctx->daddr;
+    key->sport = bpf_htons(ctx->sport);
+    key->dport = bpf_htons(ctx->dport);
+    key->ip_proto = ctx->ip_proto;
+    key->reserved[0] = 0;
+    key->reserved[1] = 0;
+    key->reserved[2] = 0;
+    return 1;
+}
+
+static __always_inline int lookup_flow_cache(const struct pkt_ctx *ctx,
+                                             struct rule_meta *rule)
+{
+    const struct flow_cache_entry *entry;
+    struct flow_cache_key key = {};
+
+    if (!build_flow_cache_key(ctx, &key))
+        return 0;
+
+    entry = bpf_map_lookup_elem(&flow_cache_map, &key);
+    if (!entry)
+        return 0;
+
+    if (entry->expires_at_ns <= bpf_ktime_get_ns()) {
+        bpf_map_delete_elem(&flow_cache_map, &key);
+        return 0;
+    }
+
+    rule->rule_id = entry->rule_id;
+    rule->required_mask = 0;
+    rule->action = entry->action;
+    rule->flags = 0;
+    return 1;
+}
+
+static __always_inline void store_flow_cache(const struct pkt_ctx *ctx,
+                                             const struct rule_meta *rule)
+{
+    struct flow_cache_key key = {};
+    struct flow_cache_entry entry = {};
+
+    if (!is_flow_cacheable_rule(rule))
+        return;
+    if (!build_flow_cache_key(ctx, &key))
+        return;
+
+    entry.expires_at_ns = bpf_ktime_get_ns() + FLOW_CACHE_TTL_NS;
+    entry.rule_id = rule->rule_id;
+    entry.action = rule->action;
+    entry.reserved = 0;
+
+    bpf_map_update_elem(&flow_cache_map, &key, &entry, BPF_ANY);
 }
 
 static __always_inline __u16 csum_fold_helper(__u32 csum)
@@ -866,34 +951,39 @@ int xdp_sidersp(struct xdp_md *xdp)
     if (!cfg)
         return ingress_failure_verdict(cfg);
 
-    mask_copy(&candidates, &cfg->all_active_rules);
+    if (lookup_flow_cache(&ctx, &best_rule)) {
+        stat_inc(STAT_RULE_CANDIDATES);
+        stat_inc(STAT_MATCHED_RULES);
+    } else {
+        mask_copy(&candidates, &cfg->all_active_rules);
 
-    if (!apply_u16_index(&vlan_index_map, ctx.vlan_id, &candidates))
-        mask_and(&candidates, &cfg->vlan_optional_rules);
-    if (!apply_u16_index(&src_port_index_map, ctx.sport, &candidates))
-        mask_and(&candidates, &cfg->src_port_optional_rules);
-    if (!apply_u16_index(&dst_port_index_map, ctx.dport, &candidates))
-        mask_and(&candidates, &cfg->dst_port_optional_rules);
+        if (!apply_u16_index(&vlan_index_map, ctx.vlan_id, &candidates))
+            mask_and(&candidates, &cfg->vlan_optional_rules);
+        if (!apply_u16_index(&src_port_index_map, ctx.sport, &candidates))
+            mask_and(&candidates, &cfg->src_port_optional_rules);
+        if (!apply_u16_index(&dst_port_index_map, ctx.dport, &candidates))
+            mask_and(&candidates, &cfg->dst_port_optional_rules);
 
-    if (apply_ipv4_lpm_index(&src_prefix_lpm_map, ctx.saddr, &candidates))
-        pkt_conds |= COND_SRC_PREFIX;
-    else
-        mask_and(&candidates, &cfg->src_prefix_optional_rules);
+        if (apply_ipv4_lpm_index(&src_prefix_lpm_map, ctx.saddr, &candidates))
+            pkt_conds |= COND_SRC_PREFIX;
+        else
+            mask_and(&candidates, &cfg->src_prefix_optional_rules);
 
-    if (apply_ipv4_lpm_index(&dst_prefix_lpm_map, ctx.daddr, &candidates))
-        pkt_conds |= COND_DST_PREFIX;
-    else
-        mask_and(&candidates, &cfg->dst_prefix_optional_rules);
+        if (apply_ipv4_lpm_index(&dst_prefix_lpm_map, ctx.daddr, &candidates))
+            pkt_conds |= COND_DST_PREFIX;
+        else
+            mask_and(&candidates, &cfg->dst_prefix_optional_rules);
 
-    if (mask_is_zero(&candidates))
-        return ingress_failure_verdict(cfg);
+        if (mask_is_zero(&candidates))
+            return ingress_failure_verdict(cfg);
 
-    stat_inc(STAT_RULE_CANDIDATES);
+        stat_inc(STAT_RULE_CANDIDATES);
 
-    if (!pick_best_rule(&candidates, pkt_conds, &best_rule))
-        return ingress_failure_verdict(cfg);
+        if (!pick_best_rule(&candidates, pkt_conds, &best_rule))
+            return ingress_failure_verdict(cfg);
 
-    stat_inc(STAT_MATCHED_RULES);
+        stat_inc(STAT_MATCHED_RULES);
+    }
 
     switch (best_rule.action) {
     case ACTION_TCP_RESET:
@@ -915,11 +1005,13 @@ int xdp_sidersp(struct xdp_md *xdp)
                         ? ICMP_HOST_UNREACH
                         : ICMP_PKT_FILTERED);
         if (ret == XDP_TX) {
+            store_flow_cache(&ctx, &best_rule);
             stat_inc(STAT_XDP_TX);
             emit_event(&ctx, &best_rule, pkt_conds, VERDICT_TX);
             return XDP_TX;
         }
         if (ret == XDP_REDIRECT) {
+            store_flow_cache(&ctx, &best_rule);
             stat_inc(STAT_REDIRECT_TX);
             emit_event(&ctx, &best_rule, pkt_conds, VERDICT_REDIRECT_TX);
             return XDP_REDIRECT;

@@ -38,8 +38,8 @@ Current metric mapping:
 |-------|--------|------|---------|
 | `ingress` | `rx_packets` | `traffic` | Total packets seen by the XDP program |
 | `parse` | `parse_failed` | `failure` | Packets rejected before matching due to parse or protocol validation failure |
-| `match` | `rule_candidates` | `traffic` | Packets with a non-empty candidate set after index pre-filter |
-| `match` | `matched_rules` | `success` | Packets that matched a rule |
+| `match` | `rule_candidates` | `traffic` | Packets admitted into policy selection, including direct flow-cache hits and non-empty candidate sets after index pre-filter |
+| `match` | `matched_rules` | `success` | Packets that matched a rule or replayed a cached blocking action |
 | `observe` | `ringbuf_dropped` | `failure` | Observation events dropped because ringbuf reserve failed |
 | `tx_same_interface` | `xdp_tx` | `success` | Same-interface kernel TX submissions |
 | `tx_same_interface` | `tx_failed` | `failure` | Same-interface kernel TX failures |
@@ -61,6 +61,8 @@ Current metric mapping:
 
 - `xsk_redirected` means the dataplane submitted the original packet to XSK.
   It does not prove the final response frame was transmitted.
+- `rule_candidates` and `matched_rules` also include short-lived flow-cache hits
+  for cached blocking actions on repeated TCP/UDP traffic.
 - `response_sent` and backend metrics in `response_tx` describe user-space TX,
   not dataplane redirect.
 - `xsk_redirect_failed` is a stage-level failure summary. The preferred
