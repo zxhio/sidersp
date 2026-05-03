@@ -239,7 +239,8 @@ func TestResponseExecutorTracksAFPacketBackend(t *testing.T) {
 	executor, err := NewResponseExecutor(ResponseExecutorConfig{
 		IfIndex: 7,
 		QueueID: 3,
-		Sender: &afpacketSender{
+		Sender: &responseTXSender{
+			backend: TXBackendAFPacket,
 			out: tx,
 			buildOpts: BuildOptions{
 				HardwareAddr: testHWAddr,
@@ -278,7 +279,8 @@ func TestResponseExecutorTracksAFPacketFailure(t *testing.T) {
 	executor, err := NewResponseExecutor(ResponseExecutorConfig{
 		IfIndex: 7,
 		QueueID: 3,
-		Sender: &afpacketSender{
+		Sender: &responseTXSender{
+			backend: TXBackendAFPacket,
 			out: tx,
 			buildOpts: BuildOptions{
 				HardwareAddr: testHWAddr,
@@ -388,7 +390,8 @@ func newTestExecutor(t testing.TB, tx frameSender, results *ResultBuffer, opts B
 	executor, err := NewResponseExecutor(ResponseExecutorConfig{
 		IfIndex: 7,
 		QueueID: 3,
-		Sender: &afxdpSender{
+		Sender: &responseTXSender{
+			backend:   TXBackendAFXDP,
 			out:       tx,
 			buildOpts: opts,
 		},

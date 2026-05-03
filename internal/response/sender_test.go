@@ -60,7 +60,8 @@ func TestAFXDPSenderBuildsAndSendsFrame(t *testing.T) {
 	t.Parallel()
 
 	out := &stubFrameSender{}
-	sender := &afxdpSender{
+	sender := &responseTXSender{
+		backend:   TXBackendAFXDP,
 		out:       out,
 		buildOpts: BuildOptions{},
 	}
@@ -77,7 +78,8 @@ func TestAFPacketSenderBuildsAndSendsFrame(t *testing.T) {
 	t.Parallel()
 
 	out := &stubFrameSender{}
-	sender := &afpacketSender{
+	sender := &responseTXSender{
+		backend:   TXBackendAFPacket,
 		out: out,
 		buildOpts: BuildOptions{
 			HardwareAddr: testHWAddr,
@@ -96,7 +98,8 @@ func TestAFXDPSenderReturnsFrameSendError(t *testing.T) {
 	t.Parallel()
 
 	wantErr := errors.New("send failed")
-	sender := &afxdpSender{
+	sender := &responseTXSender{
+		backend:   TXBackendAFXDP,
 		out:       &stubFrameSender{err: wantErr},
 		buildOpts: BuildOptions{},
 	}
@@ -111,7 +114,8 @@ func TestAFPacketSenderUsesARPBuildOptions(t *testing.T) {
 	t.Parallel()
 
 	out := &stubFrameSender{}
-	sender := &afpacketSender{
+	sender := &responseTXSender{
+		backend:   TXBackendAFPacket,
 		out: out,
 		buildOpts: BuildOptions{
 			HardwareAddr: testHWAddr,
@@ -130,7 +134,8 @@ func TestAFPacketSenderUsesIPv4PacketPathForICMPEchoReply(t *testing.T) {
 	t.Parallel()
 
 	out := &stubMixedSender{}
-	sender := &afpacketSender{
+	sender := &responseTXSender{
+		backend:   TXBackendAFPacket,
 		out:       out,
 		buildOpts: BuildOptions{},
 	}
@@ -150,7 +155,8 @@ func TestAFPacketSenderFallsBackToFramePathForARPReply(t *testing.T) {
 	t.Parallel()
 
 	out := &stubMixedSender{}
-	sender := &afpacketSender{
+	sender := &responseTXSender{
+		backend:   TXBackendAFPacket,
 		out: out,
 		buildOpts: BuildOptions{
 			HardwareAddr: testHWAddr,
@@ -172,7 +178,8 @@ func TestAFXDPSenderDoesNotReuseBufferForNonBorrowedSender(t *testing.T) {
 	t.Parallel()
 
 	out := &retainingFrameSender{}
-	sender := &afxdpSender{
+	sender := &responseTXSender{
+		backend:   TXBackendAFXDP,
 		out:       out,
 		buildOpts: BuildOptions{},
 	}

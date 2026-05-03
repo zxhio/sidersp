@@ -40,7 +40,8 @@ func BenchmarkExecuteTCPSynAckAFPacketSend(b *testing.B) {
 	executor, err := NewResponseExecutor(ResponseExecutorConfig{
 		IfIndex: 1,
 		QueueID: 3,
-		Sender: &afpacketSender{
+		Sender: &responseTXSender{
+			backend:   TXBackendAFPacket,
 			out:       out,
 			buildOpts: testTCPSynAckBuildOptions(b, 1003, 1000),
 		},

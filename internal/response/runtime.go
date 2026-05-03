@@ -64,12 +64,14 @@ func NewRuntime(opts Options) (*Runtime, error) {
 
 func buildResponseSender(socket xsk.Socket, afpacketOut frameSender, buildOpts BuildOptions) responseSender {
 	if afpacketOut == nil {
-		return &afxdpSender{
+		return &responseTXSender{
+			backend:   TXBackendAFXDP,
 			out:       socket,
 			buildOpts: buildOpts,
 		}
 	}
-	return &afpacketSender{
+	return &responseTXSender{
+		backend:   TXBackendAFPacket,
 		out:       afpacketOut,
 		buildOpts: buildOpts,
 	}
@@ -145,12 +147,6 @@ func (r *Runtime) ResetStats() error {
 	}
 	r.stats.reset()
 	return nil
-}
-
-func closeClosers(closers []io.Closer) {
-	for _, closer := range closers {
-		_ = closer.Close()
-	}
 }
 
 func senderMode(egressInterface string) string {

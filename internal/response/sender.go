@@ -21,12 +21,8 @@ type borrowedIPv4PacketSender interface {
 	SendBorrowedIPv4Packet(context.Context, []byte) error
 }
 
-type afxdpSender struct {
-	out       frameSender
-	buildOpts BuildOptions
-}
-
-type afpacketSender struct {
+type responseTXSender struct {
+	backend   TXBackend
 	out       frameSender
 	buildOpts BuildOptions
 }
@@ -57,20 +53,12 @@ func releaseFrameBuffer(item *pooledFrameBuffer) {
 	frameBufferPool.Put(item)
 }
 
-func (s *afxdpSender) Send(ctx context.Context, meta XSKMetadata, builder Builder, frame []byte, pkt *Packet) error {
+func (s *responseTXSender) Send(ctx context.Context, meta XSKMetadata, builder Builder, frame []byte, pkt *Packet) error {
 	return sendResponseFrame(ctx, s.out, meta, builder, frame, s.buildOpts, pkt)
 }
 
-func (s *afxdpSender) Backend() TXBackend {
-	return TXBackendAFXDP
-}
-
-func (s *afpacketSender) Backend() TXBackend {
-	return TXBackendAFPacket
-}
-
-func (s *afpacketSender) Send(ctx context.Context, meta XSKMetadata, builder Builder, frame []byte, pkt *Packet) error {
-	return sendResponseFrame(ctx, s.out, meta, builder, frame, s.buildOpts, pkt)
+func (s *responseTXSender) Backend() TXBackend {
+	return s.backend
 }
 
 func sendResponseFrame(ctx context.Context, out frameSender, meta XSKMetadata, builder Builder, frame []byte, buildOpts BuildOptions, pkt *Packet) error {
