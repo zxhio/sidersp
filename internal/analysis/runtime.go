@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	goruntime "runtime"
 	"sync"
 
 	"github.com/sirupsen/logrus"
@@ -30,6 +31,9 @@ type Runtime struct {
 	wg        sync.WaitGroup
 	sender    frameSender
 	ifaceName string
+
+	lockOSThread   func()
+	unlockOSThread func()
 }
 
 func NewRuntime(opts Options) (*Runtime, error) {
@@ -52,6 +56,12 @@ func NewRuntime(opts Options) (*Runtime, error) {
 		queueSize: opts.QueueSize,
 		sender:    sender,
 		ifaceName: opts.Interface,
+		lockOSThread: func() {
+			goruntime.LockOSThread()
+		},
+		unlockOSThread: func() {
+			goruntime.UnlockOSThread()
+		},
 	}, nil
 }
 
@@ -134,6 +144,18 @@ func (r *Runtime) startShardWorker(ctx context.Context, queueID int, queue <-cha
 	r.wg.Add(1)
 	go func() {
 		defer r.wg.Done()
+
+		lockThread := r.lockOSThread
+		unlockThread := r.unlockOSThread
+		if lockThread == nil {
+			lockThread = goruntime.LockOSThread
+		}
+		if unlockThread == nil {
+			unlockThread = goruntime.UnlockOSThread
+		}
+		lockThread()
+		defer unlockThread()
+
 		for {
 			select {
 			case <-ctx.Done():

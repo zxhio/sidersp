@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"runtime"
 
 	"github.com/sirupsen/logrus"
 
@@ -24,12 +25,23 @@ type Socket interface {
 
 type FrameHandler func(ctx context.Context, queueID int, socket Socket, frame []byte) error
 
+type threadLocker interface {
+	LockOSThread()
+	UnlockOSThread()
+}
+
+type runtimeThreadLocker struct{}
+
+func (runtimeThreadLocker) LockOSThread()   { runtime.LockOSThread() }
+func (runtimeThreadLocker) UnlockOSThread() { runtime.UnlockOSThread() }
+
 type Worker struct {
 	ifindex   int
 	queueID   int
 	registrar Registrar
 	socket    Socket
 	handler   FrameHandler
+	thread    threadLocker
 }
 
 func NewWorker(ifindex, queueID int, registrar Registrar, socket Socket, handler FrameHandler) (*Worker, error) {
@@ -51,6 +63,7 @@ func NewWorker(ifindex, queueID int, registrar Registrar, socket Socket, handler
 		registrar: registrar,
 		socket:    socket,
 		handler:   handler,
+		thread:    runtimeThreadLocker{},
 	}, nil
 }
 
@@ -58,6 +71,13 @@ func (w *Worker) Run(ctx context.Context) error {
 	if w == nil {
 		return fmt.Errorf("run xsk worker: nil worker")
 	}
+
+	locker := w.thread
+	if locker == nil {
+		locker = runtimeThreadLocker{}
+	}
+	locker.LockOSThread()
+	defer locker.UnlockOSThread()
 
 	if err := w.registrar.RegisterXSK(w.queueID, w.socket.FD()); err != nil {
 		return err

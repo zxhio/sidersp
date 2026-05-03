@@ -91,6 +91,8 @@ func TestRuntimeRunExportsFrames(t *testing.T) {
 	t.Parallel()
 
 	ctx, cancel := context.WithCancel(context.Background())
+	lockCalls := 0
+	unlockCalls := 0
 	sender := &stubPacketSender{
 		sendHook: func(_ []byte) {
 			cancel()
@@ -99,6 +101,12 @@ func TestRuntimeRunExportsFrames(t *testing.T) {
 	runtime, err := NewRuntime(Options{sender: sender})
 	if err != nil {
 		t.Fatalf("NewRuntime() error = %v", err)
+	}
+	runtime.lockOSThread = func() {
+		lockCalls++
+	}
+	runtime.unlockOSThread = func() {
+		unlockCalls++
 	}
 	if err := runtime.SubmitXSK(ctx, xsk.Envelope{
 		QueueID: 1,
@@ -115,6 +123,9 @@ func TestRuntimeRunExportsFrames(t *testing.T) {
 	}
 	if len(sender.frames) != 1 || len(sender.frames[0]) != 4 {
 		t.Fatalf("frames = %+v, want one exported frame", sender.frames)
+	}
+	if lockCalls != 1 || unlockCalls != 1 {
+		t.Fatalf("thread locker calls = %d/%d, want 1/1", lockCalls, unlockCalls)
 	}
 }
 

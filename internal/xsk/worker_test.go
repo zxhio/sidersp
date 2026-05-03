@@ -55,6 +55,19 @@ func (s *stubSocket) Close() error {
 	return nil
 }
 
+type stubThreadLocker struct {
+	lockCalls   int
+	unlockCalls int
+}
+
+func (s *stubThreadLocker) LockOSThread() {
+	s.lockCalls++
+}
+
+func (s *stubThreadLocker) UnlockOSThread() {
+	s.unlockCalls++
+}
+
 type handledFrame struct {
 	queueID int
 	data    []byte
@@ -88,6 +101,8 @@ func TestWorkerRegistersBeforeReceive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWorker() error = %v", err)
 	}
+	locker := &stubThreadLocker{}
+	worker.thread = locker
 
 	if err := worker.Run(ctx); err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -97,6 +112,9 @@ func TestWorkerRegistersBeforeReceive(t *testing.T) {
 	}
 	if socket.calls != 1 {
 		t.Fatalf("socket calls = %d, want 1", socket.calls)
+	}
+	if locker.lockCalls != 1 || locker.unlockCalls != 1 {
+		t.Fatalf("thread locker calls = %d/%d, want 1/1", locker.lockCalls, locker.unlockCalls)
 	}
 }
 

@@ -26,6 +26,7 @@ xsk:
   enabled: false
   # Optional: when omitted, the runtime uses queues [0] by default, or [0..combined_channels-1]
   # if dataplane.combined_channels is set to a positive value.
+  # Each queue gets one AF_XDP socket and one dedicated worker thread.
   queues: [0]
   afxdp:
     frame_size: 4096
@@ -43,6 +44,7 @@ response:
 
 analysis:
   # Optional: write selected packets to one external analysis interface.
+  # Analysis export keeps one best-effort worker per observed XSK queue.
   # Leave empty to disable analysis export.
   interface: ""
 
