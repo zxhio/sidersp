@@ -304,6 +304,106 @@ func TestFormatLPMKey(t *testing.T) {
 	}
 }
 
+func TestDiffRuleIndex(t *testing.T) {
+	t.Parallel()
+
+	prev := map[uint32]siderspRuleMeta{
+		0: {RuleId: 1001, RequiredMask: condProtoTCP, Action: actionTCPReset},
+		1: {RuleId: 1002, RequiredMask: condProtoUDP, Action: actionICMPPortUnreachable},
+	}
+	next := map[uint32]siderspRuleMeta{
+		0: {RuleId: 1001, RequiredMask: condProtoTCP, Action: actionTCPReset},
+		1: {RuleId: 1003, RequiredMask: condProtoTCP | condDstPort, Action: actionTCPReset},
+		2: {RuleId: 1004, RequiredMask: condProtoUDP, Action: actionICMPHostUnreachable},
+	}
+
+	clears, writes := diffRuleIndex(prev, next)
+	if len(clears) != 0 {
+		t.Fatalf("clears = %v, want none for changed/reused slots", clears)
+	}
+	if len(writes) != 2 {
+		t.Fatalf("writes len = %d, want 2", len(writes))
+	}
+	if got := writes[1].RuleId; got != 1003 {
+		t.Fatalf("writes[1].RuleId = %d, want 1003", got)
+	}
+	if got := writes[2].RuleId; got != 1004 {
+		t.Fatalf("writes[2].RuleId = %d, want 1004", got)
+	}
+
+	prev = next
+	next = map[uint32]siderspRuleMeta{
+		0: {RuleId: 1001, RequiredMask: condProtoTCP, Action: actionTCPReset},
+	}
+	clears, writes = diffRuleIndex(prev, next)
+	if len(clears) != 2 || clears[0] != 1 || clears[1] != 2 {
+		t.Fatalf("clears = %v, want [1 2]", clears)
+	}
+	if len(writes) != 0 {
+		t.Fatalf("writes len = %d, want 0", len(writes))
+	}
+}
+
+func TestDiffU16MaskMap(t *testing.T) {
+	t.Parallel()
+
+	prev := map[uint16]siderspMaskT{
+		0:  testMask(0),
+		80: testMask(1),
+		81: testMask(2),
+	}
+	next := map[uint16]siderspMaskT{
+		0:   testMask(0),
+		80:  testMask(1, 3),
+		443: testMask(4),
+	}
+
+	deletes, writes := diffU16MaskMap(prev, next)
+	if len(deletes) != 1 || deletes[0] != 81 {
+		t.Fatalf("deletes = %v, want [81]", deletes)
+	}
+	if len(writes) != 2 {
+		t.Fatalf("writes len = %d, want 2", len(writes))
+	}
+	if got := writes[80]; got != testMask(1, 3) {
+		t.Fatalf("writes[80] = %+v, want updated mask", got.Bits)
+	}
+	if got := writes[443]; got != testMask(4) {
+		t.Fatalf("writes[443] = %+v, want new mask", got.Bits)
+	}
+}
+
+func TestDiffPrefixMaskMap(t *testing.T) {
+	t.Parallel()
+
+	key16 := makeLPMKey(netip.MustParsePrefix("10.1.0.0/16"))
+	key24 := makeLPMKey(netip.MustParsePrefix("10.1.2.0/24"))
+	key32 := makeLPMKey(netip.MustParsePrefix("10.1.2.3/32"))
+
+	prev := map[siderspIpv4LpmKey]siderspMaskT{
+		key16: testMask(0),
+		key24: testMask(1),
+	}
+	next := map[siderspIpv4LpmKey]siderspMaskT{
+		key16: testMask(0, 2),
+		key32: testMask(3),
+	}
+
+	deletes, writes := diffPrefixMaskMap(prev, next)
+	if len(deletes) != 1 || deletes[0] != key24 {
+		t.Fatalf("deletes = %v, want [%v]", deletes, key24)
+	}
+	if len(writes) != 2 {
+		t.Fatalf("writes len = %d, want 2", len(writes))
+	}
+	if got := writes[key16]; got != testMask(0, 2) {
+		t.Fatalf("writes[key16] = %+v, want updated mask", got.Bits)
+	}
+	if got := writes[key32]; got != testMask(3) {
+		t.Fatalf("writes[key32] = %+v, want new mask", got.Bits)
+	}
+}
+
 func TestSumPerCPUCounters(t *testing.T) {
 	t.Parallel()
 
@@ -369,4 +469,12 @@ func TestKernelStatsFields(t *testing.T) {
 	if len(fields) != 14 {
 		t.Fatalf("len(fields) = %d, want %d", len(fields), 14)
 	}
+}
+
+func testMask(slots ...uint32) siderspMaskT {
+	var mask siderspMaskT
+	for _, slot := range slots {
+		setMaskBit(&mask, slot)
+	}
+	return mask
 }

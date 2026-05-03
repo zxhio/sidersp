@@ -30,6 +30,8 @@ type Runtime struct {
 	opts        Options
 	xskRuntime  xskRuntime
 	promiscSet  bool
+	snapshot    mapSnapshot
+	snapshotSet bool
 	matchMu     sync.RWMutex
 	matchCounts map[uint32]uint64
 }
@@ -161,12 +163,10 @@ func (r *Runtime) RunEventStream(ctx context.Context) error {
 	return r.streamEvents(runCtx, reader)
 }
 
-// ReplaceRules rebuilds and writes the full rule snapshot to BPF maps.
-//
-// TODO: incremental updates — currently any rule change (create/update/delete/enable/disable)
-// triggers a full rebuild of all indexes (rule_index, vlan/src_port/dst_port hash maps,
-// src/dst prefix LPM tries, global_cfg). This is correct but costly at scale. Future work:
-// stable ruleID→slot mapping, per-rule incremental index add/remove, unified delta path.
+// ReplaceRules rebuilds the next rule snapshot and syncs only the changed BPF map entries.
+// The first sync still does a full map reset/write. Later syncs keep the existing
+// "transiently pass traffic during update" contract by clearing flow cache, zeroing
+// global config, applying map deltas, and then publishing the final global config.
 func (r *Runtime) ReplaceRules(set rule.RuleSet) error {
 	snapshot, err := buildSnapshot(set, r.opts)
 	if err != nil {
@@ -175,10 +175,29 @@ func (r *Runtime) ReplaceRules(set rule.RuleSet) error {
 
 	r.logSnapshot(snapshot)
 
-	if err := r.resetMaps(); err != nil {
+	if !r.snapshotSet {
+		if err := r.writeFullSnapshot(snapshot); err != nil {
+			return err
+		}
+	} else {
+		if err := r.writeSnapshotDelta(r.snapshot, snapshot); err != nil {
+			return err
+		}
+	}
+	r.snapshot = snapshot
+	r.snapshotSet = true
+
+	if err := r.attachOnce(); err != nil {
 		return err
 	}
 
+	return nil
+}
+
+func (r *Runtime) writeFullSnapshot(snapshot mapSnapshot) error {
+	if err := r.resetMaps(); err != nil {
+		return err
+	}
 	if err := writeRuleIndex(r.objs.RuleIndexMap, snapshot.ruleIndex); err != nil {
 		return err
 	}
@@ -200,10 +219,37 @@ func (r *Runtime) ReplaceRules(set rule.RuleSet) error {
 	if err := writeGlobalConfig(r.objs.GlobalCfgMap, snapshot.globalCfg); err != nil {
 		return err
 	}
-	if err := r.attachOnce(); err != nil {
+	return nil
+}
+
+func (r *Runtime) writeSnapshotDelta(prev, next mapSnapshot) error {
+	if err := clearFlowCacheMap(r.objs.FlowCacheMap); err != nil {
+		return fmt.Errorf("clear flow_cache_map: %w", err)
+	}
+	if err := writeGlobalConfig(r.objs.GlobalCfgMap, siderspGlobalCfg{}); err != nil {
+		return fmt.Errorf("disable global_cfg_map during incremental sync: %w", err)
+	}
+	if err := writeRuleIndexDelta(r.objs.RuleIndexMap, prev.ruleIndex, next.ruleIndex); err != nil {
 		return err
 	}
-
+	if err := writeU16MaskMapDelta(r.objs.VlanIndexMap, prev.vlanIndex, next.vlanIndex); err != nil {
+		return err
+	}
+	if err := writeU16MaskMapDelta(r.objs.SrcPortIndexMap, prev.srcPortIndex, next.srcPortIndex); err != nil {
+		return err
+	}
+	if err := writeU16MaskMapDelta(r.objs.DstPortIndexMap, prev.dstPortIndex, next.dstPortIndex); err != nil {
+		return err
+	}
+	if err := writePrefixMaskMapDelta(r.objs.SrcPrefixLpmMap, prev.srcPrefixIndex, next.srcPrefixIndex); err != nil {
+		return err
+	}
+	if err := writePrefixMaskMapDelta(r.objs.DstPrefixLpmMap, prev.dstPrefixIndex, next.dstPrefixIndex); err != nil {
+		return err
+	}
+	if err := writeGlobalConfig(r.objs.GlobalCfgMap, next.globalCfg); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -420,7 +466,7 @@ func (r *Runtime) ResetStats() error {
 	return nil
 }
 
-// resetMaps clears BPF maps before ReplaceRules writes the next full snapshot.
+// resetMaps clears BPF maps before the first full snapshot write.
 // During this transient window the BPF program sees empty config and passes
 // traffic, which is acceptable for mirrored-traffic deployments.
 func (r *Runtime) resetMaps() error {
@@ -712,8 +758,39 @@ func writeRuleIndex(m *ebpf.Map, values map[uint32]siderspRuleMeta) error {
 	return nil
 }
 
+func writeRuleIndexDelta(m *ebpf.Map, prev, next map[uint32]siderspRuleMeta) error {
+	clears, writes := diffRuleIndex(prev, next)
+	var zero siderspRuleMeta
+	for _, slot := range clears {
+		if err := m.Put(slot, zero); err != nil {
+			return fmt.Errorf("clear rule_index_map slot %d: %w", slot, err)
+		}
+	}
+	for slot, value := range writes {
+		if err := m.Put(slot, value); err != nil {
+			return fmt.Errorf("write rule_index_map slot %d: %w", slot, err)
+		}
+	}
+	return nil
+}
+
 func writeU16MaskMap(m *ebpf.Map, values map[uint16]siderspMaskT) error {
 	for key, value := range values {
+		if err := m.Put(key, value); err != nil {
+			return fmt.Errorf("write %s key %d: %w", m.String(), key, err)
+		}
+	}
+	return nil
+}
+
+func writeU16MaskMapDelta(m *ebpf.Map, prev, next map[uint16]siderspMaskT) error {
+	deletes, writes := diffU16MaskMap(prev, next)
+	for _, key := range deletes {
+		if err := m.Delete(key); err != nil {
+			return fmt.Errorf("delete %s key %d: %w", m.String(), key, err)
+		}
+	}
+	for key, value := range writes {
 		if err := m.Put(key, value); err != nil {
 			return fmt.Errorf("write %s key %d: %w", m.String(), key, err)
 		}
@@ -728,6 +805,107 @@ func writePrefixMaskMap(m *ebpf.Map, values map[siderspIpv4LpmKey]siderspMaskT) 
 		}
 	}
 	return nil
+}
+
+func writePrefixMaskMapDelta(m *ebpf.Map, prev, next map[siderspIpv4LpmKey]siderspMaskT) error {
+	deletes, writes := diffPrefixMaskMap(prev, next)
+	for _, key := range deletes {
+		if err := m.Delete(key); err != nil {
+			return fmt.Errorf("delete %s prefix %d/%08x: %w", m.String(), key.Prefixlen, key.Addr, err)
+		}
+	}
+	for key, value := range writes {
+		if err := m.Put(key, value); err != nil {
+			return fmt.Errorf("write %s prefix %d/%08x: %w", m.String(), key.Prefixlen, key.Addr, err)
+		}
+	}
+	return nil
+}
+
+func diffRuleIndex(prev, next map[uint32]siderspRuleMeta) ([]uint32, map[uint32]siderspRuleMeta) {
+	clears := make([]uint32, 0)
+	writes := make(map[uint32]siderspRuleMeta)
+
+	for slot, value := range prev {
+		nextValue, ok := next[slot]
+		if ok && nextValue == value {
+			continue
+		}
+		if !ok {
+			clears = append(clears, slot)
+		}
+	}
+	for slot, value := range next {
+		prevValue, ok := prev[slot]
+		if ok && prevValue == value {
+			continue
+		}
+		writes[slot] = value
+	}
+
+	slices.Sort(clears)
+	return clears, writes
+}
+
+func diffU16MaskMap(prev, next map[uint16]siderspMaskT) ([]uint16, map[uint16]siderspMaskT) {
+	deletes := make([]uint16, 0)
+	writes := make(map[uint16]siderspMaskT)
+
+	for key, value := range prev {
+		nextValue, ok := next[key]
+		if ok && nextValue == value {
+			continue
+		}
+		if !ok {
+			deletes = append(deletes, key)
+		}
+	}
+	for key, value := range next {
+		prevValue, ok := prev[key]
+		if ok && prevValue == value {
+			continue
+		}
+		writes[key] = value
+	}
+
+	slices.Sort(deletes)
+	return deletes, writes
+}
+
+func diffPrefixMaskMap(prev, next map[siderspIpv4LpmKey]siderspMaskT) ([]siderspIpv4LpmKey, map[siderspIpv4LpmKey]siderspMaskT) {
+	deletes := make([]siderspIpv4LpmKey, 0)
+	writes := make(map[siderspIpv4LpmKey]siderspMaskT)
+
+	for key, value := range prev {
+		nextValue, ok := next[key]
+		if ok && nextValue == value {
+			continue
+		}
+		if !ok {
+			deletes = append(deletes, key)
+		}
+	}
+	for key, value := range next {
+		prevValue, ok := prev[key]
+		if ok && prevValue == value {
+			continue
+		}
+		writes[key] = value
+	}
+
+	slices.SortFunc(deletes, func(a, b siderspIpv4LpmKey) int {
+		if a.Prefixlen != b.Prefixlen {
+			return int(a.Prefixlen) - int(b.Prefixlen)
+		}
+		if a.Addr < b.Addr {
+			return -1
+		}
+		if a.Addr > b.Addr {
+			return 1
+		}
+		return 0
+	})
+	return deletes, writes
 }
 
 func writeGlobalConfig(m *ebpf.Map, cfg siderspGlobalCfg) error {
