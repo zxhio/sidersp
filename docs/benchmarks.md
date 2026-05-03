@@ -11,6 +11,7 @@ performance measurements. Use the smallest layer that matches the change.
 | Kernel integration | `make test-bpf` | Dataplane BPF integration tests under `internal/dataplane/` | Linux, root or matching capabilities, `SIDERSP_RUN_BPF_TESTS=1` |
 | VNET integration | `sudo make test-vnet` | End-to-end vnet latency matrix under `internal/vnetbench/` | Linux, root, `SIDERSP_RUN_VNET_BENCH=1`, prepared netns/bridge/veth env |
 | Microbenchmarks | `make bench` | Kernel dataplane microbenchmarks plus userspace build/execute/send benchmarks | Benchmark env vars as needed |
+| Regression gate | `make bench-gate` | Threshold-checked fast-path microbenchmarks for kernel reset and user-space SYN-ACK execution | Linux, root or matching capabilities for the BPF side |
 | End-to-end performance | `sudo make bench-vnet` | VNET-backed latency and throughput loops | Linux, root, prepared vnet env |
 
 `make test-privileged` runs the kernel and vnet integration layers together.
@@ -50,6 +51,7 @@ queue layout, and attach mode.
 | CPU | 12th Gen Intel Core i7-12700 (12 cores / 20 threads, max 4.9 GHz) |
 | Go | 1.25.5 linux/amd64 |
 | `make bench` | `BENCHTIME=200ms` |
+| `make bench-gate` | `BENCH_GATE_TIME=200ms` |
 | `make bench-vnet` | `BENCHTIME=200ms`, `VNET_SAMPLES=5` |
 
 ## Entry Points
@@ -62,6 +64,7 @@ sudo make test-vnet
 
 # pure benchmark aggregation
 make bench
+make bench-gate
 
 # vnet-backed end-to-end benchmark
 sudo make bench-vnet
@@ -81,6 +84,18 @@ tests and microbenchmarks.
 - kernel `tcp_reset`
 - packet build and packet processing
 - packet processing with real send
+
+`make bench-gate` is the lightweight regression gate for local perf checks. It
+fails when either guarded benchmark exceeds its configured `ns/op` threshold.
+Default coverage:
+
+- `BenchmarkBPFKernelTCPReset` with `BPF_BENCH_NS_MAX=1500`
+- `BenchmarkExecuteTCPSynAck` with `RESPONSE_BENCH_NS_MAX=400`
+
+Override those limits with environment variables when calibrating a different
+host profile. Keep the thresholds conservative enough to avoid false positives
+from normal host jitter. Use `BENCH_GATE_TIME` to lengthen the run when you
+want a less noisy local sample.
 
 `make bench-vnet` creates a fixed `bridge + veth + netns` topology and then
 runs the vnet latency check plus the end-to-end packet benchmarks.
