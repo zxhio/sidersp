@@ -175,6 +175,18 @@ func (r *Runtime) ReplaceRules(set rule.RuleSet) error {
 
 	r.logSnapshot(snapshot)
 
+	if err := r.applySnapshot(snapshot); err != nil {
+		return err
+	}
+
+	if err := r.attachOnce(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (r *Runtime) applySnapshot(snapshot mapSnapshot) error {
 	if !r.snapshotSet {
 		if err := r.writeFullSnapshot(snapshot); err != nil {
 			return err
@@ -186,11 +198,6 @@ func (r *Runtime) ReplaceRules(set rule.RuleSet) error {
 	}
 	r.snapshot = snapshot
 	r.snapshotSet = true
-
-	if err := r.attachOnce(); err != nil {
-		return err
-	}
-
 	return nil
 }
 

@@ -79,9 +79,10 @@ Go suite.
 `make test-vnet` isolates the vnet-backed integration chain from both unit-ish
 tests and microbenchmarks.
 
-`make bench` runs three performance groups in sequence:
+`make bench` runs four performance groups in sequence:
 
-- kernel `tcp_reset`
+- kernel dataplane microbenchmarks, including `tcp_reset` and flow-cache warm/cold candidate-scan runs
+- rule snapshot sync microbenchmarks, including full rewrite and incremental apply on a large ruleset
 - packet build and packet processing
 - packet processing with real send
 
