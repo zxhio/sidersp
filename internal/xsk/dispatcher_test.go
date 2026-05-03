@@ -10,21 +10,29 @@ type stubResponseConsumer struct {
 	envelopes []Envelope
 	sockets   []Socket
 	err       error
+	hook      func()
 }
 
 func (s *stubResponseConsumer) HandleXSK(_ context.Context, envelope Envelope, socket Socket) error {
 	s.envelopes = append(s.envelopes, envelope)
 	s.sockets = append(s.sockets, socket)
+	if s.hook != nil {
+		s.hook()
+	}
 	return s.err
 }
 
 type stubAnalysisSubmitter struct {
 	envelopes []Envelope
 	err       error
+	hook      func()
 }
 
 func (s *stubAnalysisSubmitter) SubmitXSK(_ context.Context, envelope Envelope) error {
 	s.envelopes = append(s.envelopes, envelope)
+	if s.hook != nil {
+		s.hook()
+	}
 	return s.err
 }
 
@@ -86,6 +94,42 @@ func TestDispatcherIgnoresAnalysisError(t *testing.T) {
 	}
 	if len(analysis.envelopes) != 1 {
 		t.Fatalf("analysis envelopes = %d, want 1", len(analysis.envelopes))
+	}
+}
+
+func TestDispatcherRunsResponseBeforeAnalysis(t *testing.T) {
+	t.Parallel()
+
+	var calls []string
+	response := &stubResponseConsumer{
+		hook: func() {
+			calls = append(calls, "response")
+		},
+	}
+	analysis := &stubAnalysisSubmitter{
+		hook: func() {
+			calls = append(calls, "analysis")
+		},
+	}
+	dispatcher, err := NewDispatcher(Consumers{
+		Response: response,
+		Analysis: analysis,
+	})
+	if err != nil {
+		t.Fatalf("NewDispatcher() error = %v", err)
+	}
+
+	socket := &stubSocket{fd: 42}
+	frame := []byte{0xe9, 0x03, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0xaa}
+	if err := dispatcher.Dispatch(context.Background(), 0, socket, frame); err != nil {
+		t.Fatalf("Dispatch() error = %v", err)
+	}
+
+	if len(calls) != 2 {
+		t.Fatalf("call count = %d, want 2", len(calls))
+	}
+	if calls[0] != "response" || calls[1] != "analysis" {
+		t.Fatalf("call order = %+v, want [response analysis]", calls)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"sidersp/internal/xsk"
 )
@@ -45,6 +46,10 @@ func TestRuntimeSubmitRejectsFullQueue(t *testing.T) {
 	if !errors.Is(err, ErrQueueFull) {
 		t.Fatalf("SubmitXSK() error = %v, want %v", err, ErrQueueFull)
 	}
+
+	if err := runtime.SubmitXSK(context.Background(), xsk.Envelope{QueueID: 2}); err != nil {
+		t.Fatalf("SubmitXSK() other queue error = %v, want nil", err)
+	}
 }
 
 func TestRuntimeRunStopsOnCancel(t *testing.T) {
@@ -69,8 +74,16 @@ func TestNewRuntimeUsesDefaultQueueSize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRuntime() error = %v", err)
 	}
-	if cap(runtime.queue) != defaultQueueSize {
-		t.Fatalf("queue cap = %d, want %d", cap(runtime.queue), defaultQueueSize)
+	if err := runtime.SubmitXSK(context.Background(), xsk.Envelope{QueueID: 7}); err != nil {
+		t.Fatalf("SubmitXSK() error = %v", err)
+	}
+
+	shard := runtime.queues[7]
+	if shard == nil {
+		t.Fatal("queue shard = nil, want shard for queue 7")
+	}
+	if cap(shard.queue) != defaultQueueSize {
+		t.Fatalf("queue cap = %d, want %d", cap(shard.queue), defaultQueueSize)
 	}
 }
 
@@ -95,6 +108,58 @@ func TestRuntimeRunExportsFrames(t *testing.T) {
 	}
 
 	if err := runtime.Run(ctx); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if sender.sendCalls != 1 {
+		t.Fatalf("send calls = %d, want 1", sender.sendCalls)
+	}
+	if len(sender.frames) != 1 || len(sender.frames[0]) != 4 {
+		t.Fatalf("frames = %+v, want one exported frame", sender.frames)
+	}
+}
+
+func TestRuntimeRunExportsFramesSubmittedAfterStart(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	sender := &stubPacketSender{
+		sendHook: func(_ []byte) {
+			cancel()
+		},
+	}
+	runtime, err := NewRuntime(Options{sender: sender})
+	if err != nil {
+		t.Fatalf("NewRuntime() error = %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- runtime.Run(ctx)
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	started := false
+	for time.Now().Before(deadline) {
+		runtime.mu.Lock()
+		started = runtime.runCtx != nil
+		runtime.mu.Unlock()
+		if started {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if !started {
+		t.Fatal("runtime did not enter running state before submit")
+	}
+
+	if err := runtime.SubmitXSK(context.Background(), xsk.Envelope{
+		QueueID: 3,
+		Frame:   []byte{9, 8, 7, 6},
+	}); err != nil {
+		t.Fatalf("SubmitXSK() error = %v", err)
+	}
+
+	if err := <-errCh; err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
 	if sender.sendCalls != 1 {
