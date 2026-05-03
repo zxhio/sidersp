@@ -236,10 +236,13 @@ response:
 
 analysis:
   interface: eth2
+  worker_cpus:
+    1: 7
 
 xsk:
   enabled: true
   queues: [0, 1]
+  worker_cpus: [2, 3]
   afxdp:
     frame_size: 4096
     tx_frame_reserve: 256
@@ -259,11 +262,17 @@ console:
 	if got := cfg.XSK.Queues; len(got) != 2 || got[0] != 0 || got[1] != 1 {
 		t.Fatalf("XSK.Queues = %+v, want [0 1]", got)
 	}
+	if got := cfg.XSK.WorkerCPUs; len(got) != 2 || got[0] != 2 || got[1] != 3 {
+		t.Fatalf("XSK.WorkerCPUs = %+v, want [2 3]", got)
+	}
 	if cfg.Response.ResultBufferSize != 2048 {
 		t.Fatalf("Response.ResultBufferSize = %d, want 2048", cfg.Response.ResultBufferSize)
 	}
 	if cfg.Analysis.Interface != "eth2" {
 		t.Fatalf("Analysis.Interface = %q, want %q", cfg.Analysis.Interface, "eth2")
+	}
+	if got := cfg.Analysis.WorkerCPUs[1]; got != 7 {
+		t.Fatalf("Analysis.WorkerCPUs = %+v, want queue 1 cpu 7", cfg.Analysis.WorkerCPUs)
 	}
 	if cfg.Egress.Interface != "eth1" ||
 		normalizeVLANMode(cfg.Egress.VLANMode) != "access" ||
@@ -455,6 +464,16 @@ func TestLoadRejectsInvalidXSKConfig(t *testing.T) {
 			want: "xsk: duplicate queue 0",
 		},
 		{
+			name: "negative worker cpu",
+			body: "worker_cpus: [-1]",
+			want: "xsk: worker cpu -1 out of range",
+		},
+		{
+			name: "worker cpu count mismatch",
+			body: "queues: [0, 1]\n  worker_cpus: [2]",
+			want: "xsk: worker_cpus count 1 must match queue count 2",
+		},
+		{
 			name: "reject response result buffer on xsk block",
 			body: "result_buffer_size: -1",
 			want: "field result_buffer_size not found",
@@ -622,6 +641,37 @@ console:
 	}
 	if !strings.Contains(err.Error(), `analysis: interface requires xsk.enabled=true`) {
 		t.Fatalf("Load() error = %q, want analysis interface validation", err)
+	}
+}
+
+func TestLoadRejectsInvalidAnalysisWorkerCPUs(t *testing.T) {
+	t.Parallel()
+
+	path := writeConfigFile(t, `controlplane:
+  rules_path: configs/rules.example.yaml
+
+dataplane:
+  interface: eth0
+
+analysis:
+  interface: eth2
+  worker_cpus:
+    0: -1
+
+xsk:
+  enabled: true
+  queues: [0]
+
+console:
+  listen_addr: 127.0.0.1:8080
+`)
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load() error = nil, want analysis worker cpu validation error")
+	}
+	if !strings.Contains(err.Error(), `analysis: worker_cpus queue 0 cpu -1 out of range`) {
+		t.Fatalf("Load() error = %q, want analysis worker cpu validation", err)
 	}
 }
 

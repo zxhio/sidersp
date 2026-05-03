@@ -103,6 +103,15 @@ func TestWorkerRegistersBeforeReceive(t *testing.T) {
 	}
 	locker := &stubThreadLocker{}
 	worker.thread = locker
+	affinityCalls := 0
+	affinityCPU := -1
+	worker.pinCPU = true
+	worker.cpuID = 9
+	worker.affinity = func(cpuID int) error {
+		affinityCalls++
+		affinityCPU = cpuID
+		return nil
+	}
 
 	if err := worker.Run(ctx); err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -115,6 +124,9 @@ func TestWorkerRegistersBeforeReceive(t *testing.T) {
 	}
 	if locker.lockCalls != 1 || locker.unlockCalls != 1 {
 		t.Fatalf("thread locker calls = %d/%d, want 1/1", locker.lockCalls, locker.unlockCalls)
+	}
+	if affinityCalls != 1 || affinityCPU != 9 {
+		t.Fatalf("affinity calls = %d cpu = %d, want 1/9", affinityCalls, affinityCPU)
 	}
 }
 
@@ -132,6 +144,35 @@ func TestWorkerReturnsRegisterError(t *testing.T) {
 	err = worker.Run(context.Background())
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("Run() error = %v, want %v", err, wantErr)
+	}
+	if socket.calls != 0 {
+		t.Fatalf("socket calls = %d, want 0", socket.calls)
+	}
+}
+
+func TestWorkerReturnsAffinityError(t *testing.T) {
+	t.Parallel()
+
+	wantErr := errors.New("affinity failed")
+	registrar := &stubRegistrar{}
+	socket := &stubSocket{fd: 42}
+	worker, err := NewWorker(7, 3, registrar, socket, func(_ context.Context, _ int, _ Socket, _ []byte) error { return nil })
+	if err != nil {
+		t.Fatalf("NewWorker() error = %v", err)
+	}
+	worker.pinCPU = true
+	worker.cpuID = 6
+	worker.affinity = func(int) error { return wantErr }
+
+	err = worker.Run(context.Background())
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("Run() error = %v, want %v", err, wantErr)
+	}
+	if !strings.Contains(err.Error(), "pin xsk worker queue 3 to cpu 6") {
+		t.Fatalf("Run() error = %q, want pinning context", err)
+	}
+	if registrar.calls != 0 {
+		t.Fatalf("registrar calls = %d, want 0", registrar.calls)
 	}
 	if socket.calls != 0 {
 		t.Fatalf("socket calls = %d, want 0", socket.calls)

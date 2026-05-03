@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/sirupsen/logrus"
+	"golang.org/x/sys/unix"
 
 	"sidersp/internal/afpacket"
 	"sidersp/internal/logs"
@@ -24,16 +25,18 @@ type queueShard struct {
 }
 
 type Runtime struct {
-	mu        sync.Mutex
-	queues    map[int]*queueShard
-	queueSize int
-	runCtx    context.Context
-	wg        sync.WaitGroup
-	sender    frameSender
-	ifaceName string
+	mu         sync.Mutex
+	queues     map[int]*queueShard
+	queueSize  int
+	runCtx     context.Context
+	wg         sync.WaitGroup
+	sender     frameSender
+	ifaceName  string
+	cpuByQueue map[int]int
 
 	lockOSThread   func()
 	unlockOSThread func()
+	setAffinity    func(int) error
 }
 
 func NewRuntime(opts Options) (*Runtime, error) {
@@ -52,16 +55,18 @@ func NewRuntime(opts Options) (*Runtime, error) {
 	}
 
 	return &Runtime{
-		queues:    make(map[int]*queueShard),
-		queueSize: opts.QueueSize,
-		sender:    sender,
-		ifaceName: opts.Interface,
+		queues:     make(map[int]*queueShard),
+		queueSize:  opts.QueueSize,
+		sender:     sender,
+		ifaceName:  opts.Interface,
+		cpuByQueue: copyWorkerCPUs(opts.WorkerCPUs),
 		lockOSThread: func() {
 			goruntime.LockOSThread()
 		},
 		unlockOSThread: func() {
 			goruntime.UnlockOSThread()
 		},
+		setAffinity: setCurrentThreadAffinity,
 	}, nil
 }
 
@@ -156,6 +161,20 @@ func (r *Runtime) startShardWorker(ctx context.Context, queueID int, queue <-cha
 		lockThread()
 		defer unlockThread()
 
+		if cpuID, ok := r.cpuByQueue[queueID]; ok {
+			setAffinity := r.setAffinity
+			if setAffinity == nil {
+				setAffinity = setCurrentThreadAffinity
+			}
+			if err := setAffinity(cpuID); err != nil {
+				logs.App().WithFields(logrus.Fields{
+					"queue":     queueID,
+					"interface": r.ifaceName,
+					"cpu":       cpuID,
+				}).WithError(err).Warn("Fail to pin analysis worker to cpu")
+			}
+		}
+
 		for {
 			select {
 			case <-ctx.Done():
@@ -175,4 +194,23 @@ func (r *Runtime) startShardWorker(ctx context.Context, queueID int, queue <-cha
 			}
 		}
 	}()
+}
+
+func copyWorkerCPUs(raw map[int]int) map[int]int {
+	if len(raw) == 0 {
+		return nil
+	}
+
+	cpus := make(map[int]int, len(raw))
+	for queueID, cpuID := range raw {
+		cpus[queueID] = cpuID
+	}
+	return cpus
+}
+
+func setCurrentThreadAffinity(cpuID int) error {
+	var cpus unix.CPUSet
+	cpus.Zero()
+	cpus.Set(cpuID)
+	return unix.SchedSetaffinity(0, &cpus)
 }

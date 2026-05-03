@@ -28,6 +28,8 @@ xsk:
   # if dataplane.combined_channels is set to a positive value.
   # Each queue gets one AF_XDP socket and one dedicated worker thread.
   queues: [0]
+  # Optional: pin each queue worker to a specific CPU. Order matches `queues`.
+  # worker_cpus: [2]
   afxdp:
     frame_size: 4096
     frame_count: 4096
@@ -45,6 +47,8 @@ response:
 analysis:
   # Optional: write selected packets to one external analysis interface.
   # Analysis export keeps one best-effort worker per observed XSK queue.
+  # Optional: pin analysis workers by XSK queue id.
+  # worker_cpus: {0: 4}
   # Leave empty to disable analysis export.
   interface: ""
 

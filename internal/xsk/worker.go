@@ -8,6 +8,7 @@ import (
 	"runtime"
 
 	"github.com/sirupsen/logrus"
+	"golang.org/x/sys/unix"
 
 	"sidersp/internal/logs"
 )
@@ -42,6 +43,9 @@ type Worker struct {
 	socket    Socket
 	handler   FrameHandler
 	thread    threadLocker
+	pinCPU    bool
+	cpuID     int
+	affinity  func(int) error
 }
 
 func NewWorker(ifindex, queueID int, registrar Registrar, socket Socket, handler FrameHandler) (*Worker, error) {
@@ -64,6 +68,7 @@ func NewWorker(ifindex, queueID int, registrar Registrar, socket Socket, handler
 		socket:    socket,
 		handler:   handler,
 		thread:    runtimeThreadLocker{},
+		affinity:  setCurrentThreadAffinity,
 	}, nil
 }
 
@@ -78,6 +83,16 @@ func (w *Worker) Run(ctx context.Context) error {
 	}
 	locker.LockOSThread()
 	defer locker.UnlockOSThread()
+
+	if w.pinCPU {
+		setAffinity := w.affinity
+		if setAffinity == nil {
+			setAffinity = setCurrentThreadAffinity
+		}
+		if err := setAffinity(w.cpuID); err != nil {
+			return fmt.Errorf("pin xsk worker queue %d to cpu %d: %w", w.queueID, w.cpuID, err)
+		}
+	}
 
 	if err := w.registrar.RegisterXSK(w.queueID, w.socket.FD()); err != nil {
 		return err
@@ -110,4 +125,11 @@ func (w *Worker) Run(ctx context.Context) error {
 			}).WithError(err).Debug("XSK frame handler error")
 		}
 	}
+}
+
+func setCurrentThreadAffinity(cpuID int) error {
+	var cpus unix.CPUSet
+	cpus.Zero()
+	cpus.Set(cpuID)
+	return unix.SchedSetaffinity(0, &cpus)
 }

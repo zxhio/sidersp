@@ -93,6 +93,8 @@ func TestRuntimeRunExportsFrames(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	lockCalls := 0
 	unlockCalls := 0
+	affinityCalls := 0
+	affinityCPU := -1
 	sender := &stubPacketSender{
 		sendHook: func(_ []byte) {
 			cancel()
@@ -107,6 +109,12 @@ func TestRuntimeRunExportsFrames(t *testing.T) {
 	}
 	runtime.unlockOSThread = func() {
 		unlockCalls++
+	}
+	runtime.cpuByQueue = map[int]int{1: 7}
+	runtime.setAffinity = func(cpuID int) error {
+		affinityCalls++
+		affinityCPU = cpuID
+		return nil
 	}
 	if err := runtime.SubmitXSK(ctx, xsk.Envelope{
 		QueueID: 1,
@@ -126,6 +134,9 @@ func TestRuntimeRunExportsFrames(t *testing.T) {
 	}
 	if lockCalls != 1 || unlockCalls != 1 {
 		t.Fatalf("thread locker calls = %d/%d, want 1/1", lockCalls, unlockCalls)
+	}
+	if affinityCalls != 1 || affinityCPU != 7 {
+		t.Fatalf("affinity calls = %d cpu = %d, want 1/7", affinityCalls, affinityCPU)
 	}
 }
 

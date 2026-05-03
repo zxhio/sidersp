@@ -23,6 +23,7 @@ type Runtime struct {
 	sockets []Socket
 	ifindex int
 	queues  []int
+	cpus    []int
 }
 
 func NewRuntime(opts Options, deps RuntimeDeps) (*Runtime, error) {
@@ -47,7 +48,7 @@ func NewRuntime(opts Options, deps RuntimeDeps) (*Runtime, error) {
 
 	workerSpecs := make([]WorkerSpec, 0, len(opts.Queues))
 	sockets := make([]Socket, 0, len(opts.Queues))
-	for _, queueID := range opts.Queues {
+	for i, queueID := range opts.Queues {
 		socket, err := newSocket(queueID)
 		if err != nil {
 			closeSockets(sockets)
@@ -59,6 +60,10 @@ func NewRuntime(opts Options, deps RuntimeDeps) (*Runtime, error) {
 		if err != nil {
 			closeSockets(sockets)
 			return nil, err
+		}
+		if len(opts.WorkerCPUs) != 0 {
+			worker.pinCPU = true
+			worker.cpuID = opts.WorkerCPUs[i]
 		}
 		workerSpecs = append(workerSpecs, WorkerSpec{QueueID: queueID, Worker: worker})
 	}
@@ -74,6 +79,7 @@ func NewRuntime(opts Options, deps RuntimeDeps) (*Runtime, error) {
 		sockets: sockets,
 		ifindex: opts.IfIndex,
 		queues:  append([]int(nil), opts.Queues...),
+		cpus:    append([]int(nil), opts.WorkerCPUs...),
 	}, nil
 }
 
@@ -83,10 +89,14 @@ func (r *Runtime) Run(ctx context.Context) error {
 	}
 	defer r.Close()
 
-	logs.App().WithFields(logrus.Fields{
+	fields := logrus.Fields{
 		"ifindex": r.ifindex,
 		"queues":  r.queues,
-	}).Info("Started xsk runtime")
+	}
+	if len(r.cpus) != 0 {
+		fields["worker_cpus"] = r.cpus
+	}
+	logs.App().WithFields(fields).Info("Started xsk runtime")
 
 	return r.group.Run(ctx)
 }

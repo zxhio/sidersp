@@ -66,13 +66,15 @@ type ResponseConfig struct {
 }
 
 type AnalysisConfig struct {
-	Interface string `yaml:"interface"`
+	Interface  string      `yaml:"interface"`
+	WorkerCPUs map[int]int `yaml:"worker_cpus"`
 }
 
 type XSKConfig struct {
-	Enabled bool        `yaml:"enabled"`
-	Queues  []int       `yaml:"queues"`
-	AFXDP   AFXDPConfig `yaml:"afxdp"`
+	Enabled    bool        `yaml:"enabled"`
+	Queues     []int       `yaml:"queues"`
+	WorkerCPUs []int       `yaml:"worker_cpus"`
+	AFXDP      AFXDPConfig `yaml:"afxdp"`
 }
 
 type AFXDPConfig struct {
@@ -169,7 +171,7 @@ func (c PacketPathConfig) validate() error {
 	if err := c.Egress.validate(); err != nil {
 		return fmt.Errorf("egress: %w", err)
 	}
-	if err := c.XSK.validate(); err != nil {
+	if err := c.XSK.validate(c.Dataplane.CombinedChannels); err != nil {
 		return fmt.Errorf("xsk: %w", err)
 	}
 	return nil
@@ -246,7 +248,7 @@ func (c DataplaneConfig) validate() error {
 	}
 }
 
-func (c XSKConfig) validate() error {
+func (c XSKConfig) validate(defaultQueueCount int) error {
 	seenQueues := make(map[int]struct{}, len(c.Queues))
 	for _, queue := range c.Queues {
 		if queue < 0 {
@@ -257,7 +259,33 @@ func (c XSKConfig) validate() error {
 		}
 		seenQueues[queue] = struct{}{}
 	}
+	for _, cpu := range c.WorkerCPUs {
+		if cpu < 0 {
+			return fmt.Errorf("worker cpu %d out of range", cpu)
+		}
+	}
+	if len(c.WorkerCPUs) != 0 {
+		queues := normalizedXSKQueues(c.Queues, defaultQueueCount)
+		if len(c.WorkerCPUs) != len(queues) {
+			return fmt.Errorf("worker_cpus count %d must match queue count %d", len(c.WorkerCPUs), len(queues))
+		}
+	}
 	return nil
+}
+
+func normalizedXSKQueues(raw []int, defaultQueueCount int) []int {
+	if len(raw) != 0 {
+		return append([]int(nil), raw...)
+	}
+	if defaultQueueCount <= 0 {
+		return []int{0}
+	}
+
+	queues := make([]int, defaultQueueCount)
+	for i := 0; i < defaultQueueCount; i++ {
+		queues[i] = i
+	}
+	return queues
 }
 
 func (c ResponseConfig) validate() error {
@@ -268,6 +296,14 @@ func (c ResponseConfig) validate() error {
 }
 
 func (c AnalysisConfig) validate(xskCfg XSKConfig) error {
+	for queueID, cpuID := range c.WorkerCPUs {
+		if queueID < 0 {
+			return fmt.Errorf("worker_cpus queue %d out of range", queueID)
+		}
+		if cpuID < 0 {
+			return fmt.Errorf("worker_cpus queue %d cpu %d out of range", queueID, cpuID)
+		}
+	}
 	if strings.TrimSpace(c.Interface) == "" {
 		return nil
 	}

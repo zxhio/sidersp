@@ -10,10 +10,11 @@ import (
 )
 
 type Options struct {
-	Enabled bool
-	IfIndex int
-	Queues  []int
-	AFXDP   afxdp.SocketConfig
+	Enabled    bool
+	IfIndex    int
+	Queues     []int
+	WorkerCPUs []int
+	AFXDP      afxdp.SocketConfig
 }
 
 func NewOptions(dataplaneCfg config.DataplaneConfig, xskCfg config.XSKConfig) (Options, error) {
@@ -31,6 +32,9 @@ func NewOptions(dataplaneCfg config.DataplaneConfig, xskCfg config.XSKConfig) (O
 	}
 	opts.IfIndex = iface.Index
 	opts.Queues = normalizedWorkerQueues(xskCfg.Queues, dataplaneCfg.CombinedChannels)
+	if len(xskCfg.WorkerCPUs) != 0 {
+		opts.WorkerCPUs = append([]int(nil), xskCfg.WorkerCPUs...)
+	}
 
 	afxdpCfg := newAFXDPConfig(xskCfg.AFXDP, iface.Index)
 	if err := afxdpCfg.Validate(); err != nil {
@@ -60,6 +64,9 @@ func normalizeOptions(opts Options) Options {
 	if len(opts.Queues) == 0 {
 		opts.Queues = []int{0}
 	}
+	if len(opts.WorkerCPUs) != 0 {
+		opts.WorkerCPUs = append([]int(nil), opts.WorkerCPUs...)
+	}
 	return opts
 }
 
@@ -69,6 +76,16 @@ func validateOptions(opts Options) error {
 	}
 	if len(opts.Queues) == 0 {
 		return fmt.Errorf("create xsk runtime: at least one queue is required")
+	}
+	if len(opts.WorkerCPUs) != 0 {
+		if len(opts.WorkerCPUs) != len(opts.Queues) {
+			return fmt.Errorf("create xsk runtime: worker cpu count %d must match queue count %d", len(opts.WorkerCPUs), len(opts.Queues))
+		}
+		for _, cpu := range opts.WorkerCPUs {
+			if cpu < 0 {
+				return fmt.Errorf("create xsk runtime: worker cpu %d out of range", cpu)
+			}
+		}
 	}
 	if err := opts.AFXDP.Validate(); err != nil {
 		return err
