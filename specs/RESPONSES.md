@@ -77,7 +77,7 @@ Used by `icmp_echo_reply`, `arp_reply`, `tcp_syn_ack`, `udp_echo_reply`, `dns_re
 
 ```text
 packet -> BPF parse/match -> write xsk_meta into XDP metadata -> XDP_REDIRECT to XSK
-AF_XDP backend -> expose xsk_meta as an 8-byte prefix to the XSK runtime
+frameio AF_XDP socket -> expose xsk_meta as an 8-byte prefix to the XSK runtime
 XSK runtime -> decode xsk_meta -> dispatch envelope -> response consumer -> parse full original packet -> AF_XDP TX or AF_PACKET TX
 ```
 
@@ -107,6 +107,10 @@ modes:
   resolve next-hop routing and L2 neighbors on that egress path. Non-IP
   actions such as `arp_reply` continue to transmit raw Ethernet frames through
   an AF_PACKET socket bound to the configured interface.
+
+The transport implementations live under the frame I/O infrastructure layer.
+The response module selects which transport to use for a given action but does
+not own the AF_XDP or AF_PACKET socket implementation details.
 
 The current same-interface response builders reject VLAN-tagged frames until
 VLAN tag preservation is implemented for user-space TX. The `tcp_syn_ack`
@@ -152,10 +156,10 @@ u16 action
 u16 reserved
 ```
 
-`xsk_meta` carries only dispatch metadata. The AF_XDP backend reads it from
-reserved XDP metadata headroom and exposes it as an 8-byte prefix to the XSK
-runtime. The response consumer must parse the redirected original packet for
-MAC, ARP, ICMP, TCP sequence, ACK, option, and payload context.
+`xsk_meta` carries only dispatch metadata. The AF_XDP frame I/O path reads it
+from reserved XDP metadata headroom and exposes it as an 8-byte prefix to the
+XSK runtime. The response consumer must parse the redirected original packet
+for MAC, ARP, ICMP, TCP sequence, ACK, option, and payload context.
 
 The XSK runtime must strip these 8 bytes before dispatching the original
 Ethernet frame. If BPF cannot allocate metadata or cannot submit the redirect,
@@ -165,10 +169,11 @@ failure counter is incremented.
 ## Response Result
 
 Full user-space response results are owned by the XSK response path. The
-current implementation provides dataplane-owned XSK runtime lifecycle, AF_XDP
-socket IO, queue workers, response result buffering, response execution, and
-runtime TX counters. Dataplane ringbuf events remain observation events with
-numeric verdict codes for `observe`, `tx`, `xsk`, and `redirect_tx`.
+current implementation provides dataplane-owned XSK runtime lifecycle, frame
+I/O-backed AF_XDP or AF_PACKET transport, queue workers, response result
+buffering, response execution, and runtime TX counters. Dataplane ringbuf
+events remain observation events with numeric verdict codes for `observe`,
+`tx`, `xsk`, and `redirect_tx`.
 
 Current response result shape:
 

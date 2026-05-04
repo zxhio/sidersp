@@ -6,10 +6,6 @@ import (
 	"time"
 )
 
-type frameSender interface {
-	SendFrame(context.Context, []byte) error
-}
-
 type ResponseExecutor struct {
 	ifindex int
 	queueID int

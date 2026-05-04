@@ -13,7 +13,8 @@ This document defines the system module contract. For the short agent-facing sum
 | `logging` | `internal/logs/` | active | Runtime log output setup, file rotation, and log-level management |
 | `model` | `internal/model/` | active | Shared data models used across modules |
 | `rule` | `internal/rule/` | active | Shared rule schema used by controlplane, console, and dataplane compilation |
-| `xsk` | `internal/xsk/` | active | AF_XDP transport, XSK metadata decode, queue workers, and XSK consumer dispatch |
+| `frameio` | `internal/frameio/` | active | AF_XDP and AF_PACKET frame I/O implementations, read/write primitives, and optional borrowed-send capabilities |
+| `xsk` | `internal/xsk/` | active | XSK metadata decode, queue workers, queue-local socket registration, and XSK consumer dispatch |
 | `analysis` | `internal/analysis/` | active | Selected packet export to one external analysis interface |
 | `response` | `internal/response/` | active | User-space response execution and result feedback |
 
@@ -31,8 +32,11 @@ Allowed direction:
 console/web -> controlplane -> dataplane
 console/controlplane/dataplane -> rule
 dataplane -> xsk
+xsk -> frameio
 xsk -> analysis
 xsk -> response
+analysis -> frameio
+response -> frameio
 cmd/console -> logging
 controlplane -> analysis
 controlplane -> response
@@ -43,6 +47,7 @@ Hard rules:
 
 - `dataplane` must not depend on `console`, `web`, or presentation logic
 - `dataplane` must not own policy orchestration
+- `frameio` must not decide whether a response or analysis should happen
 - `xsk` must not decide whether a response or analysis should happen
 - `console` / `web` must not perform rule matching, analysis decisions, or response decisions
 - `analysis` must not manage rules or execute responses
@@ -80,16 +85,36 @@ Responsible for user-space packet transport after dataplane redirect.
 
 Owns:
 
-- AF_XDP socket create, close, and queue binding
 - XSK metadata decode
 - Queue worker loops
+- Queue-local socket registration
 - Queue-parallel dispatch to response and analysis consumers
+
+Does not own:
+
+- Frame I/O implementation details
+- Rule matching
+- Rule lifecycle management
+- Response packet construction
+- Analysis decisions
+- Presentation or query APIs
+
+## Frame I/O
+
+Responsible for concrete packet frame transport primitives.
+
+Owns:
+
+- AF_XDP socket create, close, and queue binding
+- AF_PACKET frame send paths
+- Shared frame read/write capability interfaces
+- Optional borrowed-send optimizations where supported
 
 Does not own:
 
 - Rule matching
 - Rule lifecycle management
-- Response packet construction
+- Response decisions
 - Analysis decisions
 - Presentation or query APIs
 
@@ -167,15 +192,15 @@ Module for active user-space response execution.
 
 Current implementation status: XSK response consumer dispatch, response packet
 builders, response execution, bounded in-memory response result buffering, and
-shared TX backend selection exist. Same-interface builders still reject
-VLAN-tagged frames and TCP SYN payloads until those response semantics are
-implemented.
+sender selection across queue-local XSK TX or alternate egress frame I/O
+exist. Same-interface builders still reject VLAN-tagged frames and TCP SYN
+payloads until those response semantics are implemented.
 
 Owns:
 
 - User-space TX response execution
 - Response-side sender selection for same-interface XSK TX and alternate-egress
-  TX backend selection for supported actions
+  frame I/O for supported actions
 - XSK response-envelope consumption
 - Response result recording
 - Failure feedback
@@ -184,6 +209,7 @@ Does not own:
 
 - Rule matching
 - Response decision making
+- Frame I/O implementation details
 - BPF kernel TX actions
 
 ## Contract Documents

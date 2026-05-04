@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/gopacket/layers"
 
-	"sidersp/internal/afpacket"
+	"sidersp/internal/frameio/afpacket"
 )
 
 const defaultAFPacketBenchmarkInterface = "lo"

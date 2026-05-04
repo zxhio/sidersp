@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"sync"
+
+	"sidersp/internal/frameio"
 )
 
 type responseSender interface {
@@ -11,19 +13,9 @@ type responseSender interface {
 	Backend() TXBackend
 }
 
-// borrowedFrameSender declares that SendBorrowedFrame consumes the frame
-// synchronously and will not retain the slice after return.
-type borrowedFrameSender interface {
-	SendBorrowedFrame(context.Context, []byte) error
-}
-
-type borrowedIPv4PacketSender interface {
-	SendBorrowedIPv4Packet(context.Context, []byte) error
-}
-
 type responseTXSender struct {
 	backend   TXBackend
-	out       frameSender
+	out       frameio.WriteCloser
 	buildOpts BuildOptions
 }
 
@@ -61,7 +53,7 @@ func (s *responseTXSender) Backend() TXBackend {
 	return s.backend
 }
 
-func sendResponseFrame(ctx context.Context, out frameSender, meta XSKMetadata, builder Builder, frame []byte, buildOpts BuildOptions, pkt *Packet) error {
+func sendResponseFrame(ctx context.Context, out frameio.WriteCloser, meta XSKMetadata, builder Builder, frame []byte, buildOpts BuildOptions, pkt *Packet) error {
 	if pkt == nil || builder == nil {
 		engine := getResponseEngine()
 		defer putResponseEngine(engine)
@@ -74,21 +66,21 @@ func sendResponseFrame(ctx context.Context, out frameSender, meta XSKMetadata, b
 		}
 	}
 
-	if borrowedIPv4, ok := out.(borrowedIPv4PacketSender); ok {
+	if borrowedIPv4, ok := out.(frameio.BorrowedIPv4PacketWriter); ok {
 		buf := acquireFrameBuffer()
 		defer releaseFrameBuffer(buf)
 
 		responsePacket, err := buildResponseIPv4Packet(builder, meta, pkt, buildOpts, buf.buf)
 		if err == nil {
 			buf.buf = responsePacket
-			return borrowedIPv4.SendBorrowedIPv4Packet(ctx, responsePacket)
+			return borrowedIPv4.WriteBorrowedIPv4Packet(ctx, responsePacket)
 		}
 		if !errors.Is(err, errResponseRequiresEthernetFraming) {
 			return err
 		}
 	}
 
-	if borrowed, ok := out.(borrowedFrameSender); ok {
+	if borrowed, ok := out.(frameio.BorrowedFrameWriter); ok {
 		buf := acquireFrameBuffer()
 		defer releaseFrameBuffer(buf)
 
@@ -97,12 +89,12 @@ func sendResponseFrame(ctx context.Context, out frameSender, meta XSKMetadata, b
 			return err
 		}
 		buf.buf = responseFrame
-		return borrowed.SendBorrowedFrame(ctx, responseFrame)
+		return borrowed.WriteBorrowedFrame(ctx, responseFrame)
 	}
 
 	responseFrame, err := buildResponseFrame(builder, meta, pkt, buildOpts, nil)
 	if err != nil {
 		return err
 	}
-	return out.SendFrame(ctx, responseFrame)
+	return out.WriteFrame(ctx, responseFrame)
 }

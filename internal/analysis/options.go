@@ -12,7 +12,6 @@ type Options struct {
 	Interface  string
 	QueueSize  int
 	WorkerCPUs map[int]int
-	sender     frameSender
 }
 
 func NewOptions(analysisCfg config.AnalysisConfig, xskCfg config.XSKConfig) (Options, error) {
@@ -47,9 +46,6 @@ func normalizeOptions(opts Options) Options {
 func validateOptions(opts Options) error {
 	if opts.QueueSize <= 0 {
 		return fmt.Errorf("create analysis runtime: queue size must be > 0")
-	}
-	if opts.sender == nil && opts.Interface == "" {
-		return fmt.Errorf("create analysis runtime: interface is required")
 	}
 	for queueID, cpuID := range opts.WorkerCPUs {
 		if queueID < 0 {

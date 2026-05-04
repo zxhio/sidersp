@@ -899,17 +899,19 @@ type benchmarkTransmitter struct {
 	count     int
 }
 
-func (t *benchmarkTransmitter) SendFrame(_ context.Context, frame []byte) error {
+func (t *benchmarkTransmitter) WriteFrame(_ context.Context, frame []byte) error {
 	t.lastFrame = frame
 	t.count++
 	return nil
 }
 
-func (t *benchmarkTransmitter) SendBorrowedFrame(_ context.Context, frame []byte) error {
+func (t *benchmarkTransmitter) WriteBorrowedFrame(_ context.Context, frame []byte) error {
 	t.lastFrame = frame
 	t.count++
 	return nil
 }
+
+func (t *benchmarkTransmitter) Close() error { return nil }
 
 func BenchmarkBuildICMPEchoReply(b *testing.B) {
 	benchmarkBuildResponseFrame(b, XSKMetadata{Action: ActionICMPEchoReply}, buildTestICMPEchoRequest(b), BuildOptions{})

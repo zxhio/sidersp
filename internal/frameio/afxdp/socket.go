@@ -20,8 +20,8 @@ type Socket struct {
 	txStanding uint32
 }
 
-// NewSocket creates and binds an AF_XDP socket for the given queue ID.
-func NewSocket(cfg SocketConfig, queueID int) (*Socket, error) {
+// New creates and binds an AF_XDP socket for the given queue ID.
+func New(cfg SocketConfig, queueID int) (*Socket, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -125,10 +125,10 @@ func (s *Socket) FD() uint32 {
 	return uint32(s.sockfd)
 }
 
-// Receive polls the RX ring and returns one metadata-prefixed redirected
+// ReadFrame polls the RX ring and returns one metadata-prefixed redirected
 // frame. The returned slice is copied out of UMEM so callers do not hold
 // AF_XDP frame ownership across response execution.
-func (s *Socket) Receive(ctx context.Context) ([]byte, error) {
+func (s *Socket) ReadFrame(ctx context.Context) ([]byte, error) {
 	pollFds := []unix.PollFd{
 		{Fd: int32(s.sockfd), Events: unix.POLLIN},
 	}
@@ -154,9 +154,9 @@ func (s *Socket) Receive(ctx context.Context) ([]byte, error) {
 	}
 }
 
-// Transmit sends a response frame by allocating a UMEM slot, copying data,
+// WriteFrame sends a response frame by allocating a UMEM slot, copying data,
 // submitting a TX descriptor, and kicking the TX ring if needed.
-func (s *Socket) SendFrame(_ context.Context, frame []byte) error {
+func (s *Socket) WriteFrame(_ context.Context, frame []byte) error {
 	maxPayloadSize := int(s.cfg.FrameSize) - xskMetadataHeadroom
 	if len(frame) > maxPayloadSize {
 		return fmt.Errorf("transmit: frame length %d exceeds af_xdp payload size %d", len(frame), maxPayloadSize)
@@ -198,10 +198,10 @@ func (s *Socket) SendFrame(_ context.Context, frame []byte) error {
 	return nil
 }
 
-// SendBorrowedFrame consumes the frame synchronously and does not retain the
+// WriteBorrowedFrame consumes the frame synchronously and does not retain the
 // caller-owned slice after return.
-func (s *Socket) SendBorrowedFrame(ctx context.Context, frame []byte) error {
-	return s.SendFrame(ctx, frame)
+func (s *Socket) WriteBorrowedFrame(ctx context.Context, frame []byte) error {
+	return s.WriteFrame(ctx, frame)
 }
 
 // Close completes pending TX, unmaps all rings and UMEM, and closes the socket.

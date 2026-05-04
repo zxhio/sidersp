@@ -6,27 +6,31 @@ import (
 	"io"
 	"net"
 
-	"sidersp/internal/afpacket"
+	"sidersp/internal/frameio"
 	"sidersp/internal/model"
 	"sidersp/internal/rule"
 	"sidersp/internal/xsk"
 )
 
 type Runtime struct {
-	results         *ResultBuffer
-	stats           *statsCounters
-	closers         []io.Closer
-	ruleConfigs     *RuleConfigStore
-	ifindex         int
-	senderMode      string
-	egressInterface string
-	buildOpts       BuildOptions
-	afpacketOut     frameSender
+	results      *ResultBuffer
+	stats        *statsCounters
+	closers      []io.Closer
+	ruleConfigs  *RuleConfigStore
+	ifindex      int
+	buildOpts    BuildOptions
+	egressWriter frameio.WriteCloser
 }
 
-func NewRuntime(opts Options) (*Runtime, error) {
+func NewRuntime(opts Options, egressWriter frameio.WriteCloser) (*Runtime, error) {
 	if err := validateOptions(opts); err != nil {
 		return nil, err
+	}
+	if opts.EgressInterface == "" && egressWriter != nil {
+		return nil, fmt.Errorf("create response runtime: egress writer requires egress interface")
+	}
+	if opts.EgressInterface != "" && egressWriter == nil {
+		return nil, fmt.Errorf("create response runtime: egress writer is required")
 	}
 
 	results, err := NewResultBuffer(opts.ResultBufferSize)
@@ -41,29 +45,23 @@ func NewRuntime(opts Options) (*Runtime, error) {
 		HardwareAddr: append(net.HardwareAddr(nil), opts.HardwareAddr...),
 		RuleConfigs:  ruleConfigs,
 	}
-	afpacketOut, err := openAFPacketFrameSender(opts.EgressInterface)
-	if err != nil {
-		return nil, err
-	}
-	if afpacketOut != nil {
-		closers = append(closers, afpacketOut.(io.Closer))
+	if egressWriter != nil {
+		closers = append(closers, egressWriter)
 	}
 
 	return &Runtime{
-		results:         results,
-		stats:           stats,
-		closers:         closers,
-		ruleConfigs:     ruleConfigs,
-		ifindex:         opts.IfIndex,
-		senderMode:      senderMode(opts.EgressInterface),
-		egressInterface: opts.EgressInterface,
-		buildOpts:       buildOpts,
-		afpacketOut:     afpacketOut,
+		results:      results,
+		stats:        stats,
+		closers:      closers,
+		ruleConfigs:  ruleConfigs,
+		ifindex:      opts.IfIndex,
+		buildOpts:    buildOpts,
+		egressWriter: egressWriter,
 	}, nil
 }
 
-func buildResponseSender(socket xsk.Socket, afpacketOut frameSender, buildOpts BuildOptions) responseSender {
-	if afpacketOut == nil {
+func buildResponseSender(socket xsk.Socket, egressWriter frameio.WriteCloser, buildOpts BuildOptions) responseSender {
+	if egressWriter == nil {
 		return &responseTXSender{
 			backend:   TXBackendAFXDP,
 			out:       socket,
@@ -72,20 +70,9 @@ func buildResponseSender(socket xsk.Socket, afpacketOut frameSender, buildOpts B
 	}
 	return &responseTXSender{
 		backend:   TXBackendAFPacket,
-		out:       afpacketOut,
+		out:       egressWriter,
 		buildOpts: buildOpts,
 	}
-}
-
-func openAFPacketFrameSender(ifaceName string) (frameSender, error) {
-	if ifaceName == "" {
-		return nil, nil
-	}
-	frameSender, err := afpacket.New(ifaceName)
-	if err != nil {
-		return nil, fmt.Errorf("create af_packet sender: %w", err)
-	}
-	return frameSender, nil
 }
 
 func (r *Runtime) Close() error {
@@ -110,7 +97,7 @@ func (r *Runtime) HandleXSK(ctx context.Context, envelope xsk.Envelope, socket x
 	executor, err := NewResponseExecutor(ResponseExecutorConfig{
 		IfIndex: r.ifindex,
 		QueueID: envelope.QueueID,
-		Sender:  buildResponseSender(socket, r.afpacketOut, r.buildOpts),
+		Sender:  buildResponseSender(socket, r.egressWriter, r.buildOpts),
 		Results: r.results,
 		Stats:   r.stats,
 	})
@@ -147,11 +134,4 @@ func (r *Runtime) ResetStats() error {
 	}
 	r.stats.reset()
 	return nil
-}
-
-func senderMode(egressInterface string) string {
-	if egressInterface == "" {
-		return string(TXBackendAFXDP)
-	}
-	return string(TXBackendAFPacket)
 }

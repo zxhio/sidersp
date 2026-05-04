@@ -17,6 +17,8 @@ import (
 	"sidersp/internal/console"
 	"sidersp/internal/controlplane"
 	"sidersp/internal/dataplane"
+	"sidersp/internal/frameio"
+	"sidersp/internal/frameio/afpacket"
 	"sidersp/internal/logs"
 	"sidersp/internal/model"
 	"sidersp/internal/response"
@@ -66,7 +68,15 @@ func main() {
 
 	var responseRuntime *response.Runtime
 	if responseOpts.Enabled {
-		responseRuntime, err = response.NewRuntime(responseOpts)
+		var responseWriter frameio.WriteCloser
+		if responseOpts.EgressInterface != "" {
+			responseWriter, err = afpacket.New(responseOpts.EgressInterface)
+			if err != nil {
+				logs.App().WithError(err).Fatal("Fail to build response egress writer")
+			}
+		}
+
+		responseRuntime, err = response.NewRuntime(responseOpts, responseWriter)
 		if err != nil {
 			logs.App().WithError(err).Fatal("Fail to build response runtime")
 		}
@@ -84,7 +94,13 @@ func main() {
 
 	var analysisRuntime *analysis.Runtime
 	if analysisOpts.Enabled {
-		analysisRuntime, err = analysis.NewRuntime(analysisOpts)
+		var analysisWriter frameio.WriteCloser
+		analysisWriter, err = afpacket.New(analysisOpts.Interface)
+		if err != nil {
+			logs.App().WithError(err).Fatal("Fail to build analysis writer")
+		}
+
+		analysisRuntime, err = analysis.NewRuntime(analysisOpts, analysisWriter)
 		if err != nil {
 			logs.App().WithError(err).Fatal("Fail to build analysis runtime")
 		}

@@ -12,14 +12,16 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-type Sender struct {
+const readPollTimeoutMS = 100
+
+type Socket struct {
 	ifindex int
 	frameFD int
 	ipv4FD  int
 	mu      sync.Mutex
 }
 
-func New(ifaceName string) (*Sender, error) {
+func New(ifaceName string) (*Socket, error) {
 	iface, err := net.InterfaceByName(ifaceName)
 	if err != nil {
 		return nil, fmt.Errorf("lookup af_packet interface %s: %w", ifaceName, err)
@@ -28,6 +30,13 @@ func New(ifaceName string) (*Sender, error) {
 	fd, err := unix.Socket(unix.AF_PACKET, unix.SOCK_RAW, int(htons(unix.ETH_P_ALL)))
 	if err != nil {
 		return nil, fmt.Errorf("create af_packet socket: %w", err)
+	}
+	if err := unix.Bind(fd, &unix.SockaddrLinklayer{
+		Ifindex:  iface.Index,
+		Protocol: htons(unix.ETH_P_ALL),
+	}); err != nil {
+		unix.Close(fd)
+		return nil, fmt.Errorf("bind af_packet socket to %s: %w", ifaceName, err)
 	}
 
 	ipv4FD, err := unix.Socket(unix.AF_INET, unix.SOCK_RAW, unix.IPPROTO_RAW)
@@ -46,26 +55,62 @@ func New(ifaceName string) (*Sender, error) {
 		return nil, fmt.Errorf("enable raw ipv4 hdrincl on %s: %w", ifaceName, err)
 	}
 
-	return &Sender{
+	return &Socket{
 		ifindex: iface.Index,
 		frameFD: fd,
 		ipv4FD:  ipv4FD,
 	}, nil
 }
 
-func (s *Sender) SendFrame(ctx context.Context, frame []byte) error {
+func (s *Socket) FD() uint32 {
+	return uint32(s.frameFD)
+}
+
+func (s *Socket) ReadFrame(ctx context.Context) ([]byte, error) {
+	pollFds := []unix.PollFd{
+		{Fd: int32(s.frameFD), Events: unix.POLLIN},
+	}
+
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, nil
+		}
+
+		_, err := unix.Poll(pollFds, readPollTimeoutMS)
+		if err != nil && err != unix.EINTR {
+			return nil, fmt.Errorf("poll af_packet socket: %w", err)
+		}
+		if pollFds[0].Revents&unix.POLLIN == 0 {
+			continue
+		}
+
+		s.mu.Lock()
+		buf := make([]byte, 65536)
+		n, _, err := unix.Recvfrom(s.frameFD, buf, 0)
+		s.mu.Unlock()
+		if err != nil {
+			if err == unix.EINTR {
+				continue
+			}
+			return nil, fmt.Errorf("read af_packet frame on ifindex %d: %w", s.ifindex, err)
+		}
+		return append([]byte(nil), buf[:n]...), nil
+	}
+}
+
+func (s *Socket) WriteFrame(ctx context.Context, frame []byte) error {
 	return s.send(ctx, frame)
 }
 
-func (s *Sender) SendBorrowedFrame(ctx context.Context, frame []byte) error {
+func (s *Socket) WriteBorrowedFrame(ctx context.Context, frame []byte) error {
 	return s.send(ctx, frame)
 }
 
-func (s *Sender) SendBorrowedIPv4Packet(ctx context.Context, packet []byte) error {
+func (s *Socket) WriteBorrowedIPv4Packet(ctx context.Context, packet []byte) error {
 	return s.sendIPv4Packet(ctx, packet)
 }
 
-func (s *Sender) send(ctx context.Context, frame []byte) error {
+func (s *Socket) send(ctx context.Context, frame []byte) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -82,7 +127,7 @@ func (s *Sender) send(ctx context.Context, frame []byte) error {
 	return nil
 }
 
-func (s *Sender) sendIPv4Packet(ctx context.Context, packet []byte) error {
+func (s *Socket) sendIPv4Packet(ctx context.Context, packet []byte) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -107,7 +152,7 @@ func (s *Sender) sendIPv4Packet(ctx context.Context, packet []byte) error {
 	return nil
 }
 
-func (s *Sender) Close() error {
+func (s *Socket) Close() error {
 	if s == nil {
 		return nil
 	}

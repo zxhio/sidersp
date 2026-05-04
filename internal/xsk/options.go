@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"sidersp/internal/config"
-	"sidersp/internal/xsk/afxdp"
+	"sidersp/internal/frameio/afxdp"
 )
 
 type Options struct {

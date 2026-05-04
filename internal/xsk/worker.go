@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"runtime"
 
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
 
+	"sidersp/internal/frameio"
 	"sidersp/internal/logs"
 )
 
@@ -17,12 +17,7 @@ type Registrar interface {
 	RegisterXSK(queueID int, fd uint32) error
 }
 
-type Socket interface {
-	FD() uint32
-	Receive(context.Context) ([]byte, error)
-	SendFrame(context.Context, []byte) error
-	io.Closer
-}
+type Socket = frameio.Socket
 
 type FrameHandler func(ctx context.Context, queueID int, socket Socket, frame []byte) error
 
@@ -108,7 +103,7 @@ func (w *Worker) Run(ctx context.Context) error {
 			return nil
 		}
 
-		frame, err := w.socket.Receive(ctx)
+		frame, err := w.socket.ReadFrame(ctx)
 		if err != nil {
 			if ctx.Err() != nil || errors.Is(err, context.Canceled) {
 				return nil

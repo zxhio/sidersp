@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"sidersp/internal/xsk/afxdp"
+	"sidersp/internal/frameio/afxdp"
 )
 
 func TestValidateOptionsRejectsWorkerCPUCountMismatch(t *testing.T) {

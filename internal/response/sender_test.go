@@ -12,12 +12,12 @@ type stubFrameSender struct {
 	closed bool
 }
 
-func (s *stubFrameSender) SendFrame(_ context.Context, frame []byte) error {
+func (s *stubFrameSender) WriteFrame(_ context.Context, frame []byte) error {
 	s.frames = append(s.frames, append([]byte(nil), frame...))
 	return s.err
 }
 
-func (s *stubFrameSender) SendBorrowedFrame(_ context.Context, frame []byte) error {
+func (s *stubFrameSender) WriteBorrowedFrame(_ context.Context, frame []byte) error {
 	s.frames = append(s.frames, append([]byte(nil), frame...))
 	return s.err
 }
@@ -31,30 +31,34 @@ type retainingFrameSender struct {
 	frames [][]byte
 }
 
-func (s *retainingFrameSender) SendFrame(_ context.Context, frame []byte) error {
+func (s *retainingFrameSender) WriteFrame(_ context.Context, frame []byte) error {
 	s.frames = append(s.frames, frame)
 	return nil
 }
+
+func (s *retainingFrameSender) Close() error { return nil }
 
 type stubMixedSender struct {
 	frames      [][]byte
 	ipv4Packets [][]byte
 }
 
-func (s *stubMixedSender) SendFrame(_ context.Context, frame []byte) error {
+func (s *stubMixedSender) WriteFrame(_ context.Context, frame []byte) error {
 	s.frames = append(s.frames, append([]byte(nil), frame...))
 	return nil
 }
 
-func (s *stubMixedSender) SendBorrowedFrame(_ context.Context, frame []byte) error {
+func (s *stubMixedSender) WriteBorrowedFrame(_ context.Context, frame []byte) error {
 	s.frames = append(s.frames, append([]byte(nil), frame...))
 	return nil
 }
 
-func (s *stubMixedSender) SendBorrowedIPv4Packet(_ context.Context, packet []byte) error {
+func (s *stubMixedSender) WriteBorrowedIPv4Packet(_ context.Context, packet []byte) error {
 	s.ipv4Packets = append(s.ipv4Packets, append([]byte(nil), packet...))
 	return nil
 }
+
+func (s *stubMixedSender) Close() error { return nil }
 
 func TestAFXDPSenderBuildsAndSendsFrame(t *testing.T) {
 	t.Parallel()
@@ -79,8 +83,8 @@ func TestAFPacketSenderBuildsAndSendsFrame(t *testing.T) {
 
 	out := &stubFrameSender{}
 	sender := &responseTXSender{
-		backend:   TXBackendAFPacket,
-		out: out,
+		backend: TXBackendAFPacket,
+		out:     out,
 		buildOpts: BuildOptions{
 			HardwareAddr: testHWAddr,
 		},
@@ -115,8 +119,8 @@ func TestAFPacketSenderUsesARPBuildOptions(t *testing.T) {
 
 	out := &stubFrameSender{}
 	sender := &responseTXSender{
-		backend:   TXBackendAFPacket,
-		out: out,
+		backend: TXBackendAFPacket,
+		out:     out,
 		buildOpts: BuildOptions{
 			HardwareAddr: testHWAddr,
 		},
@@ -156,8 +160,8 @@ func TestAFPacketSenderFallsBackToFramePathForARPReply(t *testing.T) {
 
 	out := &stubMixedSender{}
 	sender := &responseTXSender{
-		backend:   TXBackendAFPacket,
-		out: out,
+		backend: TXBackendAFPacket,
+		out:     out,
 		buildOpts: BuildOptions{
 			HardwareAddr: testHWAddr,
 		},

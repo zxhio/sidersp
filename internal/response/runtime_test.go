@@ -18,11 +18,11 @@ type stubXSKSocket struct {
 
 func (s *stubXSKSocket) FD() uint32 { return s.fd }
 
-func (s *stubXSKSocket) Receive(context.Context) ([]byte, error) {
+func (s *stubXSKSocket) ReadFrame(context.Context) ([]byte, error) {
 	return nil, context.Canceled
 }
 
-func (s *stubXSKSocket) SendFrame(_ context.Context, frame []byte) error {
+func (s *stubXSKSocket) WriteFrame(_ context.Context, frame []byte) error {
 	s.txFrames = append(s.txFrames, append([]byte(nil), frame...))
 	return nil
 }
@@ -46,7 +46,7 @@ func normalizeTestOptions(opts Options) Options {
 func TestNewRuntimeUsesDefaults(t *testing.T) {
 	t.Parallel()
 
-	runtime, err := NewRuntime(normalizeTestOptions(Options{}))
+	runtime, err := NewRuntime(normalizeTestOptions(Options{}), nil)
 	if err != nil {
 		t.Fatalf("NewRuntime() error = %v", err)
 	}
@@ -95,7 +95,7 @@ func TestResolveTXHardwareAddrUsesInterfaceDefault(t *testing.T) {
 func TestRuntimeHandleXSKSendsResponse(t *testing.T) {
 	t.Parallel()
 
-	runtime, err := NewRuntime(normalizeTestOptions(Options{}))
+	runtime, err := NewRuntime(normalizeTestOptions(Options{}), nil)
 	if err != nil {
 		t.Fatalf("NewRuntime() error = %v", err)
 	}
@@ -127,7 +127,7 @@ func TestRuntimeHandleXSKSendsResponse(t *testing.T) {
 func TestRuntimeResultsReturnsCopy(t *testing.T) {
 	t.Parallel()
 
-	runtime, err := NewRuntime(normalizeTestOptions(Options{}))
+	runtime, err := NewRuntime(normalizeTestOptions(Options{}), nil)
 	if err != nil {
 		t.Fatalf("NewRuntime() error = %v", err)
 	}
@@ -151,7 +151,7 @@ func TestRuntimeResultsReturnsCopy(t *testing.T) {
 func TestRuntimeReadStatsReturnsResponseCounters(t *testing.T) {
 	t.Parallel()
 
-	runtime, err := NewRuntime(normalizeTestOptions(Options{}))
+	runtime, err := NewRuntime(normalizeTestOptions(Options{}), nil)
 	if err != nil {
 		t.Fatalf("NewRuntime() error = %v", err)
 	}
@@ -176,7 +176,7 @@ func TestRuntimeReadStatsReturnsResponseCounters(t *testing.T) {
 func TestRuntimeResetStatsClearsResponseCounters(t *testing.T) {
 	t.Parallel()
 
-	runtime, err := NewRuntime(normalizeTestOptions(Options{}))
+	runtime, err := NewRuntime(normalizeTestOptions(Options{}), nil)
 	if err != nil {
 		t.Fatalf("NewRuntime() error = %v", err)
 	}
@@ -195,7 +195,7 @@ func TestRuntimeResetStatsClearsResponseCounters(t *testing.T) {
 func TestNewRuntimeRejectsUnnormalizedOptions(t *testing.T) {
 	t.Parallel()
 
-	_, err := NewRuntime(Options{})
+	_, err := NewRuntime(Options{}, nil)
 	if err == nil {
 		t.Fatal("NewRuntime() error = nil, want validation error")
 	}

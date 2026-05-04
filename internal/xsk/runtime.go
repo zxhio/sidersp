@@ -6,8 +6,8 @@ import (
 
 	"github.com/sirupsen/logrus"
 
+	"sidersp/internal/frameio/afxdp"
 	"sidersp/internal/logs"
-	"sidersp/internal/xsk/afxdp"
 )
 
 type SocketFactory func(queueID int) (Socket, error)
@@ -42,7 +42,7 @@ func NewRuntime(opts Options, deps RuntimeDeps) (*Runtime, error) {
 	newSocket := deps.NewSocket
 	if newSocket == nil {
 		newSocket = func(queueID int) (Socket, error) {
-			return afxdp.NewSocket(opts.AFXDP, queueID)
+			return afxdp.New(opts.AFXDP, queueID)
 		}
 	}
 

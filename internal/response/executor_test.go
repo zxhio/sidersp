@@ -6,6 +6,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"sidersp/internal/frameio"
 )
 
 type stubFrameTransmitter struct {
@@ -13,10 +15,12 @@ type stubFrameTransmitter struct {
 	frames [][]byte
 }
 
-func (s *stubFrameTransmitter) SendFrame(_ context.Context, frame []byte) error {
+func (s *stubFrameTransmitter) WriteFrame(_ context.Context, frame []byte) error {
 	s.frames = append(s.frames, append([]byte(nil), frame...))
 	return s.err
 }
+
+func (s *stubFrameTransmitter) Close() error { return nil }
 
 func TestResponseExecutorSendsAndRecordsResult(t *testing.T) {
 	t.Parallel()
@@ -241,7 +245,7 @@ func TestResponseExecutorTracksAFPacketBackend(t *testing.T) {
 		QueueID: 3,
 		Sender: &responseTXSender{
 			backend: TXBackendAFPacket,
-			out: tx,
+			out:     tx,
 			buildOpts: BuildOptions{
 				HardwareAddr: testHWAddr,
 			},
@@ -281,7 +285,7 @@ func TestResponseExecutorTracksAFPacketFailure(t *testing.T) {
 		QueueID: 3,
 		Sender: &responseTXSender{
 			backend: TXBackendAFPacket,
-			out: tx,
+			out:     tx,
 			buildOpts: BuildOptions{
 				HardwareAddr: testHWAddr,
 			},
@@ -384,7 +388,7 @@ func TestResponseExecutorRejectsShortRedirectedFrame(t *testing.T) {
 	}
 }
 
-func newTestExecutor(t testing.TB, tx frameSender, results *ResultBuffer, opts BuildOptions) *ResponseExecutor {
+func newTestExecutor(t testing.TB, tx frameio.WriteCloser, results *ResultBuffer, opts BuildOptions) *ResponseExecutor {
 	t.Helper()
 
 	executor, err := NewResponseExecutor(ResponseExecutorConfig{

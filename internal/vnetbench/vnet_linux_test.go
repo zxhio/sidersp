@@ -18,11 +18,12 @@ import (
 	"time"
 
 	"sidersp/internal/dataplane"
+	"sidersp/internal/frameio/afpacket"
+	"sidersp/internal/frameio/afxdp"
 	"sidersp/internal/logs"
 	"sidersp/internal/response"
 	"sidersp/internal/rule"
 	"sidersp/internal/xsk"
-	"sidersp/internal/xsk/afxdp"
 )
 
 const (
@@ -375,13 +376,19 @@ func (h *loopHarness) startSideRSP() error {
 	afxdpCfg := afxdp.DefaultSocketConfig()
 	afxdpCfg.IfIndex = hostIf.Index
 
+	egressWriter, err := afpacket.New(h.env.bridgeIfName)
+	if err != nil {
+		return fmt.Errorf("create response egress writer: %w", err)
+	}
+
 	resp, err := response.NewRuntime(response.Options{
 		IfIndex:          hostIf.Index,
 		ResultBufferSize: 1024,
 		HardwareAddr:     append(net.HardwareAddr(nil), h.env.bridgeMAC...),
 		EgressInterface:  h.env.bridgeIfName,
-	})
+	}, egressWriter)
 	if err != nil {
+		_ = egressWriter.Close()
 		return fmt.Errorf("create response runtime: %w", err)
 	}
 	h.response = resp

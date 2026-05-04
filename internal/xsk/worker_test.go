@@ -31,7 +31,7 @@ type stubSocket struct {
 
 func (s *stubSocket) FD() uint32 { return s.fd }
 
-func (s *stubSocket) Receive(ctx context.Context) ([]byte, error) {
+func (s *stubSocket) ReadFrame(ctx context.Context) ([]byte, error) {
 	s.calls++
 	if len(s.frames) > 0 {
 		frame := s.frames[0]
@@ -47,7 +47,7 @@ func (s *stubSocket) Receive(ctx context.Context) ([]byte, error) {
 	return nil, s.err
 }
 
-func (s *stubSocket) SendFrame(_ context.Context, _ []byte) error {
+func (s *stubSocket) WriteFrame(_ context.Context, _ []byte) error {
 	return nil
 }
 

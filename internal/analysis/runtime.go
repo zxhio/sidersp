@@ -10,7 +10,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
 
-	"sidersp/internal/afpacket"
+	"sidersp/internal/frameio"
 	"sidersp/internal/logs"
 	"sidersp/internal/xsk"
 )
@@ -30,7 +30,7 @@ type Runtime struct {
 	queueSize  int
 	runCtx     context.Context
 	wg         sync.WaitGroup
-	sender     frameSender
+	writer     frameio.WriteCloser
 	ifaceName  string
 	cpuByQueue map[int]int
 
@@ -39,25 +39,19 @@ type Runtime struct {
 	setAffinity    func(int) error
 }
 
-func NewRuntime(opts Options) (*Runtime, error) {
+func NewRuntime(opts Options, writer frameio.WriteCloser) (*Runtime, error) {
 	opts = normalizeOptions(opts)
 	if err := validateOptions(opts); err != nil {
 		return nil, err
 	}
-
-	sender := opts.sender
-	if sender == nil {
-		var err error
-		sender, err = afpacket.New(opts.Interface)
-		if err != nil {
-			return nil, err
-		}
+	if writer == nil {
+		return nil, fmt.Errorf("create analysis runtime: writer is required")
 	}
 
 	return &Runtime{
 		queues:     make(map[int]*queueShard),
 		queueSize:  opts.QueueSize,
-		sender:     sender,
+		writer:     writer,
 		ifaceName:  opts.Interface,
 		cpuByQueue: copyWorkerCPUs(opts.WorkerCPUs),
 		lockOSThread: func() {
@@ -104,10 +98,10 @@ func (r *Runtime) Run(ctx context.Context) error {
 }
 
 func (r *Runtime) Close() error {
-	if r == nil || r.sender == nil {
+	if r == nil || r.writer == nil {
 		return nil
 	}
-	return r.sender.Close()
+	return r.writer.Close()
 }
 
 func (r *Runtime) start(ctx context.Context) (context.Context, map[int]chan xsk.Envelope) {
@@ -180,7 +174,7 @@ func (r *Runtime) startShardWorker(ctx context.Context, queueID int, queue <-cha
 			case <-ctx.Done():
 				return
 			case envelope := <-queue:
-				if err := r.sender.SendFrame(ctx, envelope.Frame); err != nil {
+				if err := r.writer.WriteFrame(ctx, envelope.Frame); err != nil {
 					if ctx.Err() != nil {
 						return
 					}

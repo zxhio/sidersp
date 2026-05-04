@@ -17,7 +17,7 @@ type stubPacketSender struct {
 	sendHook   func([]byte)
 }
 
-func (s *stubPacketSender) SendFrame(_ context.Context, frame []byte) error {
+func (s *stubPacketSender) WriteFrame(_ context.Context, frame []byte) error {
 	s.sendCalls++
 	s.frames = append(s.frames, append([]byte(nil), frame...))
 	if s.sendHook != nil {
@@ -34,7 +34,7 @@ func (s *stubPacketSender) Close() error {
 func TestRuntimeSubmitRejectsFullQueue(t *testing.T) {
 	t.Parallel()
 
-	runtime, err := NewRuntime(Options{QueueSize: 1, sender: &stubPacketSender{}})
+	runtime, err := NewRuntime(Options{QueueSize: 1}, &stubPacketSender{})
 	if err != nil {
 		t.Fatalf("NewRuntime() error = %v", err)
 	}
@@ -55,7 +55,7 @@ func TestRuntimeSubmitRejectsFullQueue(t *testing.T) {
 func TestRuntimeRunStopsOnCancel(t *testing.T) {
 	t.Parallel()
 
-	runtime, err := NewRuntime(Options{sender: &stubPacketSender{}})
+	runtime, err := NewRuntime(Options{}, &stubPacketSender{})
 	if err != nil {
 		t.Fatalf("NewRuntime() error = %v", err)
 	}
@@ -70,7 +70,7 @@ func TestRuntimeRunStopsOnCancel(t *testing.T) {
 func TestNewRuntimeUsesDefaultQueueSize(t *testing.T) {
 	t.Parallel()
 
-	runtime, err := NewRuntime(Options{sender: &stubPacketSender{}})
+	runtime, err := NewRuntime(Options{}, &stubPacketSender{})
 	if err != nil {
 		t.Fatalf("NewRuntime() error = %v", err)
 	}
@@ -100,7 +100,7 @@ func TestRuntimeRunExportsFrames(t *testing.T) {
 			cancel()
 		},
 	}
-	runtime, err := NewRuntime(Options{sender: sender})
+	runtime, err := NewRuntime(Options{}, sender)
 	if err != nil {
 		t.Fatalf("NewRuntime() error = %v", err)
 	}
@@ -149,7 +149,7 @@ func TestRuntimeRunExportsFramesSubmittedAfterStart(t *testing.T) {
 			cancel()
 		},
 	}
-	runtime, err := NewRuntime(Options{sender: sender})
+	runtime, err := NewRuntime(Options{}, sender)
 	if err != nil {
 		t.Fatalf("NewRuntime() error = %v", err)
 	}
@@ -196,7 +196,7 @@ func TestRuntimeCloseClosesSender(t *testing.T) {
 	t.Parallel()
 
 	sender := &stubPacketSender{}
-	runtime, err := NewRuntime(Options{sender: sender})
+	runtime, err := NewRuntime(Options{}, sender)
 	if err != nil {
 		t.Fatalf("NewRuntime() error = %v", err)
 	}
