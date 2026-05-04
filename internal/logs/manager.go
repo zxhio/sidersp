@@ -166,10 +166,6 @@ func (m *Manager) SetChannelLevel(channel string, raw string) (string, error) {
 }
 
 func (m *Manager) Close() error {
-	if m == nil {
-		return nil
-	}
-
 	var firstErr error
 	seen := make(map[*lumberjack.Logger]struct{}, len(m.channels))
 	for _, channel := range []string{ChannelApp, ChannelStats, ChannelEvent} {

@@ -17,12 +17,6 @@ func TestRegisterXSKValidation(t *testing.T) {
 		target  error
 	}{
 		{
-			name:    "nil runtime",
-			runtime: nil,
-			queueID: 0,
-			want:    "nil runtime",
-		},
-		{
 			name:    "negative queue",
 			runtime: &Runtime{},
 			queueID: -1,

@@ -38,9 +38,6 @@ func NewDispatcher(consumers Consumers) (*Dispatcher, error) {
 }
 
 func (d *Dispatcher) Dispatch(ctx context.Context, queueID int, socket Socket, frame []byte) error {
-	if d == nil {
-		return fmt.Errorf("dispatch xsk frame: nil dispatcher")
-	}
 	if socket == nil {
 		return fmt.Errorf("dispatch xsk frame: socket is required")
 	}

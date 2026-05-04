@@ -78,6 +78,11 @@ func (s *Service) Handle(ctx context.Context, ev Event) {
 * If `Close` only signals shutdown, keep it non-blocking.
 * Let `Run` or another blocking owner wait for goroutines and close owned resources.
 
+## Nil handling
+
+* Do not add nil guards unless nil is a supported state.
+* Let unsupported nil usage fail fast.
+
 ## Config and options
 
 * `config` only reads and parses raw config.
@@ -146,5 +151,6 @@ module.NewService(opt)
 * If a blocking function starts goroutines internally, does it also wait for them and own their lifecycle?
 * Did you avoid unnecessary wrappers?
 * Are stop signals and blocking waits owned by the right method?
+* Did you avoid defensive nil guards for unsupported states?
 * Are raw config parsing and validated `Options` separated?
 * Will the test survive refactoring if behavior stays the same?

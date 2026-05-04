@@ -199,14 +199,9 @@ type dataplaneStatsReader interface {
 	ResetStats() error
 }
 
-type responseStatsReader interface {
-	ReadStats() model.ResponseStats
-	ResetStats() error
-}
-
 type runtimeStatsReader struct {
 	dataplane dataplaneStatsReader
-	response  responseStatsReader
+	response  *response.Runtime
 }
 
 type consoleService struct {

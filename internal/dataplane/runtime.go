@@ -102,9 +102,6 @@ func Open(opts Options, consumers XSKConsumers) (*Runtime, error) {
 }
 
 func (r *Runtime) Close() error {
-	if r == nil {
-		return nil
-	}
 	var closeErr error
 	if r.xskRuntime != nil {
 		if err := r.xskRuntime.Close(); err != nil {
@@ -135,9 +132,6 @@ func (r *Runtime) Close() error {
 }
 
 func (r *Runtime) RunXSK(ctx context.Context) error {
-	if r == nil {
-		return fmt.Errorf("run xsk runtime: nil dataplane runtime")
-	}
 	if r.xskRuntime == nil {
 		return nil
 	}

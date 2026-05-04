@@ -84,9 +84,6 @@ func NewRuntime(opts Options, deps RuntimeDeps) (*Runtime, error) {
 }
 
 func (r *Runtime) Run(ctx context.Context) error {
-	if r == nil {
-		return fmt.Errorf("run xsk runtime: nil runtime")
-	}
 	defer r.Close()
 
 	fields := logrus.Fields{
@@ -102,9 +99,6 @@ func (r *Runtime) Run(ctx context.Context) error {
 }
 
 func (r *Runtime) Close() error {
-	if r == nil {
-		return nil
-	}
 	var firstErr error
 	for _, socket := range r.sockets {
 		if err := socket.Close(); err != nil && firstErr == nil {

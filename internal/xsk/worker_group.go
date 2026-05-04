@@ -44,9 +44,6 @@ func NewWorkerGroup(workers []WorkerSpec) (*WorkerGroup, error) {
 }
 
 func (g *WorkerGroup) Run(ctx context.Context) error {
-	if g == nil {
-		return fmt.Errorf("run worker group: nil group")
-	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}

@@ -68,10 +68,6 @@ func NewWorker(ifindex, queueID int, registrar Registrar, socket Socket, handler
 }
 
 func (w *Worker) Run(ctx context.Context) error {
-	if w == nil {
-		return fmt.Errorf("run xsk worker: nil worker")
-	}
-
 	locker := w.thread
 	if locker == nil {
 		locker = runtimeThreadLocker{}

@@ -63,10 +63,6 @@ func NewRuleConfigStore() *RuleConfigStore {
 }
 
 func (s *RuleConfigStore) ReplaceRules(set rule.RuleSet) error {
-	if s == nil {
-		return fmt.Errorf("replace response rules: nil rule config store")
-	}
-
 	nextDNS := make(map[uint32]DNSResponseConfig)
 	nextARP := make(map[uint32]ARPReplyConfig)
 	nextTCP := make(map[uint32]TCPSynAckConfig)
@@ -110,10 +106,6 @@ func (s *RuleConfigStore) ReplaceRules(set rule.RuleSet) error {
 }
 
 func (s *RuleConfigStore) DNSResponseConfig(ruleID uint32) (DNSResponseConfig, bool) {
-	if s == nil {
-		return DNSResponseConfig{}, false
-	}
-
 	state := s.state.Load()
 	if state == nil {
 		return DNSResponseConfig{}, false
@@ -123,10 +115,6 @@ func (s *RuleConfigStore) DNSResponseConfig(ruleID uint32) (DNSResponseConfig, b
 }
 
 func (s *RuleConfigStore) ARPReplyConfig(ruleID uint32) (ARPReplyConfig, bool) {
-	if s == nil {
-		return ARPReplyConfig{}, false
-	}
-
 	state := s.state.Load()
 	if state == nil {
 		return ARPReplyConfig{}, false
@@ -136,10 +124,6 @@ func (s *RuleConfigStore) ARPReplyConfig(ruleID uint32) (ARPReplyConfig, bool) {
 }
 
 func (s *RuleConfigStore) TCPSynAckConfig(ruleID uint32) (TCPSynAckConfig, bool) {
-	if s == nil {
-		return TCPSynAckConfig{}, false
-	}
-
 	state := s.state.Load()
 	if state == nil {
 		return TCPSynAckConfig{}, false

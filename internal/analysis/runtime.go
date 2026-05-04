@@ -55,10 +55,6 @@ func NewRuntime(opts Options, writer frameio.WriteCloser) (*Runtime, error) {
 }
 
 func (r *Runtime) SubmitXSK(ctx context.Context, envelope xsk.Envelope) error {
-	if r == nil {
-		return fmt.Errorf("submit xsk analysis: nil runtime")
-	}
-
 	ch, runCtx, shouldStart := r.shardForQueue(envelope.QueueID)
 	if shouldStart {
 		r.startShardWorker(runCtx, envelope.QueueID, ch)
@@ -75,10 +71,6 @@ func (r *Runtime) SubmitXSK(ctx context.Context, envelope xsk.Envelope) error {
 }
 
 func (r *Runtime) Run(ctx context.Context) error {
-	if r == nil {
-		return fmt.Errorf("run analysis runtime: nil runtime")
-	}
-
 	runCtx, shards, err := r.start(ctx)
 	if err != nil {
 		return err
@@ -89,17 +81,10 @@ func (r *Runtime) Run(ctx context.Context) error {
 
 	<-runCtx.Done()
 	r.wg.Wait()
-	if r.writer == nil {
-		return nil
-	}
 	return r.writer.Close()
 }
 
 func (r *Runtime) Close() error {
-	if r == nil {
-		return nil
-	}
-
 	r.mu.Lock()
 	cancel := r.cancel
 	r.mu.Unlock()

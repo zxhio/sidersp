@@ -20,10 +20,6 @@ func newStatsCounters() *statsCounters {
 }
 
 func (c *statsCounters) recordSent(backend TXBackend) {
-	if c == nil {
-		return
-	}
-
 	c.responseSent.Add(1)
 	switch backend {
 	case TXBackendAFXDP:
@@ -34,10 +30,6 @@ func (c *statsCounters) recordSent(backend TXBackend) {
 }
 
 func (c *statsCounters) recordFailed(backend TXBackend) {
-	if c == nil {
-		return
-	}
-
 	c.responseFailed.Add(1)
 	switch backend {
 	case TXBackendAFXDP:
@@ -48,10 +40,6 @@ func (c *statsCounters) recordFailed(backend TXBackend) {
 }
 
 func (c *statsCounters) snapshot() model.ResponseStats {
-	if c == nil {
-		return model.ResponseStats{}
-	}
-
 	return model.ResponseStats{
 		ResponseSent:     c.responseSent.Load(),
 		ResponseFailed:   c.responseFailed.Load(),
@@ -63,10 +51,6 @@ func (c *statsCounters) snapshot() model.ResponseStats {
 }
 
 func (c *statsCounters) reset() {
-	if c == nil {
-		return
-	}
-
 	c.responseSent.Store(0)
 	c.responseFailed.Store(0)
 	c.afxdpTX.Store(0)

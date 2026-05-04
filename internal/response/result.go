@@ -60,9 +60,6 @@ func NewResultBuffer(capacity int) (*ResultBuffer, error) {
 }
 
 func (b *ResultBuffer) Record(result ResponseResult) error {
-	if b == nil {
-		return fmt.Errorf("record response result: nil buffer")
-	}
 	if err := validateResult(result); err != nil {
 		return err
 	}
@@ -70,10 +67,6 @@ func (b *ResultBuffer) Record(result ResponseResult) error {
 }
 
 func (b *ResultBuffer) List() []ResponseResult {
-	if b == nil {
-		return nil
-	}
-
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -111,10 +104,6 @@ func validateResult(result ResponseResult) error {
 }
 
 func (b *ResultBuffer) recordTrusted(result *ResponseResult) error {
-	if b == nil {
-		return fmt.Errorf("record response result: nil buffer")
-	}
-
 	b.mu.Lock()
 	if len(b.items) < b.capacity {
 		b.items = append(b.items, *result)

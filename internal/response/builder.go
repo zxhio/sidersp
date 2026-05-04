@@ -72,6 +72,9 @@ const (
 )
 
 func lookupDNSResponseConfig(ruleID uint32, configs *RuleConfigStore, context string) (DNSResponseConfig, error) {
+	if configs == nil {
+		return DNSResponseConfig{}, fmt.Errorf("%s: rule %d dns response config is not configured", context, ruleID)
+	}
 	config, ok := configs.DNSResponseConfig(ruleID)
 	if !ok {
 		return DNSResponseConfig{}, fmt.Errorf("%s: rule %d dns response config is not configured", context, ruleID)

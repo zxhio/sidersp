@@ -45,10 +45,6 @@ func NewResponseExecutor(config ResponseExecutorConfig) (*ResponseExecutor, erro
 }
 
 func (e *ResponseExecutor) Execute(ctx context.Context, meta XSKMetadata, frame []byte) error {
-	if e == nil {
-		return fmt.Errorf("execute response: nil executor")
-	}
-
 	action, ok := ResponseActionName(meta.Action)
 	if !ok {
 		return fmt.Errorf("execute response: unsupported action %d", meta.Action)
@@ -79,10 +75,6 @@ func (e *ResponseExecutor) Execute(ctx context.Context, meta XSKMetadata, frame 
 }
 
 func (e *ResponseExecutor) ExecuteXSK(ctx context.Context, frame []byte) error {
-	if e == nil {
-		return fmt.Errorf("execute xsk frame: nil executor")
-	}
-
 	meta, payload, err := DecodeXSKMetadata(frame)
 	if err != nil {
 		return err

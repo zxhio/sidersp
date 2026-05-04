@@ -76,9 +76,6 @@ func buildResponseSender(socket xsk.Socket, egressWriter frameio.WriteCloser, bu
 }
 
 func (r *Runtime) Close() error {
-	if r == nil {
-		return nil
-	}
 	var firstErr error
 	for _, closer := range r.closers {
 		if err := closer.Close(); err != nil && firstErr == nil {
@@ -90,10 +87,6 @@ func (r *Runtime) Close() error {
 }
 
 func (r *Runtime) HandleXSK(ctx context.Context, envelope xsk.Envelope, socket xsk.Socket) error {
-	if r == nil {
-		return fmt.Errorf("handle xsk response: nil runtime")
-	}
-
 	executor, err := NewResponseExecutor(ResponseExecutorConfig{
 		IfIndex: r.ifindex,
 		QueueID: envelope.QueueID,
@@ -108,30 +101,18 @@ func (r *Runtime) HandleXSK(ctx context.Context, envelope xsk.Envelope, socket x
 }
 
 func (r *Runtime) Results() []ResponseResult {
-	if r == nil {
-		return nil
-	}
 	return r.results.List()
 }
 
 func (r *Runtime) ReplaceRules(set rule.RuleSet) error {
-	if r == nil {
-		return nil
-	}
 	return r.ruleConfigs.ReplaceRules(set)
 }
 
 func (r *Runtime) ReadStats() model.ResponseStats {
-	if r == nil {
-		return model.ResponseStats{}
-	}
 	return r.stats.snapshot()
 }
 
 func (r *Runtime) ResetStats() error {
-	if r == nil {
-		return nil
-	}
 	r.stats.reset()
 	return nil
 }
