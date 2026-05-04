@@ -11,7 +11,7 @@
 #ifndef SIDERSP_BPF_RULE_H
 #define SIDERSP_BPF_RULE_H
 
-#include <linux/types.h>
+#include "headers/vmlinux.h"
 
 #include "mask.h"
 

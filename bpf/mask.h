@@ -16,7 +16,7 @@
 #ifndef SIDERSP_BPF_MASK_H
 #define SIDERSP_BPF_MASK_H
 
-#include <linux/types.h>
+#include "headers/vmlinux.h"
 
 #ifndef __always_inline
 #define __always_inline inline __attribute__((always_inline))

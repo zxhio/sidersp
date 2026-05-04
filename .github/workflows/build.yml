@@ -26,10 +26,10 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Install clang and llvm
+      - name: Install clang, llvm, and BPF headers
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang llvm
+          sudo apt-get install -y clang llvm libbpf-dev linux-libc-dev
 
       - name: Set up Node.js
         uses: actions/setup-node@v6

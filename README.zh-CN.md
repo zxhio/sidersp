@@ -53,7 +53,7 @@ SideRSP 的定位是更大平台中的一个服务。内置 Web 页面主要用�
 
 - 支持 XDP/eBPF 的 Linux 环境
 - Go `1.25.5+`
-- 重新构建 BPF 对象时需要 `clang` / LLVM
+- 重新构建 BPF 对象时需要 `clang` / LLVM 以及系统 BPF/Linux 开发头文件
 - 加载 BPF 和挂载 XDP 需要 root 或等价权限
 - 独立的镜像流量网卡
 

@@ -1,12 +1,4 @@
-#include <linux/bpf.h>
-#include <linux/if_arp.h>
-#include <linux/if_ether.h>
-#include <linux/in.h>
-#include <linux/ip.h>
-#include <linux/icmp.h>
-#include <linux/tcp.h>
-#include <linux/udp.h>
-#include <linux/if_vlan.h>
+#include "headers/vmlinux.h"
 
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_endian.h>
@@ -37,6 +29,21 @@
 #ifndef AF_INET
 #define AF_INET 2
 #endif
+#ifndef ETH_ALEN
+#define ETH_ALEN 6
+#endif
+#ifndef ETH_P_IP
+#define ETH_P_IP 0x0800
+#endif
+#ifndef ETH_P_ARP
+#define ETH_P_ARP 0x0806
+#endif
+#ifndef ETH_P_8021Q
+#define ETH_P_8021Q 0x8100
+#endif
+#ifndef ARPHRD_ETHER
+#define ARPHRD_ETHER 1
+#endif
 #ifndef VLAN_HLEN
 #define VLAN_HLEN 4
 #endif
@@ -53,11 +60,6 @@ struct arp_eth_ipv4 {
     __u8 sip[4];
     __u8 tha[ETH_ALEN];
     __u8 dip[4];
-};
-
-struct vlan_hdr {
-    __be16 tci;
-    __be16 encapsulated_proto;
 };
 
 static __always_inline void stat_inc(__u32 idx)
@@ -916,8 +918,8 @@ static parse_err_t parse_vlan(struct pkt_ctx *ctx, void *data, void *data_end)
     if ((void *)(vh + 1) > data_end)
         return PARSE_ERR_ETH_SHORT;
 
-    ctx->vlan_id = bpf_ntohs(vh->tci) & 0x0fff;
-    encap = bpf_ntohs(vh->encapsulated_proto);
+    ctx->vlan_id = bpf_ntohs(vh->h_vlan_TCI) & 0x0fff;
+    encap = bpf_ntohs(vh->h_vlan_encapsulated_proto);
     ctx->conds |= COND_VLAN;
 
     if (encap == ETH_P_8021Q)

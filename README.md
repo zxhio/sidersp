@@ -54,7 +54,7 @@ is not the primary upstream platform control plane.
 
 - Linux with XDP/eBPF support
 - Go `1.25.5+`
-- `clang` / LLVM for rebuilding BPF objects
+- `clang` / LLVM and system BPF/Linux development headers for rebuilding BPF objects
 - Root or equivalent capabilities for loading BPF and attaching XDP
 - A dedicated mirrored-traffic network interface
 

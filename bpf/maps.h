@@ -34,7 +34,7 @@
 #ifndef SIDERSP_BPF_MAPS_H
 #define SIDERSP_BPF_MAPS_H
 
-#include <linux/bpf.h>
+#include "headers/vmlinux.h"
 #include <bpf/bpf_helpers.h>
 
 #include "rule.h"
