@@ -72,6 +72,12 @@ func (s *Service) Handle(ctx context.Context, ev Event) {
 * Add indirection only for real pluggability or boundary isolation.
 * If a direct call is hard to assert, test the lifecycle or result boundary instead.
 
+## Lifecycle ownership
+
+* Keep stop signals and blocking waits on clear boundaries.
+* If `Close` only signals shutdown, keep it non-blocking.
+* Let `Run` or another blocking owner wait for goroutines and close owned resources.
+
 ## Config and options
 
 * `config` only reads and parses raw config.
@@ -139,5 +145,6 @@ module.NewService(opt)
 * Is top-level goroutine launch visible at the call site?
 * If a blocking function starts goroutines internally, does it also wait for them and own their lifecycle?
 * Did you avoid unnecessary wrappers?
+* Are stop signals and blocking waits owned by the right method?
 * Are raw config parsing and validated `Options` separated?
 * Will the test survive refactoring if behavior stays the same?

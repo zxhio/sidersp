@@ -88,11 +88,15 @@ func (r *Runtime) Run(ctx context.Context) error {
 	}
 
 	<-runCtx.Done()
-	return nil
+	r.wg.Wait()
+	if r.writer == nil {
+		return nil
+	}
+	return r.writer.Close()
 }
 
 func (r *Runtime) Close() error {
-	if r == nil || r.writer == nil {
+	if r == nil {
 		return nil
 	}
 
@@ -103,8 +107,7 @@ func (r *Runtime) Close() error {
 	if cancel != nil {
 		cancel()
 	}
-	r.wg.Wait()
-	return r.writer.Close()
+	return nil
 }
 
 func (r *Runtime) start(ctx context.Context) (context.Context, map[int]chan xsk.Envelope, error) {
