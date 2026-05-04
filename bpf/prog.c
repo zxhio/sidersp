@@ -247,6 +247,48 @@ static __always_inline void store_flow_cache(const struct pkt_ctx *ctx,
     bpf_map_update_elem(&flow_cache_map, &key, &entry, BPF_ANY);
 }
 
+static __always_inline int do_tcp_reset_tx(struct xdp_md *xdp,
+                                           const struct pkt_ctx *ctx);
+
+static __always_inline int do_icmp_dest_unreachable_tx(struct xdp_md *xdp,
+                                                       const struct pkt_ctx *ctx,
+                                                       __u8 icmp_code);
+
+static __always_inline int run_kernel_tx_action(struct xdp_md *xdp,
+                                                const struct pkt_ctx *ctx,
+                                                const struct rule_meta *rule,
+                                                __u32 pkt_conds)
+{
+    __u8 icmp_code;
+    int ret;
+
+    if (rule->action == ACTION_TCP_RESET) {
+        if (ctx->tcp_flags & TCP_FLAG_RST)
+            return XDP_PASS;
+        ret = do_tcp_reset_tx(xdp, ctx);
+    } else {
+        icmp_code = ICMP_PKT_FILTERED;
+        if (rule->action == ACTION_ICMP_PORT_UNREACHABLE)
+            icmp_code = ICMP_PORT_UNREACH;
+        else if (rule->action == ACTION_ICMP_HOST_UNREACHABLE)
+            icmp_code = ICMP_HOST_UNREACH;
+        ret = do_icmp_dest_unreachable_tx(xdp, ctx, icmp_code);
+    }
+
+    if (ret == XDP_TX || ret == XDP_REDIRECT) {
+        store_flow_cache(ctx, rule);
+        stat_inc(ret == XDP_TX ? STAT_XDP_TX : STAT_REDIRECT_TX);
+        emit_event(ctx, rule, pkt_conds,
+                   ret == XDP_TX ? VERDICT_TX : VERDICT_REDIRECT_TX);
+        return ret;
+    }
+
+    stat_inc(STAT_TX_FAILED);
+    if (ret == XDP_DROP)
+        return XDP_DROP;
+    return XDP_PASS;
+}
+
 static __always_inline __u16 csum_fold_helper(__u32 csum)
 {
     csum = (csum & 0xffff) + (csum >> 16);
@@ -444,77 +486,118 @@ static __always_inline int redirect_kernel_tx(struct xdp_md *xdp,
     return bpf_redirect(fib->ifindex, 0);
 }
 
+struct kernel_tx_ctx {
+    void *data;
+    void *data_end;
+    struct ethhdr *eth;
+    struct iphdr *ip;
+    int l3_off;
+    int target_len;
+    struct tx_config *tx_cfg;
+    struct bpf_fib_lookup fib;
+    int redirect;
+};
+
+static __always_inline void init_kernel_tx_ctx(struct xdp_md *xdp,
+                                               const struct pkt_ctx *ctx,
+                                               int l4_len,
+                                               int l4_extra_len,
+                                               struct kernel_tx_ctx *tx)
+{
+    __u32 zero = 0;
+
+    tx->data = (void *)(long)xdp->data;
+    tx->data_end = (void *)(long)xdp->data_end;
+    tx->eth = 0;
+    tx->ip = 0;
+    tx->l3_off = sizeof(struct ethhdr);
+    if (ctx->vlan_id != VLAN_ID_NONE)
+        tx->l3_off += sizeof(struct vlan_hdr);
+    tx->target_len = tx->l3_off + sizeof(struct iphdr) + l4_len + l4_extra_len;
+    tx->tx_cfg = bpf_map_lookup_elem(&tx_config_map, &zero);
+    tx->redirect = tx->tx_cfg &&
+                   tx->tx_cfg->tcp_reset_mode == TCP_RESET_TX_MODE_REDIRECT;
+}
+
+static __always_inline int expand_kernel_tx_frame(struct xdp_md *xdp,
+                                                  const struct pkt_ctx *ctx,
+                                                  struct kernel_tx_ctx *tx)
+{
+    struct vlan_hdr *vlan;
+    __u8 tmp_mac[ETH_ALEN];
+
+    if (bpf_xdp_adjust_tail(xdp, tx->target_len - (tx->data_end - tx->data)))
+        return tx_failure_verdict(tx->tx_cfg);
+
+    tx->data = (void *)(long)xdp->data;
+    tx->data_end = (void *)(long)xdp->data_end;
+
+    tx->eth = tx->data;
+    if ((void *)(tx->eth + 1) > tx->data_end)
+        return tx_failure_verdict(tx->tx_cfg);
+
+    __builtin_memcpy(tmp_mac, tx->eth->h_source, ETH_ALEN);
+    __builtin_memcpy(tx->eth->h_source, tx->eth->h_dest, ETH_ALEN);
+    __builtin_memcpy(tx->eth->h_dest, tmp_mac, ETH_ALEN);
+
+    if (ctx->vlan_id != VLAN_ID_NONE) {
+        vlan = (void *)(tx->eth + 1);
+        if ((void *)(vlan + 1) > tx->data_end)
+            return tx_failure_verdict(tx->tx_cfg);
+    }
+
+    tx->ip = tx->data + tx->l3_off;
+    if ((void *)(tx->ip + 1) > tx->data_end)
+        return tx_failure_verdict(tx->tx_cfg);
+
+    return 0;
+}
+
+static __always_inline int finish_kernel_tx(struct xdp_md *xdp,
+                                            const struct pkt_ctx *ctx,
+                                            const struct kernel_tx_ctx *tx)
+{
+    if (tx->redirect)
+        return redirect_kernel_tx(xdp, ctx, tx->tx_cfg, &tx->fib);
+
+    return XDP_TX;
+}
+
 static __always_inline int do_tcp_reset_tx(struct xdp_md *xdp,
                                            const struct pkt_ctx *ctx)
 {
-    void *data = (void *)(long)xdp->data;
-    void *data_end = (void *)(long)xdp->data_end;
-    struct ethhdr *eth;
-    struct vlan_hdr *vlan;
     struct iphdr *ip;
     struct tcphdr *tcp;
-    __u8 tmp_mac[ETH_ALEN];
     __be32 tmp_addr;
     __u16 tmp_port;
-    int target_len;
-    int l3_off;
-    __u32 zero = 0;
-    struct tx_config *tx_cfg;
-    struct bpf_fib_lookup fib = {};
-    int redirect = 0;
+    struct kernel_tx_ctx tx = {};
+    int ret;
 
     if (ctx->ip_proto != IPPROTO_TCP)
         return XDP_PASS;
-    tx_cfg = bpf_map_lookup_elem(&tx_config_map, &zero);
-    if (tx_cfg && tx_cfg->tcp_reset_mode == TCP_RESET_TX_MODE_REDIRECT)
-        redirect = 1;
 
-    if (ctx->vlan_id != VLAN_ID_NONE) {
-        target_len = sizeof(*eth) + sizeof(*vlan) + sizeof(*ip) + sizeof(*tcp);
-        l3_off = sizeof(*eth) + sizeof(*vlan);
-    } else {
-        target_len = sizeof(*eth) + sizeof(*ip) + sizeof(*tcp);
-        l3_off = sizeof(*eth);
-    }
+    init_kernel_tx_ctx(xdp, ctx, sizeof(*tcp), 0, &tx);
 
-    if (redirect) {
-        ip = data + l3_off;
-        if ((void *)(ip + 1) > data_end) {
+    if (tx.redirect) {
+        ip = tx.data + tx.l3_off;
+        if ((void *)(ip + 1) > tx.data_end) {
             stat_inc(STAT_REDIRECT_FAILED);
-            return tx_failure_verdict(tx_cfg);
+            return tx_failure_verdict(tx.tx_cfg);
         }
-        if (lookup_tx_fib(xdp, tx_cfg, ip->tos, IPPROTO_TCP,
+        if (lookup_tx_fib(xdp, tx.tx_cfg, ip->tos, IPPROTO_TCP,
                           sizeof(struct iphdr) + sizeof(struct tcphdr),
-                          ctx->daddr, ctx->saddr, &fib))
-            return tx_failure_verdict(tx_cfg);
+                          ctx->daddr, ctx->saddr, &tx.fib))
+            return tx_failure_verdict(tx.tx_cfg);
     }
 
-    if (bpf_xdp_adjust_tail(xdp, target_len - (data_end - data)))
-        return tx_failure_verdict(tx_cfg);
+    ret = expand_kernel_tx_frame(xdp, ctx, &tx);
+    if (ret)
+        return ret;
 
-    data = (void *)(long)xdp->data;
-    data_end = (void *)(long)xdp->data_end;
-
-    eth = data;
-    if ((void *)(eth + 1) > data_end)
-        return tx_failure_verdict(tx_cfg);
-
-    __builtin_memcpy(tmp_mac, eth->h_source, ETH_ALEN);
-    __builtin_memcpy(eth->h_source, eth->h_dest, ETH_ALEN);
-    __builtin_memcpy(eth->h_dest, tmp_mac, ETH_ALEN);
-
-    if (ctx->vlan_id != VLAN_ID_NONE) {
-        vlan = (void *)(eth + 1);
-        if ((void *)(vlan + 1) > data_end)
-            return tx_failure_verdict(tx_cfg);
-    }
-
-    ip = data + l3_off;
-    if ((void *)(ip + 1) > data_end)
-        return tx_failure_verdict(tx_cfg);
-    tcp = (void *)(ip + 1);
-    if ((void *)(tcp + 1) > data_end)
-        return tx_failure_verdict(tx_cfg);
+    ip = tx.ip;
+    tcp = (void *)(tx.ip + 1);
+    if ((void *)(tcp + 1) > tx.data_end)
+        return tx_failure_verdict(tx.tx_cfg);
 
     tmp_addr = ip->saddr;
     ip->saddr = ip->daddr;
@@ -552,94 +635,53 @@ static __always_inline int do_tcp_reset_tx(struct xdp_md *xdp,
 
     tcp->check = tcp_rst_csum(ip->saddr, ip->daddr, tcp);
 
-    if (redirect)
-        return redirect_kernel_tx(xdp, ctx, tx_cfg, &fib);
-
-    return XDP_TX;
+    return finish_kernel_tx(xdp, ctx, &tx);
 }
 
 static __always_inline int do_icmp_dest_unreachable_tx(struct xdp_md *xdp,
                                                        const struct pkt_ctx *ctx,
                                                        __u8 icmp_code)
 {
-    void *data = (void *)(long)xdp->data;
-    void *data_end = (void *)(long)xdp->data_end;
-    struct ethhdr *eth;
-    struct vlan_hdr *vlan;
     struct iphdr *ip;
     struct udphdr *udp;
     struct icmphdr *icmp;
     __u8 *quote;
-    __u8 tmp_mac[ETH_ALEN];
     __u8 quoted[sizeof(struct iphdr) + 8];
     __be32 tmp_addr;
-    int target_len;
-    int l3_off;
-    __u32 zero = 0;
-    struct tx_config *tx_cfg;
-    struct bpf_fib_lookup fib = {};
-    int redirect = 0;
+    struct kernel_tx_ctx tx = {};
+    int ret;
 
     if (ctx->ip_proto != IPPROTO_UDP)
         return XDP_PASS;
 
-    tx_cfg = bpf_map_lookup_elem(&tx_config_map, &zero);
-    if (tx_cfg && tx_cfg->tcp_reset_mode == TCP_RESET_TX_MODE_REDIRECT)
-        redirect = 1;
+    init_kernel_tx_ctx(xdp, ctx, sizeof(*icmp), sizeof(quoted), &tx);
 
-    if (ctx->vlan_id != VLAN_ID_NONE) {
-        target_len = sizeof(*eth) + sizeof(*vlan) + sizeof(*ip) +
-                     sizeof(*icmp) + sizeof(quoted);
-        l3_off = sizeof(*eth) + sizeof(*vlan);
-    } else {
-        target_len = sizeof(*eth) + sizeof(*ip) + sizeof(*icmp) + sizeof(quoted);
-        l3_off = sizeof(*eth);
-    }
-
-    ip = data + l3_off;
-    if ((void *)(ip + 1) > data_end)
-        return tx_failure_verdict(tx_cfg);
+    ip = tx.data + tx.l3_off;
+    if ((void *)(ip + 1) > tx.data_end)
+        return tx_failure_verdict(tx.tx_cfg);
     udp = (void *)(ip + 1);
-    if ((void *)(udp + 1) > data_end)
-        return tx_failure_verdict(tx_cfg);
+    if ((void *)(udp + 1) > tx.data_end)
+        return tx_failure_verdict(tx.tx_cfg);
 
     __builtin_memcpy(quoted, ip, sizeof(struct iphdr));
     __builtin_memcpy(quoted + sizeof(struct iphdr), udp, 8);
 
-    if (redirect) {
-        if (lookup_tx_fib(xdp, tx_cfg, ip->tos, IPPROTO_ICMP,
+    if (tx.redirect) {
+        if (lookup_tx_fib(xdp, tx.tx_cfg, ip->tos, IPPROTO_ICMP,
                           sizeof(struct iphdr) + sizeof(struct icmphdr) + sizeof(quoted),
-                          ctx->daddr, ctx->saddr, &fib))
-            return tx_failure_verdict(tx_cfg);
+                          ctx->daddr, ctx->saddr, &tx.fib))
+            return tx_failure_verdict(tx.tx_cfg);
     }
 
-    if (bpf_xdp_adjust_tail(xdp, target_len - (data_end - data)))
-        return tx_failure_verdict(tx_cfg);
+    ret = expand_kernel_tx_frame(xdp, ctx, &tx);
+    if (ret)
+        return ret;
 
-    data = (void *)(long)xdp->data;
-    data_end = (void *)(long)xdp->data_end;
-
-    eth = data;
-    if ((void *)(eth + 1) > data_end)
-        return tx_failure_verdict(tx_cfg);
-
-    __builtin_memcpy(tmp_mac, eth->h_source, ETH_ALEN);
-    __builtin_memcpy(eth->h_source, eth->h_dest, ETH_ALEN);
-    __builtin_memcpy(eth->h_dest, tmp_mac, ETH_ALEN);
-
-    if (ctx->vlan_id != VLAN_ID_NONE) {
-        vlan = (void *)(eth + 1);
-        if ((void *)(vlan + 1) > data_end)
-            return tx_failure_verdict(tx_cfg);
-    }
-
-    ip = data + l3_off;
-    if ((void *)(ip + 1) > data_end)
-        return tx_failure_verdict(tx_cfg);
-    icmp = (void *)(ip + 1);
+    ip = tx.ip;
+    icmp = (void *)(tx.ip + 1);
     quote = (void *)(icmp + 1);
-    if ((void *)(quote + sizeof(quoted)) > data_end)
-        return tx_failure_verdict(tx_cfg);
+    if ((void *)(quote + sizeof(quoted)) > tx.data_end)
+        return tx_failure_verdict(tx.tx_cfg);
 
     tmp_addr = ip->saddr;
     ip->saddr = ip->daddr;
@@ -658,10 +700,7 @@ static __always_inline int do_icmp_dest_unreachable_tx(struct xdp_md *xdp,
     __builtin_memcpy(quote, quoted, sizeof(quoted));
     icmp->checksum = icmp_unreach_csum(icmp);
 
-    if (redirect)
-        return redirect_kernel_tx(xdp, ctx, tx_cfg, &fib);
-
-    return XDP_TX;
+    return finish_kernel_tx(xdp, ctx, &tx);
 }
 
 static __always_inline int redirect_xsk_with_meta(struct xdp_md *xdp,
@@ -989,40 +1028,8 @@ int xdp_sidersp(struct xdp_md *xdp)
     case ACTION_TCP_RESET:
     case ACTION_ICMP_PORT_UNREACHABLE:
     case ACTION_ICMP_HOST_UNREACHABLE:
-    case ACTION_ICMP_ADMIN_PROHIBITED: {
-        int ret;
-        if (best_rule.action == ACTION_TCP_RESET && (ctx.tcp_flags & TCP_FLAG_RST))
-            return XDP_PASS;
-        if (best_rule.action == ACTION_TCP_RESET)
-            ret = do_tcp_reset_tx(xdp, &ctx);
-        else
-            ret = do_icmp_dest_unreachable_tx(
-                xdp,
-                &ctx,
-                best_rule.action == ACTION_ICMP_PORT_UNREACHABLE
-                    ? ICMP_PORT_UNREACH
-                    : best_rule.action == ACTION_ICMP_HOST_UNREACHABLE
-                        ? ICMP_HOST_UNREACH
-                        : ICMP_PKT_FILTERED);
-        if (ret == XDP_TX) {
-            store_flow_cache(&ctx, &best_rule);
-            stat_inc(STAT_XDP_TX);
-            emit_event(&ctx, &best_rule, pkt_conds, VERDICT_TX);
-            return XDP_TX;
-        }
-        if (ret == XDP_REDIRECT) {
-            store_flow_cache(&ctx, &best_rule);
-            stat_inc(STAT_REDIRECT_TX);
-            emit_event(&ctx, &best_rule, pkt_conds, VERDICT_REDIRECT_TX);
-            return XDP_REDIRECT;
-        }
-        if (ret == XDP_DROP) {
-            stat_inc(STAT_TX_FAILED);
-            return XDP_DROP;
-        }
-        stat_inc(STAT_TX_FAILED);
-        return XDP_PASS;
-    }
+    case ACTION_ICMP_ADMIN_PROHIBITED:
+        return run_kernel_tx_action(xdp, &ctx, &best_rule, pkt_conds);
     case ACTION_ICMP_ECHO_REPLY:
     case ACTION_ARP_REPLY:
     case ACTION_TCP_SYN_ACK:
@@ -1030,6 +1037,7 @@ int xdp_sidersp(struct xdp_md *xdp)
     case ACTION_DNS_REFUSED:
     case ACTION_DNS_SINKHOLE: {
         int redir;
+
         if (best_rule.action == ACTION_TCP_SYN_ACK && !can_tcp_syn_ack(&ctx))
             return ingress_failure_verdict(cfg);
         redir = redirect_xsk_with_meta(xdp, &best_rule, cfg);
