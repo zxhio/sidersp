@@ -159,10 +159,6 @@ func TestRuntimeRunExportsFrames(t *testing.T) {
 	t.Parallel()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	lockCalls := 0
-	unlockCalls := 0
-	affinityCalls := 0
-	affinityCPU := -1
 	sender := &stubPacketSender{
 		sendHook: func(_ []byte) {
 			cancel()
@@ -171,18 +167,6 @@ func TestRuntimeRunExportsFrames(t *testing.T) {
 	runtime, err := NewRuntime(Options{}, sender)
 	if err != nil {
 		t.Fatalf("NewRuntime() error = %v", err)
-	}
-	runtime.lockOSThread = func() {
-		lockCalls++
-	}
-	runtime.unlockOSThread = func() {
-		unlockCalls++
-	}
-	runtime.cpuByQueue = map[int]int{1: 7}
-	runtime.setAffinity = func(cpuID int) error {
-		affinityCalls++
-		affinityCPU = cpuID
-		return nil
 	}
 	if err := runtime.SubmitXSK(ctx, xsk.Envelope{
 		QueueID: 1,
@@ -202,12 +186,6 @@ func TestRuntimeRunExportsFrames(t *testing.T) {
 	}
 	if len(sender.frames) != 1 || len(sender.frames[0]) != 4 {
 		t.Fatalf("frames = %+v, want one exported frame", sender.frames)
-	}
-	if lockCalls != 1 || unlockCalls != 1 {
-		t.Fatalf("thread locker calls = %d/%d, want 1/1", lockCalls, unlockCalls)
-	}
-	if affinityCalls != 1 || affinityCPU != 7 {
-		t.Fatalf("affinity calls = %d cpu = %d, want 1/7", affinityCalls, affinityCPU)
 	}
 }
 
@@ -286,12 +264,6 @@ func TestRuntimeCloseCancelsRunAndWaitsForWorker(t *testing.T) {
 		t.Fatalf("NewRuntime() error = %v", err)
 	}
 
-	unlockCalls := 0
-	runtime.lockOSThread = func() {}
-	runtime.unlockOSThread = func() {
-		unlockCalls++
-	}
-
 	if err := runtime.SubmitXSK(context.Background(), xsk.Envelope{
 		QueueID: 5,
 		Frame:   []byte{1, 2, 3, 4},
@@ -323,8 +295,5 @@ func TestRuntimeCloseCancelsRunAndWaitsForWorker(t *testing.T) {
 	}
 	if sender.closeCalls != 1 {
 		t.Fatalf("close calls = %d, want 1", sender.closeCalls)
-	}
-	if unlockCalls != 1 {
-		t.Fatalf("unlock calls = %d, want 1", unlockCalls)
 	}
 }

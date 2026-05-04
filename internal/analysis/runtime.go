@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	goruntime "runtime"
+	"runtime"
 	"sync"
 
 	"github.com/sirupsen/logrus"
@@ -34,10 +34,6 @@ type Runtime struct {
 	writer     frameio.WriteCloser
 	ifaceName  string
 	cpuByQueue map[int]int
-
-	lockOSThread   func()
-	unlockOSThread func()
-	setAffinity    func(int) error
 }
 
 func NewRuntime(opts Options, writer frameio.WriteCloser) (*Runtime, error) {
@@ -55,13 +51,6 @@ func NewRuntime(opts Options, writer frameio.WriteCloser) (*Runtime, error) {
 		writer:     writer,
 		ifaceName:  opts.Interface,
 		cpuByQueue: copyWorkerCPUs(opts.WorkerCPUs),
-		lockOSThread: func() {
-			goruntime.LockOSThread()
-		},
-		unlockOSThread: func() {
-			goruntime.UnlockOSThread()
-		},
-		setAffinity: setCurrentThreadAffinity,
 	}, nil
 }
 
@@ -159,11 +148,11 @@ func (r *Runtime) startShardWorker(ctx context.Context, queueID int, queue <-cha
 	go func() {
 		defer r.wg.Done()
 
-		r.lockOSThread()
-		defer r.unlockOSThread()
+		runtime.LockOSThread()
+		defer runtime.UnlockOSThread()
 
 		if cpuID, ok := r.cpuByQueue[queueID]; ok {
-			if err := r.setAffinity(cpuID); err != nil {
+			if err := setCurrentThreadAffinity(cpuID); err != nil {
 				logs.App().WithFields(logrus.Fields{
 					"queue":     queueID,
 					"interface": r.ifaceName,
