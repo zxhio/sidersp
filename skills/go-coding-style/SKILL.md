@@ -1,13 +1,19 @@
 ---
 name: go-coding-style
-description: Use when adding or reviewing Go coding style rules, especially goroutine launch visibility, config/options boundary, and practical test scope.
+description: Use for Go coding style and code review rules.
 ---
 
 # Go Coding Style
 
-Use this skill for local Go coding rules, not broader abstraction design.
+Use this skill for local Go style and review rules, not broader abstraction design.
 
 Keep rules short. Prefer explicit code.
+
+## Imports
+
+* Prefer the original package name in imports.
+* Do not add aliases like `goruntime "runtime"` when `runtime` works.
+* Add an alias only for a real name conflict or an established local name.
 
 ## Goroutine launch
 
@@ -58,6 +64,13 @@ func (s *Service) Handle(ctx context.Context, ev Event) {
     go s.write(ctx, ev)
 }
 ```
+
+## Direct calls
+
+* Prefer direct calls when they work.
+* Do not add wrappers or struct fields only to avoid a direct call.
+* Add indirection only for real pluggability or boundary isolation.
+* If a direct call is hard to assert, test the lifecycle or result boundary instead.
 
 ## Config and options
 
@@ -117,10 +130,14 @@ module.NewService(opt)
 * private tiny helpers
 * log strings
 * internal call order
+* unnecessary wrappers around stdlib or OS helpers
+* internal setup steps such as lock/unlock thread call counts
+* private runtime state polling over lifecycle boundaries
 
 ## Quick check
 
 * Is top-level goroutine launch visible at the call site?
 * If a blocking function starts goroutines internally, does it also wait for them and own their lifecycle?
+* Did you avoid unnecessary wrappers?
 * Are raw config parsing and validated `Options` separated?
 * Will the test survive refactoring if behavior stays the same?
