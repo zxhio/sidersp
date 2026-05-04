@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sync"
 
 	"sidersp/internal/frameio"
 	"sidersp/internal/model"
@@ -20,6 +21,8 @@ type Runtime struct {
 	ifindex      int
 	buildOpts    BuildOptions
 	egressWriter frameio.WriteCloser
+	executorMu   sync.Mutex
+	executors    map[int]*ResponseExecutor
 }
 
 func NewRuntime(opts Options, egressWriter frameio.WriteCloser) (*Runtime, error) {
@@ -57,6 +60,7 @@ func NewRuntime(opts Options, egressWriter frameio.WriteCloser) (*Runtime, error
 		ifindex:      opts.IfIndex,
 		buildOpts:    buildOpts,
 		egressWriter: egressWriter,
+		executors:    make(map[int]*ResponseExecutor),
 	}, nil
 }
 
@@ -83,21 +87,38 @@ func (r *Runtime) Close() error {
 		}
 	}
 	r.closers = nil
+	r.executors = nil
 	return firstErr
 }
 
 func (r *Runtime) HandleXSK(ctx context.Context, envelope xsk.Envelope, socket xsk.Socket) error {
+	executor, err := r.executorForQueue(envelope.QueueID, socket)
+	if err != nil {
+		return err
+	}
+	return executor.Execute(ctx, envelope.Metadata, envelope.Frame)
+}
+
+func (r *Runtime) executorForQueue(queueID int, socket xsk.Socket) (*ResponseExecutor, error) {
+	r.executorMu.Lock()
+	defer r.executorMu.Unlock()
+
+	if executor, ok := r.executors[queueID]; ok {
+		return executor, nil
+	}
+
 	executor, err := NewResponseExecutor(ResponseExecutorConfig{
 		IfIndex: r.ifindex,
-		QueueID: envelope.QueueID,
+		QueueID: queueID,
 		Sender:  buildResponseSender(socket, r.egressWriter, r.buildOpts),
 		Results: r.results,
 		Stats:   r.stats,
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return executor.Execute(ctx, envelope.Metadata, envelope.Frame)
+	r.executors[queueID] = executor
+	return executor, nil
 }
 
 func (r *Runtime) Results() []ResponseResult {

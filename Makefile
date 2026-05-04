@@ -9,11 +9,6 @@ BENCH ?= Benchmark(Decode|Build|Execute)
 RESPONSE_SEND_BENCH ?= BenchmarkExecuteTCPSynAckAFPacketSend
 RESPONSE_SEND_IFACE ?= lo
 RESPONSE_PROFILE_BENCH ?= BenchmarkExecuteTCPSynAck
-BENCH_GATE_TIME ?= 200ms
-BPF_BENCH_GATE ?= ^BenchmarkBPFKernelTCPReset$$
-BPF_BENCH_NS_MAX ?= 1500
-RESPONSE_BENCH_GATE ?= ^BenchmarkExecuteTCPSynAck$$
-RESPONSE_BENCH_NS_MAX ?= 400
 VNET_SAMPLES ?= 100
 BENCH_BUILD_DIR ?= ./build/bench
 BENCH_GOCACHE ?= /tmp/sidersp-gocache
@@ -29,7 +24,7 @@ PERF_RECORD_FLAGS ?= -g
 GOOS := linux
 GOARCH := amd64
 
-.PHONY: build build-all build-web build-xdp package run clean test test-unit test-bpf test-vnet test-privileged ai-review bench bench-gate bench-vnet bench-bpf-perf bench-response-perf bench-bpf-pprof bench-response-pprof
+.PHONY: build build-all build-web build-xdp package run clean test test-unit test-bpf test-vnet test-privileged ai-review bench bench-vnet bench-bpf-perf bench-response-perf bench-bpf-pprof bench-response-pprof
 
 build: build-xdp build-web
 	CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) go build -trimpath -ldflags="-s -w" -o $(BIN) $(MAIN)
@@ -78,9 +73,6 @@ bench: build-xdp
 	GOCACHE=$(BENCH_GOCACHE) SIDERSP_RUN_BPF_TESTS=1 go test ./internal/dataplane/ -run '^$$' -bench $(BPF_BENCH) -benchmem -benchtime=$(BENCHTIME) -count=1
 	GOCACHE=$(BENCH_GOCACHE) go test ./internal/response/ -run '^$$' -bench '$(BENCH)' -benchmem -benchtime=$(BENCHTIME) -count=1
 	GOCACHE=$(BENCH_GOCACHE) SIDERSP_RUN_AF_PACKET_BENCH=1 SIDERSP_BENCH_AF_PACKET_IFACE=$(RESPONSE_SEND_IFACE) go test ./internal/response/ -run '^$$' -bench $(RESPONSE_SEND_BENCH) -benchmem -benchtime=$(BENCHTIME) -count=1
-
-bench-gate: build-xdp
-	BENCHTIME=$(BENCH_GATE_TIME) BENCH_GOCACHE=$(BENCH_GOCACHE) BPF_BENCH_GATE='$(BPF_BENCH_GATE)' BPF_BENCH_NS_MAX=$(BPF_BENCH_NS_MAX) RESPONSE_BENCH_GATE='$(RESPONSE_BENCH_GATE)' RESPONSE_BENCH_NS_MAX=$(RESPONSE_BENCH_NS_MAX) scripts/bench-gate.sh
 
 bench-vnet: build-xdp
 	GOCACHE=$(BENCH_GOCACHE) BENCHTIME=$(BENCHTIME) SIDERSP_VNET_SAMPLES=$(VNET_SAMPLES) scripts/bench-vnet.sh

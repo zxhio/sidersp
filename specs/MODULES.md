@@ -88,7 +88,9 @@ Owns:
 - XSK metadata decode
 - Queue worker loops
 - Queue-local socket registration
-- Queue-parallel dispatch to response and analysis consumers
+- Queue-parallel dispatch to response and analysis consumers, with queue-local
+  synchronous response handling first and analysis submission on a side path
+- Borrowed-frame receive handoff for queue-local response hot paths
 
 Does not own:
 
@@ -107,7 +109,8 @@ Owns:
 
 - AF_XDP socket create, close, and queue binding
 - AF_PACKET frame send paths
-- Shared frame read/write capability interfaces
+- Shared frame read/write capability interfaces, including borrowed-frame
+  handling for queue-local hot paths
 - Optional borrowed-send optimizations where supported
 
 Does not own:

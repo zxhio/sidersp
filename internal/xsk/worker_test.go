@@ -22,11 +22,12 @@ func (s *stubRegistrar) RegisterXSK(queueID int, fd uint32) error {
 }
 
 type stubSocket struct {
-	fd      uint32
-	err     error
-	calls   int
-	frames  [][]byte
-	onEmpty func()
+	fd          uint32
+	err         error
+	calls       int
+	borrowCalls int
+	frames      [][]byte
+	onEmpty     func()
 }
 
 func (s *stubSocket) FD() uint32 { return s.fd }
@@ -47,25 +48,31 @@ func (s *stubSocket) ReadFrame(ctx context.Context) ([]byte, error) {
 	return nil, s.err
 }
 
+func (s *stubSocket) ReadBorrowedFrame(ctx context.Context) ([]byte, error) {
+	s.calls++
+	s.borrowCalls++
+	if len(s.frames) > 0 {
+		frame := s.frames[0]
+		s.frames = s.frames[1:]
+		return frame, nil
+	}
+	if s.onEmpty != nil {
+		s.onEmpty()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return nil, s.err
+}
+
+func (s *stubSocket) ReleaseBorrowedFrame() {}
+
 func (s *stubSocket) WriteFrame(_ context.Context, _ []byte) error {
 	return nil
 }
 
 func (s *stubSocket) Close() error {
 	return nil
-}
-
-type stubThreadLocker struct {
-	lockCalls   int
-	unlockCalls int
-}
-
-func (s *stubThreadLocker) LockOSThread() {
-	s.lockCalls++
-}
-
-func (s *stubThreadLocker) UnlockOSThread() {
-	s.unlockCalls++
 }
 
 type handledFrame struct {
@@ -101,17 +108,6 @@ func TestWorkerRegistersBeforeReceive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWorker() error = %v", err)
 	}
-	locker := &stubThreadLocker{}
-	worker.thread = locker
-	affinityCalls := 0
-	affinityCPU := -1
-	worker.pinCPU = true
-	worker.cpuID = 9
-	worker.affinity = func(cpuID int) error {
-		affinityCalls++
-		affinityCPU = cpuID
-		return nil
-	}
 
 	if err := worker.Run(ctx); err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -122,11 +118,8 @@ func TestWorkerRegistersBeforeReceive(t *testing.T) {
 	if socket.calls != 1 {
 		t.Fatalf("socket calls = %d, want 1", socket.calls)
 	}
-	if locker.lockCalls != 1 || locker.unlockCalls != 1 {
-		t.Fatalf("thread locker calls = %d/%d, want 1/1", locker.lockCalls, locker.unlockCalls)
-	}
-	if affinityCalls != 1 || affinityCPU != 9 {
-		t.Fatalf("affinity calls = %d cpu = %d, want 1/9", affinityCalls, affinityCPU)
+	if socket.borrowCalls != 1 {
+		t.Fatalf("socket borrowed calls = %d, want 1", socket.borrowCalls)
 	}
 }
 
@@ -144,35 +137,6 @@ func TestWorkerReturnsRegisterError(t *testing.T) {
 	err = worker.Run(context.Background())
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("Run() error = %v, want %v", err, wantErr)
-	}
-	if socket.calls != 0 {
-		t.Fatalf("socket calls = %d, want 0", socket.calls)
-	}
-}
-
-func TestWorkerReturnsAffinityError(t *testing.T) {
-	t.Parallel()
-
-	wantErr := errors.New("affinity failed")
-	registrar := &stubRegistrar{}
-	socket := &stubSocket{fd: 42}
-	worker, err := NewWorker(7, 3, registrar, socket, func(_ context.Context, _ int, _ Socket, _ []byte) error { return nil })
-	if err != nil {
-		t.Fatalf("NewWorker() error = %v", err)
-	}
-	worker.pinCPU = true
-	worker.cpuID = 6
-	worker.affinity = func(int) error { return wantErr }
-
-	err = worker.Run(context.Background())
-	if !errors.Is(err, wantErr) {
-		t.Fatalf("Run() error = %v, want %v", err, wantErr)
-	}
-	if !strings.Contains(err.Error(), "pin xsk worker queue 3 to cpu 6") {
-		t.Fatalf("Run() error = %q, want pinning context", err)
-	}
-	if registrar.calls != 0 {
-		t.Fatalf("registrar calls = %d, want 0", registrar.calls)
 	}
 	if socket.calls != 0 {
 		t.Fatalf("socket calls = %d, want 0", socket.calls)

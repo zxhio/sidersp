@@ -53,7 +53,9 @@ func (d *Dispatcher) Dispatch(ctx context.Context, queueID int, socket Socket, f
 	}
 
 	// Keep response on the queue-local XSK worker thread so AF_XDP socket
-	// state never crosses goroutines.
+	// state never crosses goroutines. Analysis is submitted only after the
+	// synchronous response step and must absorb any copy or queueing cost on its
+	// own side path.
 	responseErr := d.response.HandleXSK(ctx, envelope, socket)
 	if d.analysis != nil {
 		if err := d.analysis.SubmitXSK(ctx, envelope); err != nil {

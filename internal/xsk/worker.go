@@ -21,26 +21,14 @@ type Socket = frameio.Socket
 
 type FrameHandler func(ctx context.Context, queueID int, socket Socket, frame []byte) error
 
-type threadLocker interface {
-	LockOSThread()
-	UnlockOSThread()
-}
-
-type runtimeThreadLocker struct{}
-
-func (runtimeThreadLocker) LockOSThread()   { runtime.LockOSThread() }
-func (runtimeThreadLocker) UnlockOSThread() { runtime.UnlockOSThread() }
-
 type Worker struct {
 	ifindex   int
 	queueID   int
 	registrar Registrar
 	socket    Socket
 	handler   FrameHandler
-	thread    threadLocker
 	pinCPU    bool
 	cpuID     int
-	affinity  func(int) error
 }
 
 func NewWorker(ifindex, queueID int, registrar Registrar, socket Socket, handler FrameHandler) (*Worker, error) {
@@ -62,25 +50,15 @@ func NewWorker(ifindex, queueID int, registrar Registrar, socket Socket, handler
 		registrar: registrar,
 		socket:    socket,
 		handler:   handler,
-		thread:    runtimeThreadLocker{},
-		affinity:  setCurrentThreadAffinity,
 	}, nil
 }
 
 func (w *Worker) Run(ctx context.Context) error {
-	locker := w.thread
-	if locker == nil {
-		locker = runtimeThreadLocker{}
-	}
-	locker.LockOSThread()
-	defer locker.UnlockOSThread()
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 
 	if w.pinCPU {
-		setAffinity := w.affinity
-		if setAffinity == nil {
-			setAffinity = setCurrentThreadAffinity
-		}
-		if err := setAffinity(w.cpuID); err != nil {
+		if err := setCurrentThreadAffinity(w.cpuID); err != nil {
 			return fmt.Errorf("pin xsk worker queue %d to cpu %d: %w", w.queueID, w.cpuID, err)
 		}
 	}
@@ -93,6 +71,10 @@ func (w *Worker) Run(ctx context.Context) error {
 		"ifindex": w.ifindex,
 		"queue":   w.queueID,
 	}).Info("Started xsk worker")
+
+	if reader, ok := w.socket.(frameio.BorrowedFrameReader); ok {
+		return w.runBorrowed(ctx, reader)
+	}
 
 	for {
 		if err := ctx.Err(); err != nil {
@@ -115,6 +97,33 @@ func (w *Worker) Run(ctx context.Context) error {
 				"queue":   w.queueID,
 			}).WithError(err).Debug("XSK frame handler error")
 		}
+	}
+}
+
+func (w *Worker) runBorrowed(ctx context.Context, reader frameio.BorrowedFrameReader) error {
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil
+		}
+
+		frame, err := reader.ReadBorrowedFrame(ctx)
+		if err != nil {
+			if ctx.Err() != nil || errors.Is(err, context.Canceled) {
+				return nil
+			}
+			return err
+		}
+		if len(frame) == 0 {
+			reader.ReleaseBorrowedFrame()
+			continue
+		}
+		if err := w.handler(ctx, w.queueID, w.socket, frame); err != nil {
+			logs.App().WithFields(logrus.Fields{
+				"ifindex": w.ifindex,
+				"queue":   w.queueID,
+			}).WithError(err).Debug("XSK frame handler error")
+		}
+		reader.ReleaseBorrowedFrame()
 	}
 }
 

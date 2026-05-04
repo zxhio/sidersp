@@ -30,6 +30,8 @@ The export contract is intentionally small:
 - Export ordering is only required within the local worker path that handles a
   given envelope stream
 - Export failures must not block dataplane progress or response execution
+- Response remains the primary synchronous consumer on the XSK worker; analysis
+  must stay on an asynchronous side path after response dispatch
 
 The current contract does not define multi-interface fan-out or analyzer-side
 session management.
@@ -49,6 +51,8 @@ Selection happens before export.
 Analysis export is best-effort.
 
 - Queue saturation may cause export-side drops or skips
+- If analysis needs to retain packet bytes after dispatch, it must copy or
+  buffer them inside the analysis path
 - Export failure must be observable locally
 - Export failure must not block the response worker path
 - Export failure must not change the dataplane verdict for the original packet

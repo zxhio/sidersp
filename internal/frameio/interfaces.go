@@ -16,6 +16,11 @@ type Socket interface {
 	WriteCloser
 }
 
+type BorrowedFrameReader interface {
+	ReadBorrowedFrame(context.Context) ([]byte, error)
+	ReleaseBorrowedFrame()
+}
+
 type BorrowedFrameWriter interface {
 	WriteBorrowedFrame(context.Context, []byte) error
 }

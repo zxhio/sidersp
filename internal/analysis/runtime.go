@@ -19,9 +19,24 @@ const defaultQueueSize = 256
 
 var ErrQueueFull = errors.New("analysis queue is full")
 
+type queuedEnvelope struct {
+	envelope xsk.Envelope
+	buffer   *queuedFrameBuffer
+}
+
+type queuedFrameBuffer struct {
+	buf []byte
+}
+
 type queueShard struct {
-	queue   chan xsk.Envelope
+	queue   chan queuedEnvelope
 	started bool
+}
+
+var queuedFramePool = sync.Pool{
+	New: func() any {
+		return &queuedFrameBuffer{buf: make([]byte, 0, 2048)}
+	},
 }
 
 type Runtime struct {
@@ -59,13 +74,31 @@ func (r *Runtime) SubmitXSK(ctx context.Context, envelope xsk.Envelope) error {
 	if shouldStart {
 		r.startShardWorker(runCtx, envelope.QueueID, ch)
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if cap(ch) > 0 && len(ch) == cap(ch) {
+		return ErrQueueFull
+	}
+
+	item := queuedEnvelope{
+		envelope: envelope,
+	}
+	if len(envelope.Frame) != 0 {
+		buffer := acquireQueuedFrameBuffer(len(envelope.Frame))
+		copy(buffer.buf, envelope.Frame)
+		item.envelope.Frame = buffer.buf
+		item.buffer = buffer
+	}
 
 	select {
-	case ch <- envelope:
+	case ch <- item:
 		return nil
 	case <-ctx.Done():
+		releaseQueuedFrameBuffer(item.buffer)
 		return ctx.Err()
 	default:
+		releaseQueuedFrameBuffer(item.buffer)
 		return ErrQueueFull
 	}
 }
@@ -95,7 +128,7 @@ func (r *Runtime) Close() error {
 	return nil
 }
 
-func (r *Runtime) start(ctx context.Context) (context.Context, map[int]chan xsk.Envelope, error) {
+func (r *Runtime) start(ctx context.Context) (context.Context, map[int]chan queuedEnvelope, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -104,7 +137,7 @@ func (r *Runtime) start(ctx context.Context) (context.Context, map[int]chan xsk.
 	}
 	r.runCtx, r.cancel = context.WithCancel(ctx)
 
-	shards := make(map[int]chan xsk.Envelope, len(r.queues))
+	shards := make(map[int]chan queuedEnvelope, len(r.queues))
 	for queueID, shard := range r.queues {
 		if shard.started {
 			continue
@@ -115,13 +148,13 @@ func (r *Runtime) start(ctx context.Context) (context.Context, map[int]chan xsk.
 	return r.runCtx, shards, nil
 }
 
-func (r *Runtime) shardForQueue(queueID int) (chan xsk.Envelope, context.Context, bool) {
+func (r *Runtime) shardForQueue(queueID int) (chan queuedEnvelope, context.Context, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	shard, ok := r.queues[queueID]
 	if !ok {
-		shard = &queueShard{queue: make(chan xsk.Envelope, r.queueSize)}
+		shard = &queueShard{queue: make(chan queuedEnvelope, r.queueSize)}
 		r.queues[queueID] = shard
 	}
 	if r.runCtx == nil || shard.started {
@@ -131,7 +164,7 @@ func (r *Runtime) shardForQueue(queueID int) (chan xsk.Envelope, context.Context
 	return shard.queue, r.runCtx, true
 }
 
-func (r *Runtime) startShardWorker(ctx context.Context, queueID int, queue <-chan xsk.Envelope) {
+func (r *Runtime) startShardWorker(ctx context.Context, queueID int, queue <-chan queuedEnvelope) {
 	r.wg.Add(1)
 	go func() {
 		defer r.wg.Done()
@@ -153,8 +186,10 @@ func (r *Runtime) startShardWorker(ctx context.Context, queueID int, queue <-cha
 			select {
 			case <-ctx.Done():
 				return
-			case envelope := <-queue:
+			case item := <-queue:
+				envelope := item.envelope
 				if err := r.writer.WriteFrame(ctx, envelope.Frame); err != nil {
+					releaseQueuedFrameBuffer(item.buffer)
 					if ctx.Err() != nil {
 						return
 					}
@@ -164,10 +199,34 @@ func (r *Runtime) startShardWorker(ctx context.Context, queueID int, queue <-cha
 						"action":    envelope.Metadata.Action,
 						"interface": r.ifaceName,
 					}).WithError(err).Warn("Fail to export analysis packet")
+					continue
 				}
+				releaseQueuedFrameBuffer(item.buffer)
 			}
 		}
 	}()
+}
+
+func acquireQueuedFrameBuffer(size int) *queuedFrameBuffer {
+	item := queuedFramePool.Get().(*queuedFrameBuffer)
+	if cap(item.buf) < size {
+		item.buf = make([]byte, size)
+	} else {
+		item.buf = item.buf[:size]
+	}
+	return item
+}
+
+func releaseQueuedFrameBuffer(item *queuedFrameBuffer) {
+	if item == nil {
+		return
+	}
+	if cap(item.buf) > 8192 {
+		item.buf = make([]byte, 0, 2048)
+	} else {
+		item.buf = item.buf[:0]
+	}
+	queuedFramePool.Put(item)
 }
 
 func copyWorkerCPUs(raw map[int]int) map[int]int {

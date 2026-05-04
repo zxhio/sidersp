@@ -84,9 +84,19 @@ XSK runtime -> decode xsk_meta -> dispatch envelope -> response consumer -> pars
 XSK redirect is for actions that need full original packet context. Ringbuf
 must not be used to carry packet fields required for response construction.
 
-The same decoded envelope may also be submitted to `analysis`. Analysis
-submission is best-effort and must not block response handling or queue
-progress.
+`response` is the priority consumer on this path. The queue-local XSK worker
+must execute response parsing and TX synchronously on the same worker thread
+that owns the AF_XDP socket, without handing that work to another goroutine.
+The current implementation uses borrowed AF_XDP receive for this path, avoids
+the fixed RX copy between AF_XDP receive and response execution, and is zero
+allocation on the measured ICMP echo reply success path.
+
+The same decoded envelope may also be submitted to `analysis`, but only as a
+side path after the synchronous response step. Analysis submission is
+best-effort and must not block response handling or queue progress. If
+analysis needs packet ownership beyond the dispatch call, analysis must absorb
+that copy or buffering cost itself instead of pushing it onto the response hot
+path.
 
 `xsk_redirected` dataplane statistics and `verdict=xsk` observation events mean
 BPF successfully submitted the original packet to XSK. They do not mean the

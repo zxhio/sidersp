@@ -288,10 +288,28 @@ type replyBuilder struct {
 	tcp        layers.TCP
 	udp        layers.UDP
 	dns        layers.DNS
+	payload    payloadLayer
 }
 
 func newReplyBuilder() replyBuilder {
 	return replyBuilder{serializer: newSerializer()}
+}
+
+type payloadLayer struct {
+	data []byte
+}
+
+func (p *payloadLayer) LayerType() gopacket.LayerType {
+	return gopacket.LayerTypePayload
+}
+
+func (p *payloadLayer) SerializeTo(buf gopacket.SerializeBuffer, _ gopacket.SerializeOptions) error {
+	out, err := buf.PrependBytes(len(p.data))
+	if err != nil {
+		return err
+	}
+	copy(out, p.data)
+	return nil
 }
 
 func (b *replyBuilder) buildEthernet(srcMAC, dstMAC net.HardwareAddr, etherType layers.EthernetType) *layers.Ethernet {
@@ -318,6 +336,11 @@ func (b *replyBuilder) buildIPv4Reply(pkt *Packet, protocol layers.IPProtocol) *
 		DstIP:    pkt.ip4.SrcIP,
 	}
 	return &b.ip4
+}
+
+func (b *replyBuilder) buildPayload(data []byte) *payloadLayer {
+	b.payload.data = data
+	return &b.payload
 }
 
 func (b *replyBuilder) serializeIPResponse(target gopacket.LayerType, dst []byte, frameHeaderLen, packetHeaderLen, payloadLen int, app, transport gopacket.SerializableLayer) ([]byte, error) {
@@ -353,7 +376,7 @@ func (b *ICMPEchoReply) Build(target gopacket.LayerType, _ uint32, pkt *Packet, 
 		ethernetHeaderLen+minIPv4HeaderLen+minICMPv4HeaderLen,
 		minIPv4HeaderLen+minICMPv4HeaderLen,
 		payloadLen,
-		gopacket.Payload(pkt.icmp.Payload),
+		b.buildPayload(pkt.icmp.Payload),
 		transport,
 	)
 }
@@ -476,7 +499,7 @@ func (b *UDPEchoReply) Build(target gopacket.LayerType, _ uint32, pkt *Packet, _
 		ethernetHeaderLen+minIPv4HeaderLen+minUDPHeaderLen,
 		minIPv4HeaderLen+minUDPHeaderLen,
 		payloadLen,
-		gopacket.Payload(pkt.udp.Payload),
+		b.buildPayload(pkt.udp.Payload),
 		transport,
 	)
 }

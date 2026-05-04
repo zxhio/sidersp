@@ -18,6 +18,8 @@ type Socket struct {
 	cfg    SocketConfig
 
 	txStanding uint32
+	rxBorrowed bool
+	rxFrame    uint64
 }
 
 // New creates and binds an AF_XDP socket for the given queue ID.
@@ -129,7 +131,28 @@ func (s *Socket) FD() uint32 {
 // frame. The returned slice is copied out of UMEM so callers do not hold
 // AF_XDP frame ownership across response execution.
 func (s *Socket) ReadFrame(ctx context.Context) ([]byte, error) {
-	pollFds := []unix.PollFd{
+	frame, err := s.ReadBorrowedFrame(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(frame) == 0 {
+		s.ReleaseBorrowedFrame()
+		return nil, nil
+	}
+	out := append([]byte(nil), frame...)
+	s.ReleaseBorrowedFrame()
+	return out, nil
+}
+
+// ReadBorrowedFrame polls the RX ring and returns one metadata-prefixed
+// redirected frame borrowed directly from UMEM. Callers must release the frame
+// with ReleaseBorrowedFrame after synchronous use.
+func (s *Socket) ReadBorrowedFrame(ctx context.Context) ([]byte, error) {
+	if s.rxBorrowed {
+		return nil, fmt.Errorf("receive: borrowed frame not released")
+	}
+
+	pollFds := [1]unix.PollFd{
 		{Fd: int32(s.sockfd), Events: unix.POLLIN},
 	}
 
@@ -138,20 +161,33 @@ func (s *Socket) ReadFrame(ctx context.Context) ([]byte, error) {
 			return nil, nil
 		}
 
-		_, err := unix.Poll(pollFds, 100)
+		_, err := unix.Poll(pollFds[:], 100)
 		if err != nil && err != unix.EINTR {
 			return nil, fmt.Errorf("af_xdp poll: %w", err)
 		}
 
 		s.drainCompletions()
-		frame, err := s.receiveFrame()
+		frame, handled, err := s.receiveFrameBorrowed()
 		if err != nil {
 			return nil, err
 		}
-		if len(frame) != 0 {
+		if handled {
 			return frame, nil
 		}
 	}
+}
+
+func (s *Socket) ReleaseBorrowedFrame() {
+	if !s.rxBorrowed {
+		return
+	}
+
+	s.umem.freeFrame(s.rxFrame)
+	s.rx.Release(1)
+	s.refillFill()
+
+	s.rxBorrowed = false
+	s.rxFrame = 0
 }
 
 // WriteFrame sends a response frame by allocating a UMEM slot, copying data,
@@ -214,27 +250,42 @@ func (s *Socket) Close() error {
 }
 
 func (s *Socket) receiveFrame() ([]byte, error) {
+	frame, handled, err := s.receiveFrameBorrowed()
+	if err != nil {
+		return nil, err
+	}
+	if !handled {
+		return nil, nil
+	}
+	if len(frame) == 0 {
+		s.ReleaseBorrowedFrame()
+		return nil, nil
+	}
+	out := append([]byte(nil), frame...)
+	s.ReleaseBorrowedFrame()
+	return out, nil
+}
+
+func (s *Socket) receiveFrameBorrowed() ([]byte, bool, error) {
 	var rxIdx uint32
 	rcvd := s.rx.Peek(1, &rxIdx)
 	if rcvd == 0 {
-		return nil, nil
+		return nil, false, nil
 	}
 
 	desc := s.rx.GetDesc(rxIdx)
 	addr, length, err := s.rxFrameData(desc.Addr, desc.Len)
 	frameBase := frameBaseAddr(desc.Addr, s.cfg.FrameSize)
-	var frame []byte
-	if err == nil {
-		frame = append([]byte(nil), s.umem.frameData(addr, length)...)
-	}
-	s.umem.freeFrame(frameBase)
-
-	s.rx.Release(rcvd)
-	s.refillFill()
 	if err != nil {
-		return nil, err
+		s.umem.freeFrame(frameBase)
+		s.rx.Release(rcvd)
+		s.refillFill()
+		return nil, true, err
 	}
-	return frame, nil
+
+	s.rxBorrowed = true
+	s.rxFrame = frameBase
+	return s.umem.frameData(addr, length), true, nil
 }
 
 func (s *Socket) rxFrameData(addr uint64, length uint32) (uint64, uint32, error) {
