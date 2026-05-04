@@ -31,6 +31,23 @@ func (s *stubPacketSender) Close() error {
 	return nil
 }
 
+func waitForRuntimeStarted(t *testing.T, runtime *Runtime) {
+	t.Helper()
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		runtime.mu.Lock()
+		started := runtime.runCtx != nil
+		runtime.mu.Unlock()
+		if started {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	t.Fatal("runtime did not enter running state")
+}
+
 func TestRuntimeSubmitRejectsFullQueue(t *testing.T) {
 	t.Parallel()
 
@@ -52,6 +69,28 @@ func TestRuntimeSubmitRejectsFullQueue(t *testing.T) {
 	}
 }
 
+func TestRuntimeSubmitHonorsContextCancel(t *testing.T) {
+	t.Parallel()
+
+	runtime, err := NewRuntime(Options{QueueSize: 1}, &stubPacketSender{})
+	if err != nil {
+		t.Fatalf("NewRuntime() error = %v", err)
+	}
+
+	envelope := xsk.Envelope{QueueID: 1}
+	if err := runtime.SubmitXSK(context.Background(), envelope); err != nil {
+		t.Fatalf("SubmitXSK() fill queue error = %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err = runtime.SubmitXSK(ctx, envelope)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("SubmitXSK() error = %v, want %v", err, context.Canceled)
+	}
+}
+
 func TestRuntimeRunStopsOnCancel(t *testing.T) {
 	t.Parallel()
 
@@ -63,6 +102,35 @@ func TestRuntimeRunStopsOnCancel(t *testing.T) {
 	cancel()
 
 	if err := runtime.Run(ctx); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+}
+
+func TestRuntimeRunRejectsDuplicateStart(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runtime, err := NewRuntime(Options{}, &stubPacketSender{})
+	if err != nil {
+		t.Fatalf("NewRuntime() error = %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- runtime.Run(ctx)
+	}()
+
+	waitForRuntimeStarted(t, runtime)
+
+	err = runtime.Run(context.Background())
+	if err == nil || err.Error() != "analysis runtime already running" {
+		t.Fatalf("Run() duplicate error = %v, want analysis runtime already running", err)
+	}
+
+	cancel()
+	if err := <-errCh; err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
 }
@@ -126,6 +194,9 @@ func TestRuntimeRunExportsFrames(t *testing.T) {
 	if err := runtime.Run(ctx); err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
+	if err := runtime.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
 	if sender.sendCalls != 1 {
 		t.Fatalf("send calls = %d, want 1", sender.sendCalls)
 	}
@@ -159,20 +230,7 @@ func TestRuntimeRunExportsFramesSubmittedAfterStart(t *testing.T) {
 		errCh <- runtime.Run(ctx)
 	}()
 
-	deadline := time.Now().Add(time.Second)
-	started := false
-	for time.Now().Before(deadline) {
-		runtime.mu.Lock()
-		started = runtime.runCtx != nil
-		runtime.mu.Unlock()
-		if started {
-			break
-		}
-		time.Sleep(time.Millisecond)
-	}
-	if !started {
-		t.Fatal("runtime did not enter running state before submit")
-	}
+	waitForRuntimeStarted(t, runtime)
 
 	if err := runtime.SubmitXSK(context.Background(), xsk.Envelope{
 		QueueID: 3,
@@ -183,6 +241,9 @@ func TestRuntimeRunExportsFramesSubmittedAfterStart(t *testing.T) {
 
 	if err := <-errCh; err != nil {
 		t.Fatalf("Run() error = %v", err)
+	}
+	if err := runtime.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
 	}
 	if sender.sendCalls != 1 {
 		t.Fatalf("send calls = %d, want 1", sender.sendCalls)
@@ -205,5 +266,65 @@ func TestRuntimeCloseClosesSender(t *testing.T) {
 	}
 	if sender.closeCalls != 1 {
 		t.Fatalf("close calls = %d, want 1", sender.closeCalls)
+	}
+}
+
+func TestRuntimeCloseCancelsRunAndWaitsForWorker(t *testing.T) {
+	t.Parallel()
+
+	writeDone := make(chan struct{}, 1)
+	sender := &stubPacketSender{
+		sendHook: func(_ []byte) {
+			select {
+			case writeDone <- struct{}{}:
+			default:
+			}
+		},
+	}
+	runtime, err := NewRuntime(Options{}, sender)
+	if err != nil {
+		t.Fatalf("NewRuntime() error = %v", err)
+	}
+
+	unlockCalls := 0
+	runtime.lockOSThread = func() {}
+	runtime.unlockOSThread = func() {
+		unlockCalls++
+	}
+
+	if err := runtime.SubmitXSK(context.Background(), xsk.Envelope{
+		QueueID: 5,
+		Frame:   []byte{1, 2, 3, 4},
+	}); err != nil {
+		t.Fatalf("SubmitXSK() error = %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- runtime.Run(context.Background())
+	}()
+
+	waitForRuntimeStarted(t, runtime)
+
+	select {
+	case <-writeDone:
+	case <-time.After(time.Second):
+		t.Fatal("worker did not export frame before close")
+	}
+
+	if err := runtime.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if err := <-errCh; err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if sender.sendCalls != 1 {
+		t.Fatalf("send calls = %d, want 1", sender.sendCalls)
+	}
+	if sender.closeCalls != 1 {
+		t.Fatalf("close calls = %d, want 1", sender.closeCalls)
+	}
+	if unlockCalls != 1 {
+		t.Fatalf("unlock calls = %d, want 1", unlockCalls)
 	}
 }

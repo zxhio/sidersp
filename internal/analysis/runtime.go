@@ -29,6 +29,7 @@ type Runtime struct {
 	queues     map[int]*queueShard
 	queueSize  int
 	runCtx     context.Context
+	cancel     context.CancelFunc
 	wg         sync.WaitGroup
 	writer     frameio.WriteCloser
 	ifaceName  string
@@ -64,19 +65,21 @@ func NewRuntime(opts Options, writer frameio.WriteCloser) (*Runtime, error) {
 	}, nil
 }
 
-func (r *Runtime) SubmitXSK(_ context.Context, envelope xsk.Envelope) error {
+func (r *Runtime) SubmitXSK(ctx context.Context, envelope xsk.Envelope) error {
 	if r == nil {
 		return fmt.Errorf("submit xsk analysis: nil runtime")
 	}
 
-	shard, runCtx, shouldStart := r.shardForQueue(envelope.QueueID)
+	ch, runCtx, shouldStart := r.shardForQueue(envelope.QueueID)
 	if shouldStart {
-		r.startShardWorker(runCtx, envelope.QueueID, shard)
+		r.startShardWorker(runCtx, envelope.QueueID, ch)
 	}
 
 	select {
-	case shard <- envelope:
+	case ch <- envelope:
 		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	default:
 		return ErrQueueFull
 	}
@@ -87,13 +90,15 @@ func (r *Runtime) Run(ctx context.Context) error {
 		return fmt.Errorf("run analysis runtime: nil runtime")
 	}
 
-	runCtx, shards := r.start(ctx)
+	runCtx, shards, err := r.start(ctx)
+	if err != nil {
+		return err
+	}
 	for queueID, shard := range shards {
 		r.startShardWorker(runCtx, queueID, shard)
 	}
 
 	<-runCtx.Done()
-	r.wg.Wait()
 	return nil
 }
 
@@ -101,16 +106,26 @@ func (r *Runtime) Close() error {
 	if r == nil || r.writer == nil {
 		return nil
 	}
+
+	r.mu.Lock()
+	cancel := r.cancel
+	r.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+	r.wg.Wait()
 	return r.writer.Close()
 }
 
-func (r *Runtime) start(ctx context.Context) (context.Context, map[int]chan xsk.Envelope) {
+func (r *Runtime) start(ctx context.Context) (context.Context, map[int]chan xsk.Envelope, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if r.runCtx == nil {
-		r.runCtx = ctx
+	if r.runCtx != nil {
+		return nil, nil, fmt.Errorf("analysis runtime already running")
 	}
+	r.runCtx, r.cancel = context.WithCancel(ctx)
 
 	shards := make(map[int]chan xsk.Envelope, len(r.queues))
 	for queueID, shard := range r.queues {
@@ -120,7 +135,7 @@ func (r *Runtime) start(ctx context.Context) (context.Context, map[int]chan xsk.
 		shard.started = true
 		shards[queueID] = shard.queue
 	}
-	return r.runCtx, shards
+	return r.runCtx, shards, nil
 }
 
 func (r *Runtime) shardForQueue(queueID int) (chan xsk.Envelope, context.Context, bool) {
@@ -144,23 +159,11 @@ func (r *Runtime) startShardWorker(ctx context.Context, queueID int, queue <-cha
 	go func() {
 		defer r.wg.Done()
 
-		lockThread := r.lockOSThread
-		unlockThread := r.unlockOSThread
-		if lockThread == nil {
-			lockThread = goruntime.LockOSThread
-		}
-		if unlockThread == nil {
-			unlockThread = goruntime.UnlockOSThread
-		}
-		lockThread()
-		defer unlockThread()
+		r.lockOSThread()
+		defer r.unlockOSThread()
 
 		if cpuID, ok := r.cpuByQueue[queueID]; ok {
-			setAffinity := r.setAffinity
-			if setAffinity == nil {
-				setAffinity = setCurrentThreadAffinity
-			}
-			if err := setAffinity(cpuID); err != nil {
+			if err := r.setAffinity(cpuID); err != nil {
 				logs.App().WithFields(logrus.Fields{
 					"queue":     queueID,
 					"interface": r.ifaceName,
