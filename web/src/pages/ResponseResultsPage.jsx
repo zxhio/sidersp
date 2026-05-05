@@ -93,8 +93,8 @@ export default function ResponseResultsPage() {
       <div className="page-body">
         {error && <div className="error-block" style={{ marginBottom: 16 }}>加载失败：{error}</div>}
 
-        <form className="table-wrap" style={{ padding: 16, marginBottom: 16 }} onSubmit={submitFilters}>
-          <div className="form-row">
+        <form className="table-wrap" style={{ padding: '10px 16px', marginBottom: 12 }} onSubmit={submitFilters}>
+          <div className="form-row" style={{ gridTemplateColumns: '1fr 1fr 1fr auto' }}>
             <div className="form-group">
               <label>规则 ID</label>
               <input
@@ -117,10 +117,8 @@ export default function ResponseResultsPage() {
                 ))}
               </select>
             </div>
-          </div>
-          <div className="form-row">
             <div className="form-group">
-              <label>结果</label>
+              <label>响应结果</label>
               <select
                 value={draft.result}
                 onChange={e => setDraft(current => ({ ...current, result: e.target.value }))}
@@ -131,15 +129,14 @@ export default function ResponseResultsPage() {
                 ))}
               </select>
             </div>
-          </div>
-          <div className="overview-actions">
-            <button type="submit" className="btn btn-primary">查询</button>
-            <button type="button" className="btn" onClick={clearFilters}>清空</button>
+            <div className="form-group" style={{ display: 'flex', alignItems: 'flex-end', gap: 8 }}>
+              <button type="submit" className="btn btn-primary">查询</button>
+              <button type="button" className="btn" onClick={clearFilters}>清空</button>
+            </div>
           </div>
         </form>
 
         <div className="toolbar">
-          <span className="toolbar-info">共 {total} 条结果</span>
           <div className="column-toggle-group">
             <label className="column-toggle">
               <input
@@ -199,11 +196,11 @@ export default function ResponseResultsPage() {
               </table>
 
               <div className="pagination">
-                <span>第 {page} / {totalPages} 页</span>
+                <span>共 <strong>{total}</strong> 条 · 第 <strong>{page}</strong> / <strong>{totalPages}</strong> 页</span>
                 <div className="pagination-buttons">
                   <button
                     type="button"
-                    className="btn btn-sm"
+                    className="btn"
                     disabled={page <= 1}
                     onClick={() => setQuery(current => ({ ...current, page: current.page - 1 }))}
                   >
@@ -211,7 +208,7 @@ export default function ResponseResultsPage() {
                   </button>
                   <button
                     type="button"
-                    className="btn btn-sm"
+                    className="btn"
                     disabled={page >= totalPages}
                     onClick={() => setQuery(current => ({ ...current, page: current.page + 1 }))}
                   >

@@ -106,8 +106,8 @@ export default function EventsPage() {
       <div className="page-body">
         {error && <div className="error-block" style={{ marginBottom: 16 }}>加载失败：{error}</div>}
 
-        <form className="table-wrap" style={{ padding: 16, marginBottom: 16 }} onSubmit={submitFilters}>
-          <div className="form-row">
+        <form className="table-wrap" style={{ padding: '10px 16px', marginBottom: 12 }} onSubmit={submitFilters}>
+          <div className="form-row" style={{ gridTemplateColumns: '1fr 1fr 1fr auto' }}>
             <div className="form-group">
               <label>规则 ID</label>
               <input
@@ -130,8 +130,6 @@ export default function EventsPage() {
                 ))}
               </select>
             </div>
-          </div>
-          <div className="form-row">
             <div className="form-group">
               <label>观测结果</label>
               <select
@@ -152,7 +150,6 @@ export default function EventsPage() {
         </form>
 
         <div className="toolbar">
-          <span className="toolbar-info">共 {total} 条事件</span>
           <label className="column-toggle">
             <input
               type="checkbox"
@@ -216,11 +213,11 @@ export default function EventsPage() {
               </table>
 
               <div className="pagination">
-                <span>第 {page} / {totalPages} 页</span>
+                <span>共 <strong>{total}</strong> 条 · 第 <strong>{page}</strong> / <strong>{totalPages}</strong> 页</span>
                 <div className="pagination-buttons">
                   <button
                     type="button"
-                    className="btn btn-sm"
+                    className="btn"
                     disabled={page <= 1}
                     onClick={() => setQuery(current => ({ ...current, page: current.page - 1 }))}
                   >
@@ -228,7 +225,7 @@ export default function EventsPage() {
                   </button>
                   <button
                     type="button"
-                    className="btn btn-sm"
+                    className="btn"
                     disabled={page >= totalPages}
                     onClick={() => setQuery(current => ({ ...current, page: current.page + 1 }))}
                   >
