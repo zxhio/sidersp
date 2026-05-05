@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { listRules, createRule, updateRule, deleteRule, enableRule, disableRule, getStatus } from '../api'
 import RuleForm from '../components/RuleForm'
 import { useResizableColumns } from '../components/ResizableTable'
+import { formatActionLabel } from '../labels'
 
 const PAGE_SIZE = 20
 
@@ -231,7 +232,9 @@ export default function RulesPage() {
                         <td style={{ fontFamily: 'var(--font-mono)', fontSize: 13 }}>{formatCount(rule.matched_count)}</td>
                         <td><MatchDetail match={rule.match} /></td>
                         <td>
-                          <span className="tag tag-success">{rule.response.action}</span>
+                          <span className="tag tag-success" title={rule.response.action}>
+                            {formatActionLabel(rule.response.action)}
+                          </span>
                         </td>
                         <td>
                           <div className="actions-cell">

@@ -1,20 +1,14 @@
 import { useCallback, useEffect, useState } from 'react'
 import { listResponseResults } from '../api'
+import {
+  RESPONSE_ACTION_OPTIONS,
+  RESPONSE_RESULT_OPTIONS,
+  formatActionLabel,
+  formatResponseResultLabel,
+  formatResponseTXBackendLabel,
+} from '../labels'
 
 const PAGE_SIZE = 20
-
-const ACTION_OPTIONS = [
-  '',
-  'icmp_echo_reply',
-  'arp_reply',
-  'tcp_syn_ack',
-  'udp_echo_reply',
-  'dns_refused',
-  'dns_sinkhole',
-]
-
-const RESULT_OPTIONS = ['', 'sent', 'failed', 'skipped']
-const BACKEND_OPTIONS = ['', 'afxdp', 'afpacket']
 
 export default function ResponseResultsPage() {
   const [items, setItems] = useState([])
@@ -28,13 +22,15 @@ export default function ResponseResultsPage() {
     ruleID: '',
     action: '',
     result: '',
-    txBackend: '',
   })
   const [draft, setDraft] = useState({
     ruleID: '',
     action: '',
     result: '',
-    txBackend: '',
+  })
+  const [visibleColumns, setVisibleColumns] = useState({
+    backend: false,
+    queue: false,
   })
 
   const load = useCallback(async (nextQuery) => {
@@ -47,7 +43,6 @@ export default function ResponseResultsPage() {
         rule_id: nextQuery.ruleID,
         action: nextQuery.action,
         result: nextQuery.result,
-        tx_backend: nextQuery.txBackend,
       })
       setItems(data.items)
       setTotal(data.total)
@@ -71,12 +66,11 @@ export default function ResponseResultsPage() {
       ruleID: draft.ruleID.trim(),
       action: draft.action,
       result: draft.result,
-      txBackend: draft.txBackend,
     })
   }
 
   function clearFilters() {
-    const next = { ruleID: '', action: '', result: '', txBackend: '' }
+    const next = { ruleID: '', action: '', result: '' }
     setDraft(next)
     setQuery({
       page: 1,
@@ -84,11 +78,11 @@ export default function ResponseResultsPage() {
       ruleID: '',
       action: '',
       result: '',
-      txBackend: '',
     })
   }
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const columnCount = 6 + (visibleColumns.backend ? 1 : 0) + (visibleColumns.queue ? 1 : 0)
 
   return (
     <>
@@ -118,8 +112,8 @@ export default function ResponseResultsPage() {
                 onChange={e => setDraft(current => ({ ...current, action: e.target.value }))}
               >
                 <option value="">全部</option>
-                {ACTION_OPTIONS.filter(Boolean).map(item => (
-                  <option key={item} value={item}>{item}</option>
+                {RESPONSE_ACTION_OPTIONS.map(item => (
+                  <option key={item.value} value={item.value}>{item.label}</option>
                 ))}
               </select>
             </div>
@@ -132,20 +126,8 @@ export default function ResponseResultsPage() {
                 onChange={e => setDraft(current => ({ ...current, result: e.target.value }))}
               >
                 <option value="">全部</option>
-                {RESULT_OPTIONS.filter(Boolean).map(item => (
-                  <option key={item} value={item}>{item}</option>
-                ))}
-              </select>
-            </div>
-            <div className="form-group">
-              <label>发送后端</label>
-              <select
-                value={draft.txBackend}
-                onChange={e => setDraft(current => ({ ...current, txBackend: e.target.value }))}
-              >
-                <option value="">全部</option>
-                {BACKEND_OPTIONS.filter(Boolean).map(item => (
-                  <option key={item} value={item}>{item}</option>
+                {RESPONSE_RESULT_OPTIONS.map(item => (
+                  <option key={item.value} value={item.value}>{item.label}</option>
                 ))}
               </select>
             </div>
@@ -158,6 +140,24 @@ export default function ResponseResultsPage() {
 
         <div className="toolbar">
           <span className="toolbar-info">共 {total} 条结果</span>
+          <div className="column-toggle-group">
+            <label className="column-toggle">
+              <input
+                type="checkbox"
+                checked={visibleColumns.backend}
+                onChange={e => setVisibleColumns(current => ({ ...current, backend: e.target.checked }))}
+              />
+              显示发送路径
+            </label>
+            <label className="column-toggle">
+              <input
+                type="checkbox"
+                checked={visibleColumns.queue}
+                onChange={e => setVisibleColumns(current => ({ ...current, queue: e.target.checked }))}
+              />
+              显示队列
+            </label>
+          </div>
         </div>
 
         <div className="table-wrap">
@@ -172,8 +172,8 @@ export default function ResponseResultsPage() {
                     <th>规则</th>
                     <th>结果</th>
                     <th>动作</th>
-                    <th>后端</th>
-                    <th>队列</th>
+                    {visibleColumns.backend && <th>发送路径</th>}
+                    {visibleColumns.queue && <th>队列</th>}
                     <th>五元组</th>
                     <th>错误</th>
                   </tr>
@@ -181,16 +181,16 @@ export default function ResponseResultsPage() {
                 <tbody>
                   {items.length === 0 ? (
                     <tr className="empty-row">
-                      <td colSpan={8}>暂无响应结果数据</td>
+                      <td colSpan={columnCount}>暂无响应结果数据</td>
                     </tr>
                   ) : items.map(item => (
                     <tr key={`${item.timestamp_ns}-${item.rule_id}-${item.action}-${item.result}`}>
                       <td style={{ fontFamily: 'var(--font-mono)', fontSize: 13 }}>{formatTimestamp(item.timestamp)}</td>
                       <td style={{ fontFamily: 'var(--font-mono)', fontSize: 13 }}>{item.rule_id}</td>
-                      <td><span className={`tag ${resultClass(item.result)}`}>{item.result}</span></td>
-                      <td><span className="tag tag-success">{item.action}</span></td>
-                      <td style={{ fontFamily: 'var(--font-mono)', fontSize: 13 }}>{item.tx_backend}</td>
-                      <td style={{ fontFamily: 'var(--font-mono)', fontSize: 13 }}>{item.rx_queue}</td>
+                      <td><span className={`tag ${resultClass(item.result)}`} title={item.result}>{formatResponseResultLabel(item.result)}</span></td>
+                      <td><span className="tag tag-success" title={item.action}>{formatActionLabel(item.action)}</span></td>
+                      {visibleColumns.backend && <td><span className="tag tag-disabled" title={item.tx_backend}>{formatResponseTXBackendLabel(item.tx_backend)}</span></td>}
+                      {visibleColumns.queue && <td style={{ fontFamily: 'var(--font-mono)', fontSize: 13 }}>{item.rx_queue}</td>}
                       <td style={{ fontFamily: 'var(--font-mono)', fontSize: 13 }}>{formatTuple(item)}</td>
                       <td style={{ maxWidth: 320, whiteSpace: 'normal', wordBreak: 'break-word' }}>{item.error || '-'}</td>
                     </tr>
@@ -233,8 +233,7 @@ function formatTimestamp(iso) {
 }
 
 function formatTuple(item) {
-  const protocol = item.ip_proto ? String(item.ip_proto) : '-'
-  return `${protocol} ${item.sip || '-'}:${item.sport || 0} -> ${item.dip || '-'}:${item.dport || 0}`
+  return `${item.sip || '-'}:${item.sport || 0} -> ${item.dip || '-'}:${item.dport || 0}`
 }
 
 function resultClass(result) {

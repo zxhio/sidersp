@@ -262,7 +262,6 @@ export default function StatsPage() {
                     <h2 className="diagnostic-stage-title">{stage.title}</h2>
                     <p className="diagnostic-stage-summary">{stage.summary}</p>
                   </div>
-                  <span className="tag tag-disabled">{stage.key}</span>
                 </div>
 
                 <div className="diagnostic-metrics">

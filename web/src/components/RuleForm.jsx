@@ -1,46 +1,5 @@
 import { useEffect, useState } from 'react'
-
-const ACTION_GROUPS = [
-  {
-    label: '通用',
-    options: [
-      { value: 'alert', label: 'Alert' },
-      { value: 'none', label: 'None' },
-    ],
-  },
-  {
-    label: 'TCP',
-    options: [
-      { value: 'tcp_reset', label: 'TCP Reset' },
-      { value: 'tcp_syn_ack', label: 'TCP SYN-ACK' },
-    ],
-  },
-  {
-    label: 'UDP',
-    options: [
-      { value: 'icmp_port_unreachable', label: 'ICMP Port Unreachable' },
-      { value: 'icmp_host_unreachable', label: 'ICMP Host Unreachable' },
-      { value: 'icmp_admin_prohibited', label: 'ICMP Admin Prohibited' },
-      { value: 'udp_echo_reply', label: 'UDP Echo Reply' },
-      { value: 'dns_refused', label: 'DNS Refused' },
-      { value: 'dns_sinkhole', label: 'DNS Sinkhole' },
-    ],
-  },
-  {
-    label: 'ICMP',
-    options: [
-      { value: 'icmp_echo_reply', label: 'ICMP Echo Reply' },
-    ],
-  },
-  {
-    label: 'ARP',
-    options: [
-      { value: 'arp_reply', label: 'ARP Reply' },
-    ],
-  },
-]
-
-const ACTION_OPTIONS = ACTION_GROUPS.flatMap(group => group.options)
+import { ACTION_GROUPS, ACTION_OPTIONS } from '../labels'
 
 const PROTOCOL_OPTIONS = [
   { value: 'tcp', label: 'TCP' },

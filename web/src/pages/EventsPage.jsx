@@ -1,24 +1,15 @@
 import { useCallback, useEffect, useState } from 'react'
 import { listEvents } from '../api'
+import {
+  EVENT_ACTION_OPTIONS,
+  EVENT_OUTCOME_HINTS,
+  EVENT_OUTCOME_OPTIONS,
+  formatActionLabel,
+  formatEventOutcomeLabel,
+  formatPacketConditionLabels,
+} from '../labels'
 
 const PAGE_SIZE = 20
-
-const ACTION_OPTIONS = [
-  '',
-  'alert',
-  'tcp_reset',
-  'icmp_port_unreachable',
-  'icmp_host_unreachable',
-  'icmp_admin_prohibited',
-  'icmp_echo_reply',
-  'arp_reply',
-  'tcp_syn_ack',
-  'udp_echo_reply',
-  'dns_refused',
-  'dns_sinkhole',
-]
-
-const VERDICT_OPTIONS = ['', 'observe', 'tx', 'xsk', 'redirect_tx']
 
 export default function EventsPage() {
   const [items, setItems] = useState([])
@@ -38,6 +29,10 @@ export default function EventsPage() {
     action: '',
     verdict: '',
   })
+  const [visibleColumns, setVisibleColumns] = useState({
+    conditions: false,
+  })
+  const [helpTooltip, setHelpTooltip] = useState(null)
 
   const load = useCallback(async (nextQuery) => {
     setLoading(true)
@@ -88,6 +83,19 @@ export default function EventsPage() {
   }
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const columnCount = visibleColumns.conditions ? 6 : 5
+  const eventOutcomeHint = EVENT_OUTCOME_OPTIONS
+    .map(item => `${item.label}：${EVENT_OUTCOME_HINTS[item.value]}`)
+    .join('\n')
+
+  function showHelpTooltip(event) {
+    const rect = event.currentTarget.getBoundingClientRect()
+    setHelpTooltip({
+      text: eventOutcomeHint,
+      left: rect.left + rect.width / 2,
+      top: rect.bottom + 8,
+    })
+  }
 
   return (
     <>
@@ -117,22 +125,22 @@ export default function EventsPage() {
                 onChange={e => setDraft(current => ({ ...current, action: e.target.value }))}
               >
                 <option value="">全部</option>
-                {ACTION_OPTIONS.filter(Boolean).map(item => (
-                  <option key={item} value={item}>{item}</option>
+                {EVENT_ACTION_OPTIONS.map(item => (
+                  <option key={item.value} value={item.value}>{item.label}</option>
                 ))}
               </select>
             </div>
           </div>
           <div className="form-row">
             <div className="form-group">
-              <label>Verdict</label>
+              <label>观测结果</label>
               <select
                 value={draft.verdict}
                 onChange={e => setDraft(current => ({ ...current, verdict: e.target.value }))}
               >
                 <option value="">全部</option>
-                {VERDICT_OPTIONS.filter(Boolean).map(item => (
-                  <option key={item} value={item}>{item}</option>
+                {EVENT_OUTCOME_OPTIONS.map(item => (
+                  <option key={item.value} value={item.value}>{item.label}</option>
                 ))}
               </select>
             </div>
@@ -145,6 +153,14 @@ export default function EventsPage() {
 
         <div className="toolbar">
           <span className="toolbar-info">共 {total} 条事件</span>
+          <label className="column-toggle">
+            <input
+              type="checkbox"
+              checked={visibleColumns.conditions}
+              onChange={e => setVisibleColumns(current => ({ ...current, conditions: e.target.checked }))}
+            />
+            显示条件
+          </label>
         </div>
 
         <div className="table-wrap">
@@ -157,25 +173,43 @@ export default function EventsPage() {
                   <tr>
                     <th>时间</th>
                     <th>规则</th>
-                    <th>Verdict</th>
+                    <th>
+                      <span className="th-with-help">
+                        观测结果
+                        <span
+                          className="help-icon"
+                          tabIndex={0}
+                          onFocus={showHelpTooltip}
+                          onBlur={() => setHelpTooltip(null)}
+                          onMouseEnter={showHelpTooltip}
+                          onMouseLeave={() => setHelpTooltip(null)}
+                        >
+                          ?
+                        </span>
+                      </span>
+                    </th>
                     <th>动作</th>
                     <th>五元组</th>
-                    <th>条件</th>
+                    {visibleColumns.conditions && <th>条件</th>}
                   </tr>
                 </thead>
                 <tbody>
                   {items.length === 0 ? (
                     <tr className="empty-row">
-                      <td colSpan={6}>暂无事件数据</td>
+                      <td colSpan={columnCount}>暂无事件数据</td>
                     </tr>
                   ) : items.map(item => (
                     <tr key={`${item.timestamp_ns}-${item.rule_id}-${item.action}-${item.verdict}`}>
                       <td style={{ fontFamily: 'var(--font-mono)', fontSize: 13 }}>{formatTimestamp(item.timestamp)}</td>
                       <td style={{ fontFamily: 'var(--font-mono)', fontSize: 13 }}>{item.rule_id}</td>
-                      <td><span className="tag tag-disabled">{item.verdict}</span></td>
-                      <td><span className="tag tag-success">{item.action}</span></td>
+                      <td><span className="tag tag-disabled" title={item.verdict}>{formatEventOutcomeLabel(item.verdict)}</span></td>
+                      <td><span className="tag tag-success" title={item.action}>{formatActionLabel(item.action)}</span></td>
                       <td style={{ fontFamily: 'var(--font-mono)', fontSize: 13 }}>{formatTuple(item)}</td>
-                      <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{item.pkt_cond_names || '-'}</td>
+                      {visibleColumns.conditions && (
+                        <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>
+                          {formatPacketConditionLabels(item.pkt_cond_names)}
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -205,6 +239,14 @@ export default function EventsPage() {
             </>
           )}
         </div>
+        {helpTooltip && (
+          <div
+            className="floating-help"
+            style={{ left: helpTooltip.left, top: helpTooltip.top }}
+          >
+            {helpTooltip.text}
+          </div>
+        )}
       </div>
     </>
   )
@@ -216,6 +258,5 @@ function formatTimestamp(iso) {
 }
 
 function formatTuple(item) {
-  const protocol = item.ip_proto ? String(item.ip_proto) : '-'
-  return `${protocol} ${item.sip || '-'}:${item.sport || 0} -> ${item.dip || '-'}:${item.dport || 0}`
+  return `${item.sip || '-'}:${item.sport || 0} -> ${item.dip || '-'}:${item.dport || 0}`
 }
