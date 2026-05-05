@@ -283,7 +283,6 @@ struct kernel_tx_ctx {
     void *data_end;
     struct ethhdr *eth;
     struct iphdr *ip;
-    int l3_off;
     int target_len;
     struct tx_config *tx_cfg;
     struct bpf_fib_lookup fib;
@@ -302,10 +301,9 @@ static __always_inline void init_kernel_tx_ctx(struct xdp_md *xdp,
     tx->data_end = (void *)(long)xdp->data_end;
     tx->eth = 0;
     tx->ip = 0;
-    tx->l3_off = sizeof(struct ethhdr);
+    tx->target_len = sizeof(struct ethhdr) + sizeof(struct iphdr) + l4_len + l4_extra_len;
     if (ctx->vlan_id != VLAN_ID_NONE)
-        tx->l3_off += sizeof(struct vlan_hdr);
-    tx->target_len = tx->l3_off + sizeof(struct iphdr) + l4_len + l4_extra_len;
+        tx->target_len += sizeof(struct vlan_hdr);
     tx->tx_cfg = bpf_map_lookup_elem(&tx_config_map, &zero);
     tx->redirect = tx->tx_cfg &&
                    tx->tx_cfg->tcp_reset_mode == TCP_RESET_TX_MODE_REDIRECT;
@@ -336,9 +334,11 @@ static __always_inline int expand_kernel_tx_frame(struct xdp_md *xdp,
         vlan = (void *)(tx->eth + 1);
         if ((void *)(vlan + 1) > tx->data_end)
             return tx_failure_verdict(tx->tx_cfg);
+        tx->ip = (void *)(vlan + 1);
+    } else {
+        tx->ip = (void *)(tx->eth + 1);
     }
 
-    tx->ip = tx->data + tx->l3_off;
     if ((void *)(tx->ip + 1) > tx->data_end)
         return tx_failure_verdict(tx->tx_cfg);
 
@@ -371,7 +371,10 @@ static __always_inline int do_tcp_reset_tx(struct xdp_md *xdp,
     init_kernel_tx_ctx(xdp, ctx, sizeof(*tcp), 0, &tx);
 
     if (tx.redirect) {
-        ip = tx.data + tx.l3_off;
+        if (ctx->vlan_id != VLAN_ID_NONE)
+            ip = tx.data + sizeof(struct ethhdr) + sizeof(struct vlan_hdr);
+        else
+            ip = tx.data + sizeof(struct ethhdr);
         if ((void *)(ip + 1) > tx.data_end) {
             stat_inc(STAT_REDIRECT_FAILED);
             return tx_failure_verdict(tx.tx_cfg);
@@ -448,7 +451,10 @@ static __always_inline int do_icmp_dest_unreachable_tx(struct xdp_md *xdp,
 
     init_kernel_tx_ctx(xdp, ctx, sizeof(*icmp), sizeof(quoted), &tx);
 
-    ip = tx.data + tx.l3_off;
+    if (ctx->vlan_id != VLAN_ID_NONE)
+        ip = tx.data + sizeof(struct ethhdr) + sizeof(struct vlan_hdr);
+    else
+        ip = tx.data + sizeof(struct ethhdr);
     if ((void *)(ip + 1) > tx.data_end)
         return tx_failure_verdict(tx.tx_cfg);
     udp = (void *)(ip + 1);
