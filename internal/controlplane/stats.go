@@ -194,13 +194,13 @@ var diagnosticStageDescriptors = []stageDescriptor{
 		},
 	},
 	{
-		Key:              model.StatsStageTXSameInterface,
-		Title:            "同口发送",
-		Summary:          "BPF 直接在入口网卡发送响应，主要对应 tcp_reset 和 icmp_port_unreachable。",
+		Key:              model.StatsStageIngressPortTX,
+		Title:            "原口发送",
+		Summary:          "BPF 直接从入接口发送响应，主要对应 tcp_reset 和 icmp_port_unreachable。",
 		PrimaryMetricKey: model.StatsMetricXDPTX,
 		Metrics: []metricDescriptor{
-			{Key: model.StatsMetricXDPTX, Label: "同口发送成功", Description: "BPF 通过 XDP_TX 提交发送的次数。", Role: model.MetricRoleSuccess},
-			{Key: model.StatsMetricTXFailed, Label: "同口发送失败", Description: "BPF 构造或发送同口响应失败的次数。", Role: model.MetricRoleFailure},
+			{Key: model.StatsMetricXDPTX, Label: "原口发送成功", Description: "BPF 通过 XDP_TX 从入接口直接发送响应的次数。", Role: model.MetricRoleSuccess},
+			{Key: model.StatsMetricTXFailed, Label: "原口发送失败", Description: "BPF 构造或发送原口响应失败的次数。", Role: model.MetricRoleFailure},
 		},
 	},
 	{

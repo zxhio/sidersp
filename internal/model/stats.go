@@ -11,7 +11,7 @@ const (
 	StatsStageParse            = "parse"
 	StatsStageMatch            = "match"
 	StatsStageObserve          = "observe"
-	StatsStageTXSameInterface  = "tx_same_interface"
+	StatsStageIngressPortTX    = "ingress_port_tx"
 	StatsStageResponseRedirect = "response_redirect"
 	StatsStageRedirectEgress   = "redirect_egress"
 	StatsStageResponseTX       = "response_tx"
@@ -184,7 +184,7 @@ func BuildDiagnosticStages(counters RuntimeCounters) []DiagnosticStage {
 			},
 		},
 		{
-			Key:              StatsStageTXSameInterface,
+			Key:              StatsStageIngressPortTX,
 			PrimaryMetricKey: StatsMetricXDPTX,
 			Metrics: []DiagnosticMetric{
 				{Key: StatsMetricXDPTX, Role: MetricRoleSuccess, Value: counters.Dataplane.XDPTX},

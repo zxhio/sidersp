@@ -17,7 +17,7 @@ Stats are grouped in this fixed order:
 | `parse` | Packet parsing and protocol validation |
 | `match` | Candidate selection and final rule match |
 | `observe` | Ringbuf observation delivery |
-| `tx_same_interface` | Same-interface kernel TX, mainly `tcp_reset` and `icmp_port_unreachable` via `XDP_TX` |
+| `ingress_port_tx` | Ingress-port kernel TX via `XDP_TX`, mainly `tcp_reset` and `icmp_port_unreachable` |
 | `response_redirect` | Dataplane redirect of the original packet into XSK |
 | `redirect_egress` | Dataplane redirect of a kernel-built response to the configured egress interface |
 | `response_tx` | User-space response transmission through AF_XDP or AF_PACKET |
@@ -41,8 +41,8 @@ Current metric mapping:
 | `match` | `rule_candidates` | `traffic` | Packets admitted into policy selection, including direct flow-cache hits and non-empty candidate sets after index pre-filter |
 | `match` | `matched_rules` | `success` | Packets that matched a rule or replayed a cached blocking action |
 | `observe` | `ringbuf_dropped` | `failure` | Observation events dropped because ringbuf reserve failed |
-| `tx_same_interface` | `xdp_tx` | `success` | Same-interface kernel TX submissions |
-| `tx_same_interface` | `tx_failed` | `failure` | Same-interface kernel TX failures |
+| `ingress_port_tx` | `xdp_tx` | `success` | Responses sent back out of the ingress interface via `XDP_TX` |
+| `ingress_port_tx` | `tx_failed` | `failure` | Ingress-port kernel TX build or send failures |
 | `response_redirect` | `xsk_redirected` | `success` | Original packets submitted by BPF to XSK |
 | `response_redirect` | `xsk_redirect_failed` | `failure` | Total XSK redirect-stage failures |
 | `response_redirect` | `xsk_meta_failed` | `failure` | XDP metadata allocation or write failures before redirect |
@@ -135,4 +135,5 @@ Rules:
 3. Compare `match.rule_candidates` and `match.matched_rules` to judge rule selection quality.
 4. If response handling is involved, check `response_redirect` to confirm BPF handed the original packet to XSK.
 5. If user-space response handling is involved, check `response_tx` to separate AF_XDP and AF_PACKET failures.
-6. If redirect egress is enabled for kernel TX, check `redirect_egress` and inspect `fib_lookup_failed` before broader TX debugging.
+6. If ingress-port kernel TX is enabled, check `ingress_port_tx` first.
+7. If redirect egress is enabled for kernel TX, check `redirect_egress` and inspect `fib_lookup_failed` before broader TX debugging.
