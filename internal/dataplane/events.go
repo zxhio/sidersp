@@ -5,6 +5,10 @@ import (
 	"fmt"
 	"net/netip"
 	"strings"
+	"time"
+
+	"sidersp/internal/model"
+	"sidersp/internal/rule"
 )
 
 type ruleEvent struct {
@@ -145,4 +149,41 @@ func conditionNames(mask uint32) string {
 	}
 
 	return strings.Join(names, "|")
+}
+
+func verdictName(code uint8) string {
+	switch code {
+	case 0:
+		return "observe"
+	case 1:
+		return "tx"
+	case 2:
+		return "xsk"
+	case 3:
+		return "redirect_tx"
+	default:
+		return fmt.Sprintf("unknown(%d)", code)
+	}
+}
+
+func newEventRecord(evt ruleEvent, observedAt time.Time) model.EventRecord {
+	action, ok := rule.ActionName(evt.Action)
+	if !ok {
+		action = fmt.Sprintf("unknown(%d)", evt.Action)
+	}
+
+	return model.EventRecord{
+		ObservedAt:   observedAt.UTC(),
+		TimestampNS:  evt.TimestampNS,
+		RuleID:       evt.RuleID,
+		PktConds:     evt.PktConds,
+		PktCondNames: conditionNames(evt.PktConds),
+		Action:       action,
+		Verdict:      verdictName(evt.Verdict),
+		SIP:          ipv4String(evt.SIP),
+		DIP:          ipv4String(evt.DIP),
+		SPort:        evt.SPort,
+		DPort:        evt.DPort,
+		IPProto:      evt.IPProto,
+	}
 }

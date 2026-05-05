@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"sidersp/internal/controlplane"
 	"sidersp/internal/logs"
@@ -18,6 +19,8 @@ type stubService struct {
 	status         controlplane.Status
 	stats          controlplane.Stats
 	statsByKey     map[int]controlplane.Stats
+	eventPage      controlplane.EventPage
+	resultPage     controlplane.ResponseResultPage
 	ruleCounts     map[int]uint64
 	lastRange      int
 	resetStatsErr  error
@@ -40,6 +43,18 @@ func (s *stubService) Stats(rangeSeconds int) (controlplane.Stats, error) {
 func (s *stubService) ResetStats() error {
 	s.resetStatsCall++
 	return s.resetStatsErr
+}
+func (s *stubService) ListEvents(query controlplane.EventQuery) (controlplane.EventPage, error) {
+	page := s.eventPage
+	page.Page = query.Page
+	page.PageSize = query.PageSize
+	return page, nil
+}
+func (s *stubService) ListResponseResults(query controlplane.ResponseResultQuery) (controlplane.ResponseResultPage, error) {
+	page := s.resultPage
+	page.Page = query.Page
+	page.PageSize = query.PageSize
+	return page, nil
 }
 func (s *stubService) RuleMatchCounts() (map[int]uint64, error) {
 	return mapsClone(s.ruleCounts), nil
@@ -429,6 +444,112 @@ func TestListRules(t *testing.T) {
 	if body.Data[0].MatchedCount != 12 {
 		t.Fatalf("matched_count = %d, want 12", body.Data[0].MatchedCount)
 	}
+}
+
+func TestListEvents(t *testing.T) {
+	t.Parallel()
+
+	server := NewServer("127.0.0.1:0", &stubService{
+		eventPage: controlplane.EventPage{
+			Items: []controlplane.EventRecord{
+				{
+					Timestamp:    testTime(1713000000),
+					TimestampNS:  123,
+					RuleID:       1001,
+					PktConds:     131,
+					PktCondNames: "PROTO_TCP|SRC_PORT|DST_PORT",
+					Action:       "tcp_reset",
+					Verdict:      "tx",
+					SIP:          "10.0.0.1",
+					DIP:          "10.0.0.2",
+					SPort:        12345,
+					DPort:        80,
+					IPProto:      6,
+				},
+			},
+			Total: 1,
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/events?page=1&page_size=10&rule_id=1001&action=tcp_reset&verdict=tx", nil)
+	rec := httptest.NewRecorder()
+	server.newRouter().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var body struct {
+		Data     []EventResponse `json:"data"`
+		Total    int             `json:"total"`
+		Page     int             `json:"page"`
+		PageSize int             `json:"page_size"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if body.Total != 1 || body.Page != 1 || body.PageSize != 10 {
+		t.Fatalf("pagination = %+v, want total=1 page=1 page_size=10", body)
+	}
+	if len(body.Data) != 1 || body.Data[0].Action != "tcp_reset" || body.Data[0].Verdict != "tx" {
+		t.Fatalf("data = %+v, want tcp_reset tx event", body.Data)
+	}
+}
+
+func TestListResponseResults(t *testing.T) {
+	t.Parallel()
+
+	server := NewServer("127.0.0.1:0", &stubService{
+		resultPage: controlplane.ResponseResultPage{
+			Items: []controlplane.ResponseResultRecord{
+				{
+					Timestamp:   testTime(1713000001),
+					TimestampNS: 456,
+					RuleID:      2001,
+					Action:      "dns_refused",
+					Result:      "failed",
+					TXBackend:   "afxdp",
+					IfIndex:     7,
+					RXQueue:     3,
+					SIP:         "10.0.0.10",
+					DIP:         "10.0.0.20",
+					SPort:       5353,
+					DPort:       53,
+					IPProto:     17,
+					Error:       "tx failed",
+				},
+			},
+			Total: 1,
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/response-results?page=1&page_size=5&rule_id=2001&action=dns_refused&result=failed&tx_backend=afxdp", nil)
+	rec := httptest.NewRecorder()
+	server.newRouter().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var body struct {
+		Data     []ResponseResultResponse `json:"data"`
+		Total    int                      `json:"total"`
+		Page     int                      `json:"page"`
+		PageSize int                      `json:"page_size"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if body.Total != 1 || body.Page != 1 || body.PageSize != 5 {
+		t.Fatalf("pagination = %+v, want total=1 page=1 page_size=5", body)
+	}
+	if len(body.Data) != 1 || body.Data[0].Action != "dns_refused" || body.Data[0].Result != "failed" {
+		t.Fatalf("data = %+v, want dns_refused failed result", body.Data)
+	}
+}
+
+func testTime(unix int64) time.Time {
+	return time.Unix(unix, 0).UTC()
 }
 
 func TestGetStats(t *testing.T) {

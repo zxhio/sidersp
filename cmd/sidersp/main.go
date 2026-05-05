@@ -143,7 +143,7 @@ func main() {
 	cp, err := controlplane.NewRuntime(cpOpts, syncer, dp, runtimeStatsReader{
 		dataplane: dp,
 		response:  responseRuntime,
-	})
+	}, responseRuntime)
 	if err != nil {
 		logs.App().WithError(err).Fatal("Fail to build controlplane runtime")
 	}

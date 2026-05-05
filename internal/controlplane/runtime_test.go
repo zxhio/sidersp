@@ -44,7 +44,7 @@ func newTestRuntime(t testing.TB, opts Options, syncer RuleSyncer, streamer Even
 	t.Helper()
 
 	opts = normalizeOptions(opts)
-	runtime, err := NewRuntime(opts, syncer, streamer, statsReader)
+	runtime, err := NewRuntime(opts, syncer, streamer, statsReader, nil)
 	if err != nil {
 		t.Fatalf("NewRuntime() error = %v", err)
 	}
@@ -529,7 +529,7 @@ func TestNewOptionsParsesConsoleStats(t *testing.T) {
 func TestNewRuntimeReturnsErrorForNilSyncer(t *testing.T) {
 	t.Parallel()
 
-	if _, err := NewRuntime(Options{}, nil, testStreamer{}, testStatsReader{}); err == nil {
+	if _, err := NewRuntime(Options{}, nil, testStreamer{}, testStatsReader{}, nil); err == nil {
 		t.Fatal("NewRuntime() error = nil, want validation error")
 	}
 }

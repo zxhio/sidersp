@@ -69,7 +69,7 @@ export async function disableRule(id) {
 }
 
 export async function getStats(rangeSeconds = 600) {
-  const params = new URLSearchParams()
+ const params = new URLSearchParams()
   if (rangeSeconds) params.set('range_seconds', String(rangeSeconds))
   const query = params.toString() ? `?${params.toString()}` : ''
   const res = await request(`/stats${query}`)
@@ -78,4 +78,26 @@ export async function getStats(rangeSeconds = 600) {
 
 export async function resetStats() {
   await request('/stats', { method: 'DELETE' })
+}
+
+function buildListQuery(params = {}) {
+  const query = new URLSearchParams()
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === '') return
+    query.set(key, String(value))
+  })
+  const encoded = query.toString()
+  return encoded ? `?${encoded}` : ''
+}
+
+export async function listEvents(params = {}) {
+  const query = buildListQuery(params)
+  const res = await request(`/events${query}`)
+  return { items: res.data, total: res.total, page: res.page, pageSize: res.page_size }
+}
+
+export async function listResponseResults(params = {}) {
+  const query = buildListQuery(params)
+  const res = await request(`/response-results${query}`)
+  return { items: res.data, total: res.total, page: res.page, pageSize: res.page_size }
 }

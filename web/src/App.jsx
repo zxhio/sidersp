@@ -3,6 +3,8 @@ import Layout from './components/Layout'
 import OverviewPage from './pages/OverviewPage'
 import StatusPage from './pages/StatusPage'
 import RulesPage from './pages/RulesPage'
+import EventsPage from './pages/EventsPage'
+import ResponseResultsPage from './pages/ResponseResultsPage'
 
 export default function App() {
   return (
@@ -11,6 +13,8 @@ export default function App() {
         <Route path="/" element={<OverviewPage />} />
         <Route path="/rules" element={<RulesPage />} />
         <Route path="/status" element={<StatusPage />} />
+        <Route path="/events" element={<EventsPage />} />
+        <Route path="/response-results" element={<ResponseResultsPage />} />
       </Routes>
     </Layout>
   )

@@ -224,7 +224,8 @@ Result values:
 | `afpacket` | User-space TX used the AF_PACKET backend |
 
 The in-memory result buffer is a local process buffer. It stores the newest
-records up to its configured capacity and evicts the oldest records when full.
+records up to its configured capacity, evicts the oldest records when full,
+and is exposed for console query as a bounded debug surface.
 
 ## Response TX Stats
 

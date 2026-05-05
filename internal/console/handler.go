@@ -109,6 +109,73 @@ func (h Handler) resetStats(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+func (h Handler) listEvents(c *gin.Context) {
+	page, pageSize, err := parsePage(c)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
+		return
+	}
+
+	ruleID, err := parseOptionalID(c.Query("rule_id"))
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
+		return
+	}
+
+	items, err := h.service.ListEvents(controlplane.EventQuery{
+		Page:     page,
+		PageSize: pageSize,
+		RuleID:   ruleID,
+		Action:   c.Query("action"),
+		Verdict:  c.Query("verdict"),
+	})
+	if err != nil {
+		h.writeServiceError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, listEnvelope{
+		Data:     newEventResponses(items.Items),
+		Total:    items.Total,
+		Page:     items.Page,
+		PageSize: items.PageSize,
+	})
+}
+
+func (h Handler) listResponseResults(c *gin.Context) {
+	page, pageSize, err := parsePage(c)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
+		return
+	}
+
+	ruleID, err := parseOptionalID(c.Query("rule_id"))
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
+		return
+	}
+
+	items, err := h.service.ListResponseResults(controlplane.ResponseResultQuery{
+		Page:      page,
+		PageSize:  pageSize,
+		RuleID:    ruleID,
+		Action:    c.Query("action"),
+		Result:    c.Query("result"),
+		TXBackend: c.Query("tx_backend"),
+	})
+	if err != nil {
+		h.writeServiceError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, listEnvelope{
+		Data:     newResponseResultResponses(items.Items),
+		Total:    items.Total,
+		Page:     items.Page,
+		PageSize: items.PageSize,
+	})
+}
+
 func (h Handler) listRules(c *gin.Context) {
 	page, pageSize, err := parsePage(c)
 	if err != nil {
@@ -292,6 +359,13 @@ func parseID(raw string) (int, error) {
 	return id, nil
 }
 
+func parseOptionalID(raw string) (int, error) {
+	if strings.TrimSpace(raw) == "" {
+		return 0, nil
+	}
+	return parseID(strings.TrimSpace(raw))
+}
+
 func parsePage(c *gin.Context) (int, int, error) {
 	page := 1
 	pageSize := 100
@@ -336,6 +410,50 @@ func newStatusResponse(item controlplane.Status) StatusResponse {
 		TotalRules:     item.TotalRules,
 		Enabled:        item.Enabled,
 	}
+}
+
+func newEventResponses(items []controlplane.EventRecord) []EventResponse {
+	out := make([]EventResponse, 0, len(items))
+	for _, item := range items {
+		out = append(out, EventResponse{
+			Timestamp:    item.Timestamp.Format(time.RFC3339Nano),
+			TimestampNS:  item.TimestampNS,
+			RuleID:       item.RuleID,
+			PktConds:     item.PktConds,
+			PktCondNames: item.PktCondNames,
+			Action:       item.Action,
+			Verdict:      item.Verdict,
+			SIP:          item.SIP,
+			DIP:          item.DIP,
+			SPort:        item.SPort,
+			DPort:        item.DPort,
+			IPProto:      item.IPProto,
+		})
+	}
+	return out
+}
+
+func newResponseResultResponses(items []controlplane.ResponseResultRecord) []ResponseResultResponse {
+	out := make([]ResponseResultResponse, 0, len(items))
+	for _, item := range items {
+		out = append(out, ResponseResultResponse{
+			Timestamp:   item.Timestamp.Format(time.RFC3339Nano),
+			TimestampNS: item.TimestampNS,
+			RuleID:      item.RuleID,
+			Action:      item.Action,
+			Result:      item.Result,
+			TXBackend:   item.TXBackend,
+			IfIndex:     item.IfIndex,
+			RXQueue:     item.RXQueue,
+			SIP:         item.SIP,
+			DIP:         item.DIP,
+			SPort:       item.SPort,
+			DPort:       item.DPort,
+			IPProto:     item.IPProto,
+			Error:       item.Error,
+		})
+	}
+	return out
 }
 
 func newStatsResponse(item controlplane.Stats) StatsResponse {

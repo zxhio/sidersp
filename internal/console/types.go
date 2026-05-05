@@ -53,6 +53,38 @@ type StatusResponse struct {
 	Enabled        int    `json:"enabled_rules"`
 }
 
+type EventResponse struct {
+	Timestamp    string `json:"timestamp"`
+	TimestampNS  uint64 `json:"timestamp_ns"`
+	RuleID       uint32 `json:"rule_id"`
+	PktConds     uint32 `json:"pkt_conds"`
+	PktCondNames string `json:"pkt_cond_names"`
+	Action       string `json:"action"`
+	Verdict      string `json:"verdict"`
+	SIP          string `json:"sip"`
+	DIP          string `json:"dip"`
+	SPort        uint16 `json:"sport"`
+	DPort        uint16 `json:"dport"`
+	IPProto      uint8  `json:"ip_proto"`
+}
+
+type ResponseResultResponse struct {
+	Timestamp   string `json:"timestamp"`
+	TimestampNS uint64 `json:"timestamp_ns"`
+	RuleID      uint32 `json:"rule_id"`
+	Action      string `json:"action"`
+	Result      string `json:"result"`
+	TXBackend   string `json:"tx_backend"`
+	IfIndex     int    `json:"ifindex"`
+	RXQueue     int    `json:"rx_queue"`
+	SIP         string `json:"sip"`
+	DIP         string `json:"dip"`
+	SPort       uint16 `json:"sport"`
+	DPort       uint16 `json:"dport"`
+	IPProto     uint8  `json:"ip_proto"`
+	Error       string `json:"error"`
+}
+
 type StatsResponse struct {
 	Overview               StatsOverviewResponse             `json:"overview"`
 	Stages                 []DiagnosticStageResponse         `json:"stages"`

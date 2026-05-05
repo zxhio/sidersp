@@ -11,6 +11,8 @@ export default function Layout({ children }) {
           <NavLink to="/" end>概览</NavLink>
           <NavLink to="/rules">规则管理</NavLink>
           <NavLink to="/status">统计信息</NavLink>
+          <NavLink to="/events">观测事件</NavLink>
+          <NavLink to="/response-results">响应结果</NavLink>
         </nav>
       </aside>
       <div className="main">

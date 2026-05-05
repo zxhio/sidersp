@@ -152,8 +152,8 @@ Owns:
 - Status display
 - Rule CRUD
 - Statistics view
-- Event query after event storage is introduced
-- Response result query after response results are introduced
+- Event query over bounded in-memory event storage
+- Response result query over bounded in-memory result storage
 
 Does not own:
 
@@ -194,10 +194,10 @@ that interface belongs to other modules or external systems.
 Module for active user-space response execution.
 
 Current implementation status: XSK response consumer dispatch, response packet
-builders, response execution, bounded in-memory response result buffering, and
-sender selection across queue-local XSK TX or alternate egress frame I/O
-exist. Same-interface builders still reject VLAN-tagged frames and TCP SYN
-payloads until those response semantics are implemented.
+builders, response execution, bounded in-memory response result buffering with
+console query, and sender selection across queue-local XSK TX or alternate
+egress frame I/O exist. Same-interface builders still reject VLAN-tagged
+frames and TCP SYN payloads until those response semantics are implemented.
 
 Owns:
 

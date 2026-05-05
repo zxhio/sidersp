@@ -32,16 +32,18 @@ type StatsReader interface {
 }
 
 type Runtime struct {
-	opts     Options
-	syncer   RuleSyncer
-	streamer EventStreamer
-	stats    StatsReader
-	mu       sync.RWMutex
-	rules    rule.RuleSet
-	history  []StatsPoint
+	opts         Options
+	syncer       RuleSyncer
+	streamer     EventStreamer
+	stats        StatsReader
+	eventSource  EventSource
+	resultSource ResponseResultSource
+	mu           sync.RWMutex
+	rules        rule.RuleSet
+	history      []StatsPoint
 }
 
-func NewRuntime(opts Options, syncer RuleSyncer, streamer EventStreamer, statsReader StatsReader) (*Runtime, error) {
+func NewRuntime(opts Options, syncer RuleSyncer, streamer EventStreamer, statsReader StatsReader, resultSource ResponseResultSource) (*Runtime, error) {
 	if syncer == nil {
 		return nil, fmt.Errorf("controlplane: syncer is required")
 	}
@@ -55,11 +57,18 @@ func NewRuntime(opts Options, syncer RuleSyncer, streamer EventStreamer, statsRe
 		return nil, fmt.Errorf("controlplane: invalid options: %w", err)
 	}
 
+	var eventSource EventSource
+	if source, ok := streamer.(EventSource); ok {
+		eventSource = source
+	}
+
 	return &Runtime{
-		opts:     opts,
-		syncer:   syncer,
-		streamer: streamer,
-		stats:    statsReader,
+		opts:         opts,
+		syncer:       syncer,
+		streamer:     streamer,
+		stats:        statsReader,
+		eventSource:  eventSource,
+		resultSource: resultSource,
 	}, nil
 }
 

@@ -4,6 +4,9 @@ This document defines the dataplane observation event contract.
 
 Events are emitted by BPF through ringbuf after a rule match produces an observable outcome. Events are used for status display, statistics, and audit. They are not a packet construction data channel.
 
+Current implementation status: the dataplane runtime keeps a bounded in-memory
+event buffer for console query in addition to log output and statistics.
+
 ## Event Scope
 
 - `alert` emits an observation event before applying `dataplane.ingress_verdict`.
@@ -115,6 +118,7 @@ egress NIC, switch, or destination host accepted the packet.
 - Events must not carry fields required to construct spoof response packets.
 - XSK TX response construction must use the original packet delivered through XSK.
 - User-space response results are separate records owned by the response/XSK worker path.
+- The current query path is a bounded in-memory console/debug surface, not a persistent event store.
 
 ## Related Contracts
 

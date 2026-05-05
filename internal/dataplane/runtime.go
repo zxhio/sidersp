@@ -32,6 +32,7 @@ type Runtime struct {
 	promiscSet  bool
 	snapshot    mapSnapshot
 	snapshotSet bool
+	events      *eventBuffer
 	matchMu     sync.RWMutex
 	matchCounts map[uint32]uint64
 }
@@ -78,6 +79,7 @@ func Open(opts Options, consumers XSKConsumers) (*Runtime, error) {
 		objs:        objs,
 		iface:       opts.Interface,
 		opts:        opts,
+		events:      newEventBuffer(defaultEventBufferSize),
 		matchCounts: make(map[uint32]uint64),
 	}
 	if err := r.writeXDPResponseConfig(opts.XDPResponse); err != nil {
@@ -155,6 +157,13 @@ func (r *Runtime) RunEventStream(ctx context.Context) error {
 	go r.logKernelStats(runCtx, statsLogInterval)
 
 	return r.streamEvents(runCtx, reader)
+}
+
+func (r *Runtime) Events() []model.EventRecord {
+	if r.events == nil {
+		return nil
+	}
+	return r.events.list()
 }
 
 // ReplaceRules rebuilds the next rule snapshot and syncs only the changed BPF map entries.
@@ -310,6 +319,9 @@ func (r *Runtime) streamEvents(ctx context.Context, reader *ringbuf.Reader) erro
 		if err != nil {
 			logs.App().WithError(err).Error("Fail to decode dataplane event")
 			continue
+		}
+		if r.events != nil {
+			r.events.add(newEventRecord(evt, time.Now().UTC()))
 		}
 
 		r.matchMu.Lock()
