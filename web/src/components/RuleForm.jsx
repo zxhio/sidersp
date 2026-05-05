@@ -467,6 +467,14 @@ export default function RuleForm({ rule, defaultARPHardwareAddr = '', onSubmit, 
   const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
+    function handleKeyDown(e) {
+      if (e.key === 'Escape') onCancel()
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [onCancel])
+
+  useEffect(() => {
     if (!defaultARPHardwareAddr) {
       return
     }
@@ -811,8 +819,8 @@ export default function RuleForm({ rule, defaultARPHardwareAddr = '', onSubmit, 
           <div className="modal-body">
             {error && <div className="error-msg">{error}</div>}
 
-            <div className="form-section-title">基本信息</div>
-            <div className="form-row">
+            <div className="form-section-title" style={{ marginTop: 0 }}>基本信息</div>
+            <div className="form-row" style={{ gridTemplateColumns: '1fr 1fr auto' }}>
               <div className="form-group">
                 <label>规则名称 <span className="required">*</span></label>
                 <input
@@ -830,10 +838,8 @@ export default function RuleForm({ rule, defaultARPHardwareAddr = '', onSubmit, 
                   onChange={e => set('priority', e.target.value)}
                 />
               </div>
-            </div>
-            <div className="form-row">
-              <div className="form-group">
-                <label style={{ marginTop: 22 }}>
+              <div className="form-group" style={{ display: 'flex', alignItems: 'flex-end' }}>
+                <label>
                   <span className="checkbox-label">
                     <input
                       type="checkbox"
@@ -844,7 +850,6 @@ export default function RuleForm({ rule, defaultARPHardwareAddr = '', onSubmit, 
                   </span>
                 </label>
               </div>
-              <div />
             </div>
 
             <div className="form-section-title">响应动作</div>
@@ -861,13 +866,13 @@ export default function RuleForm({ rule, defaultARPHardwareAddr = '', onSubmit, 
                   </optgroup>
                 ))}
               </select>
-              {isUDPOnlyAction && (
-                <div className="form-section-desc">该动作会自动固定为 UDP。</div>
-              )}
-              {actionParamSchema?.note && (
-                <div className="form-section-desc">{actionParamSchema.note}</div>
-              )}
             </div>
+            {isUDPOnlyAction && (
+              <div className="form-section-desc">该动作会自动固定为 UDP。</div>
+            )}
+            {actionParamSchema?.note && (
+              <div className="form-section-desc">{actionParamSchema.note}</div>
+            )}
 
             {actionParamFields.length > 0 && (
               <>
@@ -952,8 +957,8 @@ export default function RuleForm({ rule, defaultARPHardwareAddr = '', onSubmit, 
             )}
             {isTCPProtocol && (
               <div className="form-row">
-                <div className="form-group">
-                  <label>TCP Flags</label>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label style={{ marginBottom: 0 }}>TCP Flags</label>
                   <div className="checkbox-group">
                     {visibleTCPFlagFields.map(field => (
                       <label key={field.key} className="checkbox-label">

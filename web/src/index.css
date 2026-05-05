@@ -595,7 +595,7 @@ tr:last-child td {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 16px 24px;
+  padding: 12px 20px;
   border-bottom: 1px solid var(--c-border);
   flex-shrink: 0;
 }
@@ -617,7 +617,7 @@ tr:last-child td {
 .modal-close:hover { color: var(--c-text); }
 
 .modal-body {
-  padding: 20px 24px;
+  padding: 12px 20px 16px;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -627,7 +627,7 @@ tr:last-child td {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  padding: 12px 24px;
+  padding: 12px 20px;
   border-top: 1px solid var(--c-border);
   flex-shrink: 0;
   background: var(--c-surface);
@@ -662,7 +662,7 @@ tr:last-child td {
 .form-group input[type="number"],
 .form-group select {
   width: 100%;
-  padding: 5px 10px;
+  padding: 6px 10px;
   border: 1px solid var(--c-border);
   border-radius: var(--radius);
   font-size: 13px;
@@ -696,22 +696,22 @@ tr:last-child td {
   font-size: 13px;
   font-weight: 600;
   color: var(--c-text);
-  margin: 20px 0 10px;
-  padding-bottom: 6px;
+  margin: 16px 0 8px;
+  padding-bottom: 4px;
   border-bottom: 1px solid var(--c-border);
 }
 
 .form-section-desc {
   font-size: 12px;
   color: var(--c-text-placeholder);
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 
 .checkbox-group {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
-  padding-top: 8px;
+  padding-top: 2px;
 }
 
 .checkbox-label {
