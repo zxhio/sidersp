@@ -23,6 +23,7 @@ import (
 	"sidersp/internal/model"
 	"sidersp/internal/response"
 	"sidersp/internal/rule"
+	"sidersp/internal/xsk"
 )
 
 func main() {
@@ -117,8 +118,8 @@ func main() {
 	}
 
 	dp, err := dataplane.Open(dpOpts, dataplane.XSKConsumers{
-		Response: responseRuntime,
-		Analysis: analysisRuntime,
+		Response: optionalXSKConsumer[response.Runtime, xsk.ResponseConsumer](responseRuntime),
+		Analysis: optionalXSKConsumer[analysis.Runtime, xsk.AnalysisSubmitter](analysisRuntime),
 	})
 	if err != nil {
 		logs.App().WithError(err).Fatal("Fail to open dataplane")
@@ -192,6 +193,14 @@ func main() {
 		logs.App().WithError(err).Fatal("Fail to run service")
 	case <-ctx.Done():
 	}
+}
+
+func optionalXSKConsumer[T any, C any](runtime *T) C {
+	var consumer C
+	if runtime == nil {
+		return consumer
+	}
+	return any(runtime).(C)
 }
 
 type dataplaneStatsReader interface {
