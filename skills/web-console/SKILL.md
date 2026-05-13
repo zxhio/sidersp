@@ -37,18 +37,25 @@ Do not introduce a second modal system.
 
 ## API contract
 
-All backend APIs go through `api.js`. Response envelope:
+All backend APIs go through `api.js`.
 
-- Success: `{ "data": ... }` or `{ "data": [...], "total": N, "page": N, "page_size": N }`
-- Error: `{ "error": { "code": "...", "message": "..." } }`
+Response shape follows the matching API spec.
+
+- Agent HTTP conventions live in `specs/agent/http.md`
+- Mgr routes live in `specs/mgr-api.md`
+- Resource contracts live in `specs/mgr/`
+
+Components should consume normalized values from `api.js`, not raw backend response envelopes.
 
 New endpoints must be added to `api.js` as exported async functions.
 
+When an endpoint still uses a legacy response envelope, keep that compatibility inside `api.js`.
+
 ## Rule UI contract
 
-- Rule forms and tables must follow `specs/RULES.md`
+- Rule forms and tables must follow `specs/mgr/rules.md`
 - Do not introduce unsupported rule fields such as `features`
-- Action names use the snake_case values from `specs/RULES.md`
+- Action names use the snake_case values from `specs/mgr/rules.md`
 - The UI may validate inputs for usability, but backend/controlplane validation remains authoritative
 
 ## Conventions
