@@ -37,10 +37,10 @@ Inspect only what you need:
 ### Specs
 
 - [ ] Behavior changes are reflected in the matching spec.
-- [ ] Rule changes update `specs/RULES.md` when needed.
-- [ ] Event changes update `specs/EVENTS.md` when needed.
-- [ ] Response changes update `specs/RESPONSES.md` when needed.
-- [ ] Stats changes update `specs/STATS.md` when needed.
+- [ ] Rule changes update `specs/mgr/rules.md` or `specs/agent/ruleset.md` when needed.
+- [ ] Event changes update `specs/agent/events.md` when needed.
+- [ ] Response changes update `specs/agent/response.md` when needed.
+- [ ] Stats changes update `specs/agent/stats.md` or `specs/mgr/stats.md` when needed.
 
 ### Area checks
 

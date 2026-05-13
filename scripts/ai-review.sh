@@ -226,16 +226,18 @@ if [[ $need_modules_spec -eq 1 ]]; then
 	echo "  - specs/MODULES.md"
 fi
 if [[ $need_rules_spec -eq 1 ]]; then
-	echo "  - specs/RULES.md"
+	echo "  - specs/mgr/rules.md"
+	echo "  - specs/agent/ruleset.md"
 fi
 if [[ $need_events_spec -eq 1 ]]; then
-	echo "  - specs/EVENTS.md"
+	echo "  - specs/agent/events.md"
 fi
 if [[ $need_responses_spec -eq 1 ]]; then
-	echo "  - specs/RESPONSES.md"
+	echo "  - specs/agent/response.md"
 fi
 if [[ $need_stats_spec -eq 1 ]]; then
-	echo "  - specs/STATS.md"
+	echo "  - specs/agent/stats.md"
+	echo "  - specs/mgr/stats.md"
 fi
 if [[ $need_modules_spec -eq 0 && $need_rules_spec -eq 0 && $need_events_spec -eq 0 && $need_responses_spec -eq 0 && $need_stats_spec -eq 0 ]]; then
 	echo "  - matching files in specs/ when behavior changes"
