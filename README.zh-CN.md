@@ -15,7 +15,7 @@
 - XSK 重定向通道，用于用户态 spoof 响应
 - ringbuf 观测事件输出
 - 面向调试的状态、规则和统计 Web 页面
-- 规则页与 `specs/RULES.md` 对齐，支持 `protocol`、VLAN/IP/端口过滤、`tcp_flags`、`icmp.type`、`arp.operation` 和 snake_case 动作
+- 规则页与 `specs/mgr/rules.md` 对齐，支持 `protocol`、VLAN/IP/端口过滤、`tcp_flags`、`icmp.type`、`arp.operation` 和 snake_case 动作
 
 ## 架构
 
@@ -44,7 +44,7 @@ flowchart LR
 - `controlplane`：规则/配置加载、运行状态维护、统计聚合和流程协调。
 - `console` / `web`：REST API 和面向本地验证、联调的轻量调试页面。
 - `config`、`rule` 和 `model`：当前模块共享的本地配置、规则 schema 和数据模型。
-- `specs/`：模块、规则、分析导出、事件和响应语义的系统合约。
+- `specs/`：agent / mgr 资源、API、事件、统计和响应语义的系统合约。
 
 SideRSP 的定位是更大平台中的一个服务。内置 Web 页面主要用于本地调试、
 集成联调和契约校验，不作为上层平台的主控制台。
@@ -154,13 +154,13 @@ skills/     本地 agent 指引
 - 镜像流量入口处理
 - 基于规则的分类和动作选择
 - 主动响应执行路径
-- 单网口外部分析导出
+- 命中包下游分析分发
 - 事件和统计可视化
 - 面向调试的管理页面
 
 ## 规则页契约
 
-Web 规则页遵循 [specs/RULES.md](specs/RULES.md) 的当前契约，编辑字段包括
+Web 规则页遵循 [specs/mgr/rules.md](specs/mgr/rules.md) 的当前契约，编辑字段包括
 `protocol`、`vlans`、`src_prefixes`、`dst_prefixes`、`src_ports`、
 `dst_ports`、`tcp_flags`、`icmp.type`、`arp.operation` 和
 `response.action`。

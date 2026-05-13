@@ -15,7 +15,7 @@ Lightweight side-path traffic pre-decision and active response service.
 - XSK redirect path for user-space spoof responses
 - Ringbuf observation event output
 - Debug-oriented Web console for status, rules, and statistics
-- Rule UI aligned with `specs/RULES.md`, including `protocol`, VLAN/IP/port filters, `tcp_flags`, `icmp.type`, `arp.operation`, and snake_case response actions
+- Rule UI aligned with `specs/mgr/rules.md`, including `protocol`, VLAN/IP/port filters, `tcp_flags`, `icmp.type`, `arp.operation`, and snake_case response actions
 
 ## Architecture
 
@@ -44,7 +44,7 @@ flowchart LR
 - `controlplane`: rule/config loading, runtime state, statistics aggregation, and coordination.
 - `console` / `web`: REST API and lightweight debug UI for local validation and integration.
 - `config`, `rule`, and `model`: shared local configuration, rule schema, and data models used by the active modules.
-- `specs/`: system contracts for modules, rules, analysis export, events, and response semantics.
+- `specs/`: system contracts for agent and mgr resources, APIs, events, stats, and response semantics.
 
 SideRSP is intended to run as a service inside a larger platform. The built-in
 Web UI is for local debugging, integration testing, and contract validation; it
@@ -158,13 +158,13 @@ Current focus:
 - Mirrored-traffic ingress handling
 - Rule-driven classification and action selection
 - Active response execution paths
-- One-interface external analysis export
+- Hit-packet dispatch for downstream analysis
 - Event/statistics visibility
 - Debug-oriented management UI
 
 ## Rule Console
 
-The Web rule page follows the current contract in [specs/RULES.md](specs/RULES.md).
+The Web rule page follows the current contract in [specs/mgr/rules.md](specs/mgr/rules.md).
 It edits `protocol`, `vlans`, `src_prefixes`, `dst_prefixes`, `src_ports`,
 `dst_ports`, `tcp_flags`, `icmp.type`, `arp.operation`, and
 `response.action`.
