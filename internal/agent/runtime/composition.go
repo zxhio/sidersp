@@ -31,6 +31,7 @@ type Composition struct {
 type DataplaneRuntime interface {
 	service.DataplaneStatsReader
 	service.DataplaneEventSource
+	service.DataplaneEventSubscriber
 	Attach() error
 	ProgramID() (uint32, error)
 	ReplaceRules(set rule.RuleSet) error

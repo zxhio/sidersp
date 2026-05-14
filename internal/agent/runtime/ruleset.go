@@ -145,6 +145,12 @@ func (r *DataplaneAttachmentRuntime) enabledDataplaneRuntimesLocked() []dataplan
 	return entries
 }
 
+func (r *DataplaneAttachmentRuntime) enabledDataplaneRuntimes() []dataplaneRuntimeEntry {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.enabledDataplaneRuntimesLocked()
+}
+
 func previousDataplaneRuleSet(ruleset types.Ruleset) (rule.RuleSet, error) {
 	if !hasStoredRuleset(ruleset) {
 		return rule.RuleSet{}, nil

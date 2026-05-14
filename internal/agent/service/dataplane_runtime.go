@@ -20,9 +20,14 @@ type DataplaneEventSource interface {
 	Events() []model.EventRecord
 }
 
+type DataplaneEventSubscriber interface {
+	SubscribeEvents(ctx context.Context) (<-chan model.EventRecord, error)
+}
+
 type DataplaneRuntimeAdapter struct {
-	stats  DataplaneStatsReader
-	events DataplaneEventSource
+	stats      DataplaneStatsReader
+	events     DataplaneEventSource
+	subscriber DataplaneEventSubscriber
 }
 
 func NewDataplaneRuntimeAdapter(stats DataplaneStatsReader, events DataplaneEventSource) *DataplaneRuntimeAdapter {
@@ -30,8 +35,9 @@ func NewDataplaneRuntimeAdapter(stats DataplaneStatsReader, events DataplaneEven
 		panic("agent service: dataplane stats reader is required")
 	}
 	return &DataplaneRuntimeAdapter{
-		stats:  stats,
-		events: events,
+		stats:      stats,
+		events:     events,
+		subscriber: eventSubscriber(events),
 	}
 }
 
@@ -44,7 +50,14 @@ func (a *DataplaneRuntimeAdapter) ReadStats(ctx context.Context) (types.Stats, e
 }
 
 func (a *DataplaneRuntimeAdapter) SubscribeEvents(ctx context.Context) (<-chan types.Event, error) {
-	return nil, ErrEventStreamUnsupported
+	if a.subscriber == nil {
+		return nil, ErrEventStreamUnsupported
+	}
+	events, err := a.subscriber.SubscribeEvents(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return mapDataplaneEvents(ctx, events), nil
 }
 
 func NewStatsFromDataplane(stats model.DataplaneStats) types.Stats {
@@ -98,4 +111,36 @@ func ipv4ToUint32(raw string) uint32 {
 	}
 	v4 := addr.As4()
 	return binary.BigEndian.Uint32(v4[:])
+}
+
+func eventSubscriber(events DataplaneEventSource) DataplaneEventSubscriber {
+	subscriber, ok := events.(DataplaneEventSubscriber)
+	if !ok {
+		return nil
+	}
+	return subscriber
+}
+
+func mapDataplaneEvents(ctx context.Context, events <-chan model.EventRecord) <-chan types.Event {
+	out := make(chan types.Event, 64)
+	go func() {
+		defer close(out)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case item, ok := <-events:
+				if !ok {
+					return
+				}
+				next := NewEventFromDataplane(item)
+				select {
+				case out <- next:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+	}()
+	return out
 }

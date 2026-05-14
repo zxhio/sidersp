@@ -6,6 +6,7 @@ import (
 	"net"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -177,6 +178,100 @@ func TestDataplaneAttachmentReadStatsAggregatesActiveRuntimes(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(30), got.Ingress.Packets)
 	require.Equal(t, uint64(3), got.Errors.XDPPackets)
+}
+
+func TestDataplaneAttachmentSubscribeEventsMergesEnabledRuntimes(t *testing.T) {
+	first := &fakeDataplaneRuntime{
+		programID: 101,
+		eventCh:   make(chan model.EventRecord, 1),
+	}
+	second := &fakeDataplaneRuntime{
+		programID: 202,
+		eventCh:   make(chan model.EventRecord, 1),
+	}
+	opener := &recordingDataplaneOpener{next: []*fakeDataplaneRuntime{first, second}}
+	runtime := newTestDataplaneAttachmentRuntime(opener)
+	_, err := runtime.CreateAttachment(context.Background(), types.Attachment{IfIndex: 30})
+	require.NoError(t, err)
+	_, err = runtime.CreateAttachment(context.Background(), types.Attachment{IfIndex: 31})
+	require.NoError(t, err)
+
+	events, err := runtime.SubscribeEvents(context.Background())
+	require.NoError(t, err)
+	first.eventCh <- testModelEvent(1001)
+	second.eventCh <- testModelEvent(1002)
+
+	got := []uint32{
+		readRuntimeEvent(t, events).RuleID,
+		readRuntimeEvent(t, events).RuleID,
+	}
+	require.ElementsMatch(t, []uint32{1001, 1002}, got)
+}
+
+func TestDataplaneAttachmentSubscribeEventsSkipsDisabledRuntimes(t *testing.T) {
+	first := &fakeDataplaneRuntime{
+		programID: 101,
+		eventCh:   make(chan model.EventRecord, 1),
+	}
+	second := &fakeDataplaneRuntime{
+		programID: 202,
+		eventCh:   make(chan model.EventRecord, 1),
+	}
+	opener := &recordingDataplaneOpener{next: []*fakeDataplaneRuntime{first, second}}
+	runtime := newTestDataplaneAttachmentRuntime(opener)
+	_, err := runtime.CreateAttachment(context.Background(), types.Attachment{IfIndex: 32})
+	require.NoError(t, err)
+	_, err = runtime.CreateAttachment(context.Background(), types.Attachment{IfIndex: 33})
+	require.NoError(t, err)
+	_, err = runtime.SetAttachmentEnabled(context.Background(), 32, false)
+	require.NoError(t, err)
+
+	events, err := runtime.SubscribeEvents(context.Background())
+	require.NoError(t, err)
+	second.eventCh <- testModelEvent(1002)
+
+	got := readRuntimeEvent(t, events)
+	require.Equal(t, uint32(1002), got.RuleID)
+}
+
+func TestDataplaneAttachmentSubscribeEventsPropagatesRuntimeError(t *testing.T) {
+	wantErr := errors.New("subscribe failed")
+	fakeRuntime := &fakeDataplaneRuntime{
+		programID: 101,
+		eventErr:  wantErr,
+	}
+	opener := &recordingDataplaneOpener{next: []*fakeDataplaneRuntime{fakeRuntime}}
+	runtime := newTestDataplaneAttachmentRuntime(opener)
+	_, err := runtime.CreateAttachment(context.Background(), types.Attachment{IfIndex: 34})
+	require.NoError(t, err)
+
+	events, err := runtime.SubscribeEvents(context.Background())
+
+	require.Nil(t, events)
+	require.ErrorIs(t, err, wantErr)
+}
+
+func TestDataplaneAttachmentSubscribeEventsClosesOnContextCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	fakeRuntime := &fakeDataplaneRuntime{
+		programID: 101,
+		eventCh:   make(chan model.EventRecord),
+	}
+	opener := &recordingDataplaneOpener{next: []*fakeDataplaneRuntime{fakeRuntime}}
+	runtime := newTestDataplaneAttachmentRuntime(opener)
+	_, err := runtime.CreateAttachment(context.Background(), types.Attachment{IfIndex: 35})
+	require.NoError(t, err)
+	events, err := runtime.SubscribeEvents(ctx)
+	require.NoError(t, err)
+
+	cancel()
+
+	select {
+	case _, ok := <-events:
+		require.False(t, ok)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for event stream to close")
+	}
 }
 
 func TestDataplaneRulesetDryRunDoesNotApplyOrStore(t *testing.T) {
@@ -462,6 +557,32 @@ func testResponseConfig(ifindex int, vlanMode string) types.ResponseConfig {
 		IfName:   "eth" + strconv.Itoa(ifindex),
 		VLANMode: vlanMode,
 	}
+}
+
+func testModelEvent(ruleID uint32) model.EventRecord {
+	return model.EventRecord{
+		ObservedAt: time.Unix(1710000000, 0).UTC(),
+		RuleID:     ruleID,
+		Action:     "tcp_reset",
+		Verdict:    "xdp_tx",
+		SIP:        "10.1.2.3",
+		DIP:        "192.168.1.20",
+		SPort:      52345,
+		DPort:      80,
+		IPProto:    6,
+	}
+}
+
+func readRuntimeEvent(t *testing.T, events <-chan types.Event) types.Event {
+	t.Helper()
+
+	select {
+	case item := <-events:
+		return item
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for runtime event")
+	}
+	return types.Event{}
 }
 
 type recordingDataplaneOpener struct {

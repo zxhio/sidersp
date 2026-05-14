@@ -8,7 +8,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"sidersp/internal/agent/service"
 	"sidersp/internal/agent/types"
 	"sidersp/internal/dataplane"
 	"sidersp/internal/model"
@@ -68,11 +67,13 @@ func TestNewCompositionDataplaneModeOpensFromAttachment(t *testing.T) {
 	require.True(t, status.DispatchEnabled)
 
 	events, err := composition.Services.Events.SubscribeEvents(context.Background())
-	require.Nil(t, events)
-	require.ErrorIs(t, err, service.ErrEventStreamUnsupported)
+	require.NoError(t, err)
+	require.NotNil(t, events)
 
 	require.NoError(t, composition.Close())
 	require.True(t, fakeRuntime.closed)
+	_, ok := <-events
+	require.False(t, ok)
 }
 
 func fakeInterfaceByIndex(index int) (*net.Interface, error) {
@@ -94,6 +95,9 @@ type fakeDataplaneRuntime struct {
 	programID    uint32
 	stats        model.DataplaneStats
 	events       []model.EventRecord
+	eventCh      chan model.EventRecord
+	eventErr     error
+	eventClosed  bool
 	appliedRules []rule.RuleSet
 	appliedXDP   []dataplane.XDPResponseOptions
 	attached     bool
@@ -109,6 +113,16 @@ func (r *fakeDataplaneRuntime) ReadStats() (model.DataplaneStats, error) {
 
 func (r *fakeDataplaneRuntime) Events() []model.EventRecord {
 	return r.events
+}
+
+func (r *fakeDataplaneRuntime) SubscribeEvents(ctx context.Context) (<-chan model.EventRecord, error) {
+	if r.eventErr != nil {
+		return nil, r.eventErr
+	}
+	if r.eventCh == nil {
+		r.eventCh = make(chan model.EventRecord)
+	}
+	return r.eventCh, nil
 }
 
 func (r *fakeDataplaneRuntime) Attach() error {
@@ -138,5 +152,9 @@ func (r *fakeDataplaneRuntime) ReplaceXDPResponse(options dataplane.XDPResponseO
 
 func (r *fakeDataplaneRuntime) Close() error {
 	r.closed = true
+	if r.eventCh != nil && !r.eventClosed {
+		r.eventClosed = true
+		close(r.eventCh)
+	}
 	return r.closeErr
 }

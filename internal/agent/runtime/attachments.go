@@ -228,10 +228,6 @@ func (r *DataplaneAttachmentRuntime) ReadStats(ctx context.Context) (types.Stats
 	return service.NewStatsFromDataplane(total), nil
 }
 
-func (r *DataplaneAttachmentRuntime) SubscribeEvents(ctx context.Context) (<-chan types.Event, error) {
-	return nil, service.ErrEventStreamUnsupported
-}
-
 func (r *DataplaneAttachmentRuntime) Close() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

@@ -33,6 +33,12 @@ type Runtime struct {
 	snapshot    mapSnapshot
 	snapshotSet bool
 	events      *eventBuffer
+	eventMu     sync.Mutex
+	eventSubs   map[uint64]chan model.EventRecord
+	eventNextID uint64
+	eventCancel context.CancelFunc
+	eventErr    error
+	eventClosed bool
 	matchMu     sync.RWMutex
 	matchCounts map[uint32]uint64
 }
@@ -104,6 +110,8 @@ func Open(opts Options, consumers XSKConsumers) (*Runtime, error) {
 }
 
 func (r *Runtime) Close() error {
+	r.closeEventStream()
+
 	var closeErr error
 	if r.xskRuntime != nil {
 		if err := r.xskRuntime.Close(); err != nil {
@@ -147,16 +155,13 @@ func (r *Runtime) RunEventStream(ctx context.Context) error {
 	}
 
 	runCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	go func() {
-		<-runCtx.Done()
+	if err := r.setEventStreamCancel(cancel); err != nil {
+		cancel()
 		_ = reader.Close()
-	}()
+		return err
+	}
 
-	go r.logKernelStats(runCtx, statsLogInterval)
-
-	return r.streamEvents(runCtx, reader)
+	return r.consumeEventReader(runCtx, cancel, reader)
 }
 
 func (r *Runtime) Attach() error {
@@ -180,6 +185,29 @@ func (r *Runtime) Events() []model.EventRecord {
 		return nil
 	}
 	return r.events.list()
+}
+
+func (r *Runtime) SubscribeEvents(ctx context.Context) (<-chan model.EventRecord, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	r.eventMu.Lock()
+	defer r.eventMu.Unlock()
+
+	if r.eventClosed {
+		return nil, fmt.Errorf("dataplane event stream is closed")
+	}
+	if r.eventErr != nil {
+		return nil, fmt.Errorf("stream dataplane events: %w", r.eventErr)
+	}
+	if r.eventCancel == nil {
+		if err := r.startEventStreamLocked(); err != nil {
+			return nil, err
+		}
+	}
+
+	return r.subscribeEventRecordsLocked(ctx), nil
 }
 
 func (r *Runtime) ReplaceXDPResponse(opts XDPResponseOptions) error {
@@ -329,7 +357,7 @@ func (r *Runtime) configurePromisc() error {
 	return nil
 }
 
-func (r *Runtime) streamEvents(ctx context.Context, reader *ringbuf.Reader) error {
+func (r *Runtime) streamEvents(ctx context.Context, reader eventReader) error {
 	for {
 		record, err := reader.Read()
 		if err != nil {
@@ -344,9 +372,11 @@ func (r *Runtime) streamEvents(ctx context.Context, reader *ringbuf.Reader) erro
 			logs.App().WithError(err).Error("Fail to decode dataplane event")
 			continue
 		}
+		item := newEventRecord(evt, time.Now().UTC())
 		if r.events != nil {
-			r.events.add(newEventRecord(evt, time.Now().UTC()))
+			r.events.add(item)
 		}
+		r.publishEventRecord(item)
 
 		r.matchMu.Lock()
 		r.matchCounts[evt.RuleID]++

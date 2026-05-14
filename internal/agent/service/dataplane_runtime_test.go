@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"sidersp/internal/agent/types"
 	"sidersp/internal/model"
 )
 
@@ -102,6 +103,70 @@ func TestDataplaneRuntimeAdapterSubscribeEventsReturnsUnsupported(t *testing.T) 
 	require.ErrorIs(t, err, ErrEventStreamUnsupported)
 }
 
+func TestDataplaneRuntimeAdapterSubscribeEventsMapsRecords(t *testing.T) {
+	observedAt := time.Unix(1710000000, 0).UTC()
+	source := &staticDataplaneEventSubscriber{
+		events: make(chan model.EventRecord, 1),
+	}
+	source.events <- model.EventRecord{
+		ObservedAt: observedAt,
+		RuleID:     1002,
+		Action:     "tcp_reset",
+		Verdict:    "xdp_tx",
+		SIP:        "10.1.2.3",
+		DIP:        "192.168.1.20",
+		SPort:      52345,
+		DPort:      80,
+		IPProto:    6,
+	}
+	adapter := NewDataplaneRuntimeAdapter(staticDataplaneStatsReader{}, source)
+
+	events, err := adapter.SubscribeEvents(context.Background())
+
+	require.NoError(t, err)
+	got := readAgentServiceEvent(t, events)
+	require.Equal(t, int64(1710000000), got.Timestamp)
+	require.Equal(t, "rule_event", got.Type)
+	require.Equal(t, uint32(1002), got.RuleID)
+	require.Equal(t, "tcp_reset", got.Action)
+	require.Equal(t, "xdp_tx", got.Verdict)
+	require.Equal(t, uint32(0x0a010203), got.SIP)
+	require.Equal(t, uint32(0xc0a80114), got.DIP)
+	require.Equal(t, uint16(52345), got.SPort)
+	require.Equal(t, uint16(80), got.DPort)
+	require.Equal(t, uint8(6), got.IPProto)
+}
+
+func TestDataplaneRuntimeAdapterSubscribeEventsPropagatesError(t *testing.T) {
+	wantErr := errors.New("subscribe failed")
+	source := &staticDataplaneEventSubscriber{err: wantErr}
+	adapter := NewDataplaneRuntimeAdapter(staticDataplaneStatsReader{}, source)
+
+	events, err := adapter.SubscribeEvents(context.Background())
+
+	require.Nil(t, events)
+	require.ErrorIs(t, err, wantErr)
+}
+
+func TestDataplaneRuntimeAdapterSubscribeEventsStopsOnCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	source := &staticDataplaneEventSubscriber{
+		events: make(chan model.EventRecord),
+	}
+	adapter := NewDataplaneRuntimeAdapter(staticDataplaneStatsReader{}, source)
+	events, err := adapter.SubscribeEvents(ctx)
+	require.NoError(t, err)
+
+	cancel()
+
+	select {
+	case _, ok := <-events:
+		require.False(t, ok)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for mapped event stream to close")
+	}
+}
+
 type staticDataplaneStatsReader struct {
 	stats model.DataplaneStats
 	err   error
@@ -112,4 +177,32 @@ func (r staticDataplaneStatsReader) ReadStats() (model.DataplaneStats, error) {
 		return model.DataplaneStats{}, r.err
 	}
 	return r.stats, nil
+}
+
+type staticDataplaneEventSubscriber struct {
+	events chan model.EventRecord
+	err    error
+}
+
+func (s *staticDataplaneEventSubscriber) Events() []model.EventRecord {
+	return nil
+}
+
+func (s *staticDataplaneEventSubscriber) SubscribeEvents(ctx context.Context) (<-chan model.EventRecord, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.events, nil
+}
+
+func readAgentServiceEvent(t *testing.T, events <-chan types.Event) types.Event {
+	t.Helper()
+
+	select {
+	case item := <-events:
+		return item
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for agent event")
+	}
+	return types.Event{}
 }
