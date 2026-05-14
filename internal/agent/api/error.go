@@ -1,0 +1,38 @@
+package api
+
+import (
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+)
+
+const (
+	ErrorCodeBadRequest       = "bad_request"
+	ErrorCodeValidationFailed = "validation_failed"
+	ErrorCodeNotFound         = "not_found"
+	ErrorCodeConflict         = "conflict"
+	ErrorCodeRuntimeFailed    = "runtime_failed"
+	ErrorCodeInternal         = "internal_error"
+)
+
+type ProblemDetails struct {
+	Type   string `json:"type"`
+	Title  string `json:"title"`
+	Status int    `json:"status"`
+	Detail string `json:"detail,omitempty"`
+	Code   string `json:"code"`
+}
+
+func writeProblem(c *gin.Context, status int, code string, title string, detail string) {
+	c.JSON(status, ProblemDetails{
+		Type:   "about:blank",
+		Title:  title,
+		Status: status,
+		Detail: detail,
+		Code:   code,
+	})
+}
+
+func writeInternalError(c *gin.Context, detail string) {
+	writeProblem(c, http.StatusInternalServerError, ErrorCodeInternal, "Internal error", detail)
+}
