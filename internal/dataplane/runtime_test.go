@@ -319,15 +319,6 @@ func TestDiffPrefixMaskMap(t *testing.T) {
 	}
 }
 
-func TestSumPerCPUCounters(t *testing.T) {
-	t.Parallel()
-
-	got := sumPerCPUCounters([]uint64{3, 5, 7})
-	if got != 15 {
-		t.Fatalf("sumPerCPUCounters() = %d, want %d", got, 15)
-	}
-}
-
 func TestKernelStatsFields(t *testing.T) {
 	t.Parallel()
 

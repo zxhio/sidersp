@@ -157,6 +157,13 @@ If a low-level-looking API, config, or lifecycle test protects a real boundary,
 keep the boundary and move it closer to the owning service when needed. For
 example, failed rule apply must not mutate the active ruleset.
 
+When reviewing existing tests, each remaining test should have a clear answer to
+"what boundary breaks if this fails?" Delete it if the answer is only helper
+formatting, default plumbing, field copying, wrapper delegation, or call count
+bookkeeping. Keep it when it guards a protocol/ABI contract, packet-path behavior,
+rollback behavior, resource budget, concurrency cancellation, or error
+propagation boundary.
+
 ### Avoid testing
 
 * simple constructors
