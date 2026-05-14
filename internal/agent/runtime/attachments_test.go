@@ -179,10 +179,157 @@ func TestDataplaneAttachmentReadStatsAggregatesActiveRuntimes(t *testing.T) {
 	require.Equal(t, uint64(3), got.Errors.XDPPackets)
 }
 
+func TestDataplaneRulesetDryRunDoesNotApplyOrStore(t *testing.T) {
+	fakeRuntime := &fakeDataplaneRuntime{programID: 101}
+	opener := &recordingDataplaneOpener{next: []*fakeDataplaneRuntime{fakeRuntime}}
+	runtime := newTestDataplaneAttachmentRuntime(opener)
+	_, err := runtime.CreateAttachment(context.Background(), types.Attachment{IfIndex: 12})
+	require.NoError(t, err)
+	svc := service.NewRulesetService(runtime)
+
+	got, err := svc.ReplaceRuleset(context.Background(), testDataplaneRuleset(2, 2002), true)
+
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), got.Version)
+	require.Empty(t, fakeRuntime.appliedRules)
+	stored, err := runtime.GetRuleset(context.Background())
+	require.NoError(t, err)
+	require.Zero(t, stored.Version)
+	require.Nil(t, stored.Rules)
+}
+
+func TestDataplaneRulesetReplaceAppliesAllEnabledAttachments(t *testing.T) {
+	first := &fakeDataplaneRuntime{programID: 101}
+	second := &fakeDataplaneRuntime{programID: 202}
+	opener := &recordingDataplaneOpener{next: []*fakeDataplaneRuntime{first, second}}
+	runtime := newTestDataplaneAttachmentRuntime(opener)
+	_, err := runtime.CreateAttachment(context.Background(), types.Attachment{IfIndex: 13})
+	require.NoError(t, err)
+	_, err = runtime.CreateAttachment(context.Background(), types.Attachment{IfIndex: 14})
+	require.NoError(t, err)
+	svc := service.NewRulesetService(runtime)
+
+	got, err := svc.ReplaceRuleset(context.Background(), testDataplaneRuleset(3, 3003), false)
+
+	require.NoError(t, err)
+	require.Equal(t, uint64(3), got.Version)
+	require.Len(t, first.appliedRules, 1)
+	require.Len(t, second.appliedRules, 1)
+	require.Equal(t, 3003, first.appliedRules[0].Rules[0].ID)
+	require.Equal(t, 3003, second.appliedRules[0].Rules[0].ID)
+
+	stored, err := runtime.GetRuleset(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, uint64(3), stored.Version)
+}
+
+func TestDataplaneRulesetApplyFailureDoesNotStoreAndRollsBack(t *testing.T) {
+	first := &fakeDataplaneRuntime{programID: 101}
+	second := &fakeDataplaneRuntime{programID: 202}
+	opener := &recordingDataplaneOpener{next: []*fakeDataplaneRuntime{first, second}}
+	runtime := newTestDataplaneAttachmentRuntime(opener)
+	_, err := runtime.CreateAttachment(context.Background(), types.Attachment{IfIndex: 15})
+	require.NoError(t, err)
+	_, err = runtime.CreateAttachment(context.Background(), types.Attachment{IfIndex: 16})
+	require.NoError(t, err)
+	svc := service.NewRulesetService(runtime)
+	previous := testDataplaneRuleset(4, 4004)
+	_, err = svc.ReplaceRuleset(context.Background(), previous, false)
+	require.NoError(t, err)
+	second.applyErr = errors.New("apply failed")
+
+	_, err = svc.ReplaceRuleset(context.Background(), testDataplaneRuleset(5, 5005), false)
+
+	require.ErrorContains(t, err, "apply failed")
+	stored, getErr := runtime.GetRuleset(context.Background())
+	require.NoError(t, getErr)
+	require.Equal(t, previous.Version, stored.Version)
+	require.Equal(t, previous.Rules[0].RuleID, stored.Rules[0].RuleID)
+	require.Len(t, first.appliedRules, 3)
+	require.Equal(t, 4004, first.appliedRules[2].Rules[0].ID)
+	require.Len(t, second.appliedRules, 2)
+	require.Equal(t, 5005, second.appliedRules[1].Rules[0].ID)
+}
+
+func TestDataplaneRulesetClearAppliesEmptyRuleset(t *testing.T) {
+	fakeRuntime := &fakeDataplaneRuntime{programID: 101}
+	opener := &recordingDataplaneOpener{next: []*fakeDataplaneRuntime{fakeRuntime}}
+	runtime := newTestDataplaneAttachmentRuntime(opener)
+	_, err := runtime.CreateAttachment(context.Background(), types.Attachment{IfIndex: 17})
+	require.NoError(t, err)
+	svc := service.NewRulesetService(runtime)
+	_, err = svc.ReplaceRuleset(context.Background(), testDataplaneRuleset(6, 6006), false)
+	require.NoError(t, err)
+
+	err = svc.ClearRuleset(context.Background())
+
+	require.NoError(t, err)
+	require.Len(t, fakeRuntime.appliedRules, 2)
+	require.Empty(t, fakeRuntime.appliedRules[1].Rules)
+	stored, err := runtime.GetRuleset(context.Background())
+	require.NoError(t, err)
+	require.Zero(t, stored.Version)
+	require.Nil(t, stored.Rules)
+}
+
+func TestDataplaneRulesetCreateAttachmentAppliesCurrentRuleset(t *testing.T) {
+	first := &fakeDataplaneRuntime{programID: 101}
+	second := &fakeDataplaneRuntime{programID: 202}
+	opener := &recordingDataplaneOpener{next: []*fakeDataplaneRuntime{first, second}}
+	runtime := newTestDataplaneAttachmentRuntime(opener)
+	_, err := runtime.CreateAttachment(context.Background(), types.Attachment{IfIndex: 18})
+	require.NoError(t, err)
+	svc := service.NewRulesetService(runtime)
+	_, err = svc.ReplaceRuleset(context.Background(), testDataplaneRuleset(7, 7007), false)
+	require.NoError(t, err)
+
+	_, err = runtime.CreateAttachment(context.Background(), types.Attachment{IfIndex: 19})
+
+	require.NoError(t, err)
+	require.Len(t, second.appliedRules, 1)
+	require.Equal(t, 7007, second.appliedRules[0].Rules[0].ID)
+}
+
+func TestDataplaneRulesetReenableAttachmentAppliesCurrentRuleset(t *testing.T) {
+	first := &fakeDataplaneRuntime{programID: 101}
+	second := &fakeDataplaneRuntime{programID: 202}
+	opener := &recordingDataplaneOpener{next: []*fakeDataplaneRuntime{first, second}}
+	runtime := newTestDataplaneAttachmentRuntime(opener)
+	_, err := runtime.CreateAttachment(context.Background(), types.Attachment{IfIndex: 20})
+	require.NoError(t, err)
+	svc := service.NewRulesetService(runtime)
+	_, err = svc.ReplaceRuleset(context.Background(), testDataplaneRuleset(8, 8008), false)
+	require.NoError(t, err)
+	_, err = runtime.SetAttachmentEnabled(context.Background(), 20, false)
+	require.NoError(t, err)
+
+	_, err = runtime.SetAttachmentEnabled(context.Background(), 20, true)
+
+	require.NoError(t, err)
+	require.Len(t, second.appliedRules, 1)
+	require.Equal(t, 8008, second.appliedRules[0].Rules[0].ID)
+}
+
 func newTestDataplaneAttachmentRuntime(opener *recordingDataplaneOpener) *DataplaneAttachmentRuntime {
 	return NewDataplaneAttachmentRuntime(service.NewInMemoryRuntime(), opener.open, func(index int) (*net.Interface, error) {
 		return &net.Interface{Index: index, Name: "eth" + strconv.Itoa(index)}, nil
 	})
+}
+
+func testDataplaneRuleset(version uint64, ruleID uint32) types.Ruleset {
+	return types.Ruleset{
+		Version: version,
+		Rules: []types.Rule{
+			{
+				RuleID:   ruleID,
+				Priority: 10,
+				Match: types.RuleMatch{
+					Protocol: "tcp",
+				},
+				Response: types.RuleResponse{Action: "tcp_reset"},
+			},
+		},
+	}
 }
 
 type recordingDataplaneOpener struct {

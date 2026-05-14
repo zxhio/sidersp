@@ -12,6 +12,7 @@ import (
 	"sidersp/internal/agent/types"
 	"sidersp/internal/dataplane"
 	"sidersp/internal/model"
+	"sidersp/internal/rule"
 )
 
 func TestNewCompositionDefaultModeUsesInMemoryRuntime(t *testing.T) {
@@ -81,12 +82,14 @@ func requireServices(t *testing.T, services Services) {
 }
 
 type fakeDataplaneRuntime struct {
-	programID uint32
-	stats     model.DataplaneStats
-	events    []model.EventRecord
-	attached  bool
-	closed    bool
-	closeErr  error
+	programID    uint32
+	stats        model.DataplaneStats
+	events       []model.EventRecord
+	appliedRules []rule.RuleSet
+	attached     bool
+	closed       bool
+	applyErr     error
+	closeErr     error
 }
 
 func (r *fakeDataplaneRuntime) ReadStats() (model.DataplaneStats, error) {
@@ -104,6 +107,14 @@ func (r *fakeDataplaneRuntime) Attach() error {
 
 func (r *fakeDataplaneRuntime) ProgramID() (uint32, error) {
 	return r.programID, nil
+}
+
+func (r *fakeDataplaneRuntime) ReplaceRules(set rule.RuleSet) error {
+	r.appliedRules = append(r.appliedRules, cloneRuleSet(set))
+	if r.applyErr != nil {
+		return r.applyErr
+	}
+	return nil
 }
 
 func (r *fakeDataplaneRuntime) Close() error {

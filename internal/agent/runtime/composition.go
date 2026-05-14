@@ -7,6 +7,7 @@ import (
 
 	"sidersp/internal/agent/service"
 	"sidersp/internal/dataplane"
+	"sidersp/internal/rule"
 )
 
 type Services struct {
@@ -32,6 +33,7 @@ type DataplaneRuntime interface {
 	service.DataplaneEventSource
 	Attach() error
 	ProgramID() (uint32, error)
+	ReplaceRules(set rule.RuleSet) error
 	Close() error
 }
 
@@ -74,6 +76,7 @@ func NewComposition(options Options, buildOpts ...BuildOption) (*Composition, er
 
 	state := service.NewInMemoryRuntime()
 	attachmentRuntime := service.AttachmentConfigRuntime(state)
+	rulesetRuntime := service.RulesetRuntime(state)
 	statsRuntime := service.StatsRuntime(state)
 	eventRuntime := service.EventRuntime(state)
 	var closer interface {
@@ -82,6 +85,7 @@ func NewComposition(options Options, buildOpts ...BuildOption) (*Composition, er
 	if options.Mode == ModeDataplane {
 		runtime := NewDataplaneAttachmentRuntime(state, build.dataplaneOpener, build.interfaceByIndex)
 		attachmentRuntime = runtime
+		rulesetRuntime = runtime
 		statsRuntime = runtime
 		eventRuntime = runtime
 		closer = runtime
@@ -91,11 +95,11 @@ func NewComposition(options Options, buildOpts ...BuildOption) (*Composition, er
 		Services: Services{
 			Status: service.NewStatusServiceWithRuntime(service.RuntimeDeps{
 				Attachments: attachmentRuntime,
-				Ruleset:     state,
+				Ruleset:     rulesetRuntime,
 				Response:    state,
 				Dispatch:    state,
 			}),
-			Ruleset:     service.NewRulesetService(state),
+			Ruleset:     service.NewRulesetService(rulesetRuntime),
 			Attachments: service.NewAttachmentService(attachmentRuntime),
 			Response:    service.NewResponseService(state),
 			Dispatch:    service.NewDispatchService(state),
