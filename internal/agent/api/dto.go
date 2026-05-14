@@ -71,6 +71,38 @@ type RuleResponseBody struct {
 	Params map[string]any `json:"params,omitempty"`
 }
 
+type ResponseConfigRequest struct {
+	IfIndex  *int   `json:"ifindex"`
+	IfName   string `json:"ifname,omitempty"`
+	VLANMode string `json:"vlan_mode,omitempty"`
+}
+
+type ResponseConfigResponse struct {
+	IfIndex  int    `json:"ifindex"`
+	IfName   string `json:"ifname,omitempty"`
+	VLANMode string `json:"vlan_mode"`
+}
+
+type DispatchConfigRequest struct {
+	Enabled        bool   `json:"enabled,omitempty"`
+	Backend        string `json:"backend,omitempty"`
+	TargetIfIndex  int    `json:"target_ifindex,omitempty"`
+	TargetIfName   string `json:"target_ifname,omitempty"`
+	VLANMode       string `json:"vlan_mode,omitempty"`
+	QueueSize      int    `json:"queue_size,omitempty"`
+	MaxPacketBytes int    `json:"max_packet_bytes,omitempty"`
+}
+
+type DispatchConfigResponse struct {
+	Enabled        bool   `json:"enabled"`
+	Backend        string `json:"backend"`
+	TargetIfIndex  int    `json:"target_ifindex,omitempty"`
+	TargetIfName   string `json:"target_ifname,omitempty"`
+	VLANMode       string `json:"vlan_mode"`
+	QueueSize      int    `json:"queue_size"`
+	MaxPacketBytes int    `json:"max_packet_bytes"`
+}
+
 func newHealthResponse(item types.Health) HealthResponse {
 	return HealthResponse{Status: item.Status}
 }
@@ -238,4 +270,47 @@ func cloneBodyParams(params map[string]any) map[string]any {
 		out[key] = value
 	}
 	return out
+}
+
+func newResponseConfig(req ResponseConfigRequest) (types.ResponseConfig, error) {
+	if req.IfIndex == nil {
+		return types.ResponseConfig{}, types.NewValidationError("ifindex is required")
+	}
+	return types.ResponseConfig{
+		IfIndex:  *req.IfIndex,
+		IfName:   req.IfName,
+		VLANMode: req.VLANMode,
+	}, nil
+}
+
+func newResponseConfigResponse(item types.ResponseConfig) ResponseConfigResponse {
+	return ResponseConfigResponse{
+		IfIndex:  item.IfIndex,
+		IfName:   item.IfName,
+		VLANMode: item.VLANMode,
+	}
+}
+
+func newDispatchConfig(req DispatchConfigRequest) types.DispatchConfig {
+	return types.DispatchConfig{
+		Enabled:        req.Enabled,
+		Backend:        req.Backend,
+		TargetIfIndex:  req.TargetIfIndex,
+		TargetIfName:   req.TargetIfName,
+		VLANMode:       req.VLANMode,
+		QueueSize:      req.QueueSize,
+		MaxPacketBytes: req.MaxPacketBytes,
+	}
+}
+
+func newDispatchConfigResponse(item types.DispatchConfig) DispatchConfigResponse {
+	return DispatchConfigResponse{
+		Enabled:        item.Enabled,
+		Backend:        item.Backend,
+		TargetIfIndex:  item.TargetIfIndex,
+		TargetIfName:   item.TargetIfName,
+		VLANMode:       item.VLANMode,
+		QueueSize:      item.QueueSize,
+		MaxPacketBytes: item.MaxPacketBytes,
+	}
 }

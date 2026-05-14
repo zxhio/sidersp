@@ -8,8 +8,12 @@ import (
 )
 
 type InMemoryRuntime struct {
-	mu      sync.RWMutex
-	ruleset types.Ruleset
+	mu                 sync.RWMutex
+	ruleset            types.Ruleset
+	response           types.ResponseConfig
+	responseConfigured bool
+	dispatch           types.DispatchConfig
+	dispatchConfigured bool
 }
 
 func NewInMemoryRuntime() *InMemoryRuntime {
@@ -65,9 +69,76 @@ func (r *InMemoryRuntime) ClearRuleset(ctx context.Context) error {
 }
 
 func (r *InMemoryRuntime) ResponseConfigured(ctx context.Context) (bool, error) {
-	return false, nil
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.responseConfigured, nil
+}
+
+func (r *InMemoryRuntime) GetResponse(ctx context.Context) (types.ResponseConfig, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if !r.responseConfigured {
+		return defaultResponseConfig(), nil
+	}
+	return r.response, nil
+}
+
+func (r *InMemoryRuntime) ReplaceResponse(ctx context.Context, config types.ResponseConfig) (types.ResponseConfig, error) {
+	next, err := normalizeResponseConfig(config)
+	if err != nil {
+		return types.ResponseConfig{}, err
+	}
+
+	r.mu.Lock()
+	r.response = next
+	r.responseConfigured = true
+	r.mu.Unlock()
+	return next, nil
+}
+
+func (r *InMemoryRuntime) ClearResponse(ctx context.Context) error {
+	r.mu.Lock()
+	r.response = types.ResponseConfig{}
+	r.responseConfigured = false
+	r.mu.Unlock()
+	return nil
 }
 
 func (r *InMemoryRuntime) DispatchEnabled(ctx context.Context) (bool, error) {
-	return false, nil
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if !r.dispatchConfigured {
+		return false, nil
+	}
+	return r.dispatch.Enabled, nil
+}
+
+func (r *InMemoryRuntime) GetDispatch(ctx context.Context) (types.DispatchConfig, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if !r.dispatchConfigured {
+		return defaultDispatchConfig(), nil
+	}
+	return r.dispatch, nil
+}
+
+func (r *InMemoryRuntime) ReplaceDispatch(ctx context.Context, config types.DispatchConfig) (types.DispatchConfig, error) {
+	next, err := normalizeDispatchConfig(config)
+	if err != nil {
+		return types.DispatchConfig{}, err
+	}
+
+	r.mu.Lock()
+	r.dispatch = next
+	r.dispatchConfigured = true
+	r.mu.Unlock()
+	return next, nil
+}
+
+func (r *InMemoryRuntime) ClearDispatch(ctx context.Context) error {
+	r.mu.Lock()
+	r.dispatch = types.DispatchConfig{}
+	r.dispatchConfigured = false
+	r.mu.Unlock()
+	return nil
 }

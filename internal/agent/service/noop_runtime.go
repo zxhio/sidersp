@@ -39,6 +39,30 @@ func (NoopRuntime) ResponseConfigured(ctx context.Context) (bool, error) {
 	return false, nil
 }
 
+func (NoopRuntime) GetResponse(ctx context.Context) (types.ResponseConfig, error) {
+	return defaultResponseConfig(), nil
+}
+
+func (NoopRuntime) ReplaceResponse(ctx context.Context, config types.ResponseConfig) (types.ResponseConfig, error) {
+	return normalizeResponseConfig(config)
+}
+
+func (NoopRuntime) ClearResponse(ctx context.Context) error {
+	return nil
+}
+
 func (NoopRuntime) DispatchEnabled(ctx context.Context) (bool, error) {
 	return false, nil
+}
+
+func (NoopRuntime) GetDispatch(ctx context.Context) (types.DispatchConfig, error) {
+	return defaultDispatchConfig(), nil
+}
+
+func (NoopRuntime) ReplaceDispatch(ctx context.Context, config types.DispatchConfig) (types.DispatchConfig, error) {
+	return normalizeDispatchConfig(config)
+}
+
+func (NoopRuntime) ClearDispatch(ctx context.Context) error {
+	return nil
 }

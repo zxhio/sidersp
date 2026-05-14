@@ -44,9 +44,11 @@ func run(ctx context.Context, listenAddr string) error {
 	runtime := service.NewInMemoryRuntime()
 	statusService := service.NewStatusServiceWithRuntime(runtime.RuntimeDeps())
 	rulesetService := service.NewRulesetService(runtime)
+	responseService := service.NewResponseService(runtime)
+	dispatchService := service.NewDispatchService(runtime)
 	srv := &http.Server{
 		Addr:    listenAddr,
-		Handler: api.NewRouter(statusService, rulesetService),
+		Handler: api.NewRouter(statusService, rulesetService, responseService, dispatchService),
 	}
 
 	errCh := make(chan error, 1)
