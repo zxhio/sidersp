@@ -1,7 +1,7 @@
 package runtime
 
 import (
-	"fmt"
+	"net"
 
 	"github.com/sirupsen/logrus"
 
@@ -20,21 +20,28 @@ type Services struct {
 }
 
 type Composition struct {
-	Services  Services
-	mode      Mode
-	dataplane DataplaneRuntime
+	Services Services
+	mode     Mode
+	closer   interface {
+		Close() error
+	}
 }
 
 type DataplaneRuntime interface {
 	service.DataplaneStatsReader
 	service.DataplaneEventSource
+	Attach() error
+	ProgramID() (uint32, error)
 	Close() error
 }
 
 type DataplaneOpener func(dataplane.Options) (DataplaneRuntime, error)
 
+type interfaceLookup func(index int) (*net.Interface, error)
+
 type buildOptions struct {
-	dataplaneOpener DataplaneOpener
+	dataplaneOpener  DataplaneOpener
+	interfaceByIndex interfaceLookup
 }
 
 type BuildOption func(*buildOptions)
@@ -45,6 +52,12 @@ func WithDataplaneOpener(opener DataplaneOpener) BuildOption {
 	}
 }
 
+func WithInterfaceLookup(lookup interfaceLookup) BuildOption {
+	return func(options *buildOptions) {
+		options.interfaceByIndex = lookup
+	}
+}
+
 func NewComposition(options Options, buildOpts ...BuildOption) (*Composition, error) {
 	options, err := options.normalize()
 	if err != nil {
@@ -52,43 +65,45 @@ func NewComposition(options Options, buildOpts ...BuildOption) (*Composition, er
 	}
 
 	build := buildOptions{
-		dataplaneOpener: openDataplane,
+		dataplaneOpener:  openDataplane,
+		interfaceByIndex: net.InterfaceByIndex,
 	}
 	for _, apply := range buildOpts {
 		apply(&build)
 	}
 
 	state := service.NewInMemoryRuntime()
+	attachmentRuntime := service.AttachmentConfigRuntime(state)
 	statsRuntime := service.StatsRuntime(state)
 	eventRuntime := service.EventRuntime(state)
-
-	var dataplaneRuntime DataplaneRuntime
+	var closer interface {
+		Close() error
+	}
 	if options.Mode == ModeDataplane {
-		dataplaneOptions, err := newDataplaneOptions(options.Dataplane)
-		if err != nil {
-			return nil, err
-		}
-		dataplaneRuntime, err = build.dataplaneOpener(dataplaneOptions)
-		if err != nil {
-			return nil, fmt.Errorf("open dataplane runtime: %w", err)
-		}
-		adapter := service.NewDataplaneRuntimeAdapter(dataplaneRuntime, dataplaneRuntime)
-		statsRuntime = adapter
-		eventRuntime = adapter
+		runtime := NewDataplaneAttachmentRuntime(state, build.dataplaneOpener, build.interfaceByIndex)
+		attachmentRuntime = runtime
+		statsRuntime = runtime
+		eventRuntime = runtime
+		closer = runtime
 	}
 
 	composition := &Composition{
 		Services: Services{
-			Status:      service.NewStatusServiceWithRuntime(state.RuntimeDeps()),
+			Status: service.NewStatusServiceWithRuntime(service.RuntimeDeps{
+				Attachments: attachmentRuntime,
+				Ruleset:     state,
+				Response:    state,
+				Dispatch:    state,
+			}),
 			Ruleset:     service.NewRulesetService(state),
-			Attachments: service.NewAttachmentService(state),
+			Attachments: service.NewAttachmentService(attachmentRuntime),
 			Response:    service.NewResponseService(state),
 			Dispatch:    service.NewDispatchService(state),
 			Stats:       service.NewStatsService(statsRuntime),
 			Events:      service.NewEventService(eventRuntime),
 		},
-		mode:      options.Mode,
-		dataplane: dataplaneRuntime,
+		mode:   options.Mode,
+		closer: closer,
 	}
 
 	logrus.WithField("runtime_mode", composition.mode).Info("Built agent runtime")
@@ -100,24 +115,10 @@ func (c *Composition) Mode() Mode {
 }
 
 func (c *Composition) Close() error {
-	if c == nil || c.dataplane == nil {
+	if c == nil || c.closer == nil {
 		return nil
 	}
-	return c.dataplane.Close()
-}
-
-func newDataplaneOptions(options DataplaneOptions) (dataplane.Options, error) {
-	if options.Interface == "" {
-		return dataplane.Options{}, fmt.Errorf("dataplane interface is required")
-	}
-	return dataplane.Options{
-		Interface:      options.Interface,
-		IngressVerdict: "pass",
-		XDPResponse: dataplane.XDPResponseOptions{
-			VLANMode:       "preserve",
-			FailureVerdict: "pass",
-		},
-	}, nil
+	return c.closer.Close()
 }
 
 func openDataplane(options dataplane.Options) (DataplaneRuntime, error) {

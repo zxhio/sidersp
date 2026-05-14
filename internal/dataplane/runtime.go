@@ -159,6 +159,22 @@ func (r *Runtime) RunEventStream(ctx context.Context) error {
 	return r.streamEvents(runCtx, reader)
 }
 
+func (r *Runtime) Attach() error {
+	return r.attachOnce()
+}
+
+func (r *Runtime) ProgramID() (uint32, error) {
+	info, err := r.objs.XdpSidersp.Info()
+	if err != nil {
+		return 0, fmt.Errorf("read xdp program info: %w", err)
+	}
+	id, ok := info.ID()
+	if !ok {
+		return 0, nil
+	}
+	return uint32(id), nil
+}
+
 func (r *Runtime) Events() []model.EventRecord {
 	if r.events == nil {
 		return nil

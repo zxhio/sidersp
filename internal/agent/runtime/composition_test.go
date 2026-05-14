@@ -2,7 +2,8 @@ package runtime
 
 import (
 	"context"
-	"errors"
+	"net"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -27,36 +28,30 @@ func TestNewCompositionDefaultModeUsesInMemoryRuntime(t *testing.T) {
 	require.Equal(t, 1, status.Attachments)
 }
 
-func TestNewCompositionDataplaneModeRequiresInterface(t *testing.T) {
-	called := false
-	composition, err := NewComposition(Options{Mode: ModeDataplane}, WithDataplaneOpener(func(dataplane.Options) (DataplaneRuntime, error) {
-		called = true
-		return nil, errors.New("should not open dataplane")
-	}))
-
-	require.Nil(t, composition)
-	require.False(t, called)
-	require.ErrorContains(t, err, "dataplane interface is required")
-}
-
-func TestNewCompositionDataplaneModeWiresStatsAdapter(t *testing.T) {
+func TestNewCompositionDataplaneModeOpensFromAttachment(t *testing.T) {
 	fakeRuntime := &fakeDataplaneRuntime{
-		stats: model.DataplaneStats{RXPackets: 42},
+		programID: 101,
+		stats:     model.DataplaneStats{RXPackets: 42},
 	}
-	var opened dataplane.Options
+	var opened []dataplane.Options
 	composition, err := NewComposition(Options{
 		Mode: ModeDataplane,
-		Dataplane: DataplaneOptions{
-			Interface: "eth0",
-		},
 	}, WithDataplaneOpener(func(options dataplane.Options) (DataplaneRuntime, error) {
-		opened = options
+		opened = append(opened, options)
 		return fakeRuntime, nil
-	}))
+	}), WithInterfaceLookup(fakeInterfaceByIndex))
 	require.NoError(t, err)
 	require.Equal(t, ModeDataplane, composition.Mode())
 	requireServices(t, composition.Services)
-	require.Equal(t, "eth0", opened.Interface)
+	require.Empty(t, opened)
+
+	attachment, err := composition.Services.Attachments.CreateAttachment(context.Background(), types.Attachment{IfIndex: 3}, false)
+	require.NoError(t, err)
+	require.True(t, attachment.Enabled)
+	require.Equal(t, uint32(101), attachment.Runtime.ProgramID)
+	require.Len(t, opened, 1)
+	require.Equal(t, "eth3", opened[0].Interface)
+	require.True(t, fakeRuntime.attached)
 
 	stats, err := composition.Services.Stats.Stats(context.Background())
 	require.NoError(t, err)
@@ -68,6 +63,10 @@ func TestNewCompositionDataplaneModeWiresStatsAdapter(t *testing.T) {
 
 	require.NoError(t, composition.Close())
 	require.True(t, fakeRuntime.closed)
+}
+
+func fakeInterfaceByIndex(index int) (*net.Interface, error) {
+	return &net.Interface{Index: index, Name: "eth" + strconv.Itoa(index)}, nil
 }
 
 func requireServices(t *testing.T, services Services) {
@@ -82,9 +81,12 @@ func requireServices(t *testing.T, services Services) {
 }
 
 type fakeDataplaneRuntime struct {
-	stats  model.DataplaneStats
-	events []model.EventRecord
-	closed bool
+	programID uint32
+	stats     model.DataplaneStats
+	events    []model.EventRecord
+	attached  bool
+	closed    bool
+	closeErr  error
 }
 
 func (r *fakeDataplaneRuntime) ReadStats() (model.DataplaneStats, error) {
@@ -95,7 +97,16 @@ func (r *fakeDataplaneRuntime) Events() []model.EventRecord {
 	return r.events
 }
 
+func (r *fakeDataplaneRuntime) Attach() error {
+	r.attached = true
+	return nil
+}
+
+func (r *fakeDataplaneRuntime) ProgramID() (uint32, error) {
+	return r.programID, nil
+}
+
 func (r *fakeDataplaneRuntime) Close() error {
 	r.closed = true
-	return nil
+	return r.closeErr
 }

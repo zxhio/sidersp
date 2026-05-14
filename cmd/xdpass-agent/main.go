@@ -18,11 +18,10 @@ import (
 )
 
 const (
-	defaultListenAddr     = "127.0.0.1:18081"
-	listenAddrEnv         = "XDPASS_AGENT_LISTEN_ADDR"
-	runtimeModeEnv        = "XDPASS_AGENT_RUNTIME_MODE"
-	dataplaneInterfaceEnv = "XDPASS_AGENT_DATAPLANE_INTERFACE"
-	shutdownTimeout       = 5 * time.Second
+	defaultListenAddr = "127.0.0.1:18081"
+	listenAddrEnv     = "XDPASS_AGENT_LISTEN_ADDR"
+	runtimeModeEnv    = "XDPASS_AGENT_RUNTIME_MODE"
+	shutdownTimeout   = 5 * time.Second
 )
 
 func main() {
@@ -47,7 +46,6 @@ func runtimeOptionsFromEnv() runtime.Options {
 	if mode := strings.TrimSpace(os.Getenv(runtimeModeEnv)); mode != "" {
 		options.Mode = runtime.Mode(mode)
 	}
-	options.Dataplane.Interface = strings.TrimSpace(os.Getenv(dataplaneInterfaceEnv))
 	return options
 }
 

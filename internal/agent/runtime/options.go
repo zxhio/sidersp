@@ -13,12 +13,7 @@ const (
 )
 
 type Options struct {
-	Mode      Mode
-	Dataplane DataplaneOptions
-}
-
-type DataplaneOptions struct {
-	Interface string
+	Mode Mode
 }
 
 func DefaultOptions() Options {
@@ -31,7 +26,6 @@ func (o Options) normalize() (Options, error) {
 		return Options{}, err
 	}
 	o.Mode = mode
-	o.Dataplane.Interface = strings.TrimSpace(o.Dataplane.Interface)
 	return o, nil
 }
 
