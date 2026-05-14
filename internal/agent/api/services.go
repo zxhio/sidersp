@@ -17,6 +17,14 @@ type RulesetService interface {
 	ClearRuleset(ctx context.Context) error
 }
 
+type AttachmentService interface {
+	ListAttachments(ctx context.Context) ([]types.Attachment, error)
+	GetAttachment(ctx context.Context, ifindex int) (types.Attachment, error)
+	CreateAttachment(ctx context.Context, attachment types.Attachment, dryRun bool) (types.Attachment, error)
+	SetAttachmentEnabled(ctx context.Context, ifindex int, enabled bool) (types.Attachment, error)
+	DeleteAttachment(ctx context.Context, ifindex int) error
+}
+
 type ResponseService interface {
 	GetResponse(ctx context.Context) (types.ResponseConfig, error)
 	ReplaceResponse(ctx context.Context, config types.ResponseConfig) (types.ResponseConfig, error)

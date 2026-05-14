@@ -71,6 +71,59 @@ type RuleResponseBody struct {
 	Params map[string]any `json:"params,omitempty"`
 }
 
+type AttachmentRequest struct {
+	IfIndex     *int                          `json:"ifindex"`
+	IfName      string                        `json:"ifname,omitempty"`
+	AttachMode  string                        `json:"attach_mode,omitempty"`
+	MissVerdict string                        `json:"miss_verdict,omitempty"`
+	Channels    AttachmentChannelsRequestBody `json:"channels,omitempty"`
+	XSK         AttachmentXSKBody             `json:"xsk,omitempty"`
+}
+
+type AttachmentResponse struct {
+	IfIndex     int                    `json:"ifindex"`
+	IfName      string                 `json:"ifname,omitempty"`
+	AttachMode  string                 `json:"attach_mode"`
+	Enabled     bool                   `json:"enabled"`
+	MissVerdict string                 `json:"miss_verdict"`
+	Channels    AttachmentChannelsBody `json:"channels"`
+	XSK         AttachmentXSKBody      `json:"xsk"`
+	Runtime     AttachmentRuntimeBody  `json:"runtime"`
+}
+
+type AttachmentChannelsRequestBody struct {
+	RXQueueCount int `json:"rx_queue_count"`
+}
+
+type AttachmentChannelsBody struct {
+	RXQueueCount    int `json:"rx_queue_count"`
+	MaxRXQueueCount int `json:"max_rx_queue_count"`
+}
+
+type AttachmentXSKBody struct {
+	Enabled bool               `json:"enabled"`
+	Queues  []int              `json:"queues,omitempty"`
+	UMEM    AttachmentUMEMBody `json:"umem"`
+}
+
+type AttachmentUMEMBody struct {
+	FrameSize          int `json:"frame_size"`
+	FrameCount         int `json:"frame_count"`
+	FillRingSize       int `json:"fill_ring_size"`
+	CompletionRingSize int `json:"completion_ring_size"`
+	RXRingSize         int `json:"rx_ring_size"`
+	TXRingSize         int `json:"tx_ring_size"`
+	TXFrameReserve     int `json:"tx_frame_reserve"`
+}
+
+type AttachmentRuntimeBody struct {
+	ProgramID uint32 `json:"program_id"`
+}
+
+type PatchAttachmentRequest struct {
+	Enabled *bool `json:"enabled"`
+}
+
 type ResponseConfigRequest struct {
 	IfIndex  *int   `json:"ifindex"`
 	IfName   string `json:"ifname,omitempty"`
@@ -268,6 +321,75 @@ func cloneBodyParams(params map[string]any) map[string]any {
 	out := make(map[string]any, len(params))
 	for key, value := range params {
 		out[key] = value
+	}
+	return out
+}
+
+func newAttachment(req AttachmentRequest) (types.Attachment, error) {
+	if req.IfIndex == nil {
+		return types.Attachment{}, types.NewValidationError("ifindex is required")
+	}
+	return types.Attachment{
+		IfIndex:     *req.IfIndex,
+		IfName:      req.IfName,
+		AttachMode:  req.AttachMode,
+		MissVerdict: req.MissVerdict,
+		Channels: types.AttachmentChannels{
+			RXQueueCount: req.Channels.RXQueueCount,
+		},
+		XSK: types.AttachmentXSK{
+			Enabled: req.XSK.Enabled,
+			Queues:  append([]int(nil), req.XSK.Queues...),
+			UMEM: types.AttachmentUMEM{
+				FrameSize:          req.XSK.UMEM.FrameSize,
+				FrameCount:         req.XSK.UMEM.FrameCount,
+				FillRingSize:       req.XSK.UMEM.FillRingSize,
+				CompletionRingSize: req.XSK.UMEM.CompletionRingSize,
+				RXRingSize:         req.XSK.UMEM.RXRingSize,
+				TXRingSize:         req.XSK.UMEM.TXRingSize,
+				TXFrameReserve:     req.XSK.UMEM.TXFrameReserve,
+			},
+		},
+	}, nil
+}
+
+func newAttachmentResponse(item types.Attachment) AttachmentResponse {
+	return AttachmentResponse{
+		IfIndex:     item.IfIndex,
+		IfName:      item.IfName,
+		AttachMode:  item.AttachMode,
+		Enabled:     item.Enabled,
+		MissVerdict: item.MissVerdict,
+		Channels: AttachmentChannelsBody{
+			RXQueueCount:    item.Channels.RXQueueCount,
+			MaxRXQueueCount: item.Channels.MaxRXQueueCount,
+		},
+		XSK: AttachmentXSKBody{
+			Enabled: item.XSK.Enabled,
+			Queues:  append([]int(nil), item.XSK.Queues...),
+			UMEM: AttachmentUMEMBody{
+				FrameSize:          item.XSK.UMEM.FrameSize,
+				FrameCount:         item.XSK.UMEM.FrameCount,
+				FillRingSize:       item.XSK.UMEM.FillRingSize,
+				CompletionRingSize: item.XSK.UMEM.CompletionRingSize,
+				RXRingSize:         item.XSK.UMEM.RXRingSize,
+				TXRingSize:         item.XSK.UMEM.TXRingSize,
+				TXFrameReserve:     item.XSK.UMEM.TXFrameReserve,
+			},
+		},
+		Runtime: AttachmentRuntimeBody{
+			ProgramID: item.Runtime.ProgramID,
+		},
+	}
+}
+
+func newAttachmentResponses(items []types.Attachment) []AttachmentResponse {
+	if items == nil {
+		return []AttachmentResponse{}
+	}
+	out := make([]AttachmentResponse, 0, len(items))
+	for _, item := range items {
+		out = append(out, newAttachmentResponse(item))
 	}
 	return out
 }

@@ -12,6 +12,30 @@ func (NoopRuntime) AttachmentCount(ctx context.Context) (int, error) {
 	return 0, nil
 }
 
+func (NoopRuntime) ListAttachments(ctx context.Context) ([]types.Attachment, error) {
+	return nil, nil
+}
+
+func (NoopRuntime) GetAttachment(ctx context.Context, ifindex int) (types.Attachment, error) {
+	return types.Attachment{}, attachmentNotFound(ifindex)
+}
+
+func (NoopRuntime) ValidateAttachment(ctx context.Context, attachment types.Attachment) (types.Attachment, error) {
+	return normalizeAttachment(attachment)
+}
+
+func (NoopRuntime) CreateAttachment(ctx context.Context, attachment types.Attachment) (types.Attachment, error) {
+	return normalizeAttachment(attachment)
+}
+
+func (NoopRuntime) SetAttachmentEnabled(ctx context.Context, ifindex int, enabled bool) (types.Attachment, error) {
+	return types.Attachment{}, attachmentNotFound(ifindex)
+}
+
+func (NoopRuntime) DeleteAttachment(ctx context.Context, ifindex int) error {
+	return attachmentNotFound(ifindex)
+}
+
 func (NoopRuntime) RulesetVersion(ctx context.Context) (uint64, error) {
 	return 0, nil
 }

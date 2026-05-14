@@ -43,12 +43,13 @@ func listenAddrFromEnv() string {
 func run(ctx context.Context, listenAddr string) error {
 	runtime := service.NewInMemoryRuntime()
 	statusService := service.NewStatusServiceWithRuntime(runtime.RuntimeDeps())
+	attachmentService := service.NewAttachmentService(runtime)
 	rulesetService := service.NewRulesetService(runtime)
 	responseService := service.NewResponseService(runtime)
 	dispatchService := service.NewDispatchService(runtime)
 	srv := &http.Server{
 		Addr:    listenAddr,
-		Handler: api.NewRouter(statusService, rulesetService, responseService, dispatchService),
+		Handler: api.NewRouter(statusService, rulesetService, attachmentService, responseService, dispatchService),
 	}
 
 	errCh := make(chan error, 1)

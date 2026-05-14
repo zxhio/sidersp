@@ -46,5 +46,15 @@ func writeAPIError(c *gin.Context, err error) {
 		writeProblem(c, http.StatusBadRequest, ErrorCodeValidationFailed, "Validation failed", validationErr.Detail)
 		return
 	}
+	var notFoundErr types.NotFoundError
+	if errors.As(err, &notFoundErr) {
+		writeProblem(c, http.StatusNotFound, ErrorCodeNotFound, "Not found", notFoundErr.Detail)
+		return
+	}
+	var conflictErr types.ConflictError
+	if errors.As(err, &conflictErr) {
+		writeProblem(c, http.StatusConflict, ErrorCodeConflict, "Conflict", conflictErr.Detail)
+		return
+	}
 	writeInternalError(c, err.Error())
 }

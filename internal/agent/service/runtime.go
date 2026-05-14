@@ -10,6 +10,16 @@ type AttachmentRuntime interface {
 	AttachmentCount(ctx context.Context) (int, error)
 }
 
+type AttachmentConfigRuntime interface {
+	AttachmentRuntime
+	ListAttachments(ctx context.Context) ([]types.Attachment, error)
+	GetAttachment(ctx context.Context, ifindex int) (types.Attachment, error)
+	ValidateAttachment(ctx context.Context, attachment types.Attachment) (types.Attachment, error)
+	CreateAttachment(ctx context.Context, attachment types.Attachment) (types.Attachment, error)
+	SetAttachmentEnabled(ctx context.Context, ifindex int, enabled bool) (types.Attachment, error)
+	DeleteAttachment(ctx context.Context, ifindex int) error
+}
+
 type RulesetStatusRuntime interface {
 	RulesetVersion(ctx context.Context) (uint64, error)
 }
