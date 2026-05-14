@@ -133,6 +133,30 @@ module.NewService(opt)
 * lifecycle boundary behavior
 * error handling at important boundaries
 
+### Test scope cleanup
+
+Keep tests that protect:
+
+* rule semantics
+* ruleset load, normalize, sort, and validation
+* dataplane snapshot, apply, and rollback behavior
+* BPF constants, stats, event ABI, and packet matching
+* packet-path benchmarks
+* meaningful failure boundaries
+
+Prune or reduce tests that only cover:
+
+* process start/stop smoke paths
+* broad API CRUD or status-code matrices
+* config schema permutations
+* constructors and field assignments
+* log strings
+* private helper implementation details
+
+If a low-level-looking API, config, or lifecycle test protects a real boundary,
+keep the boundary and move it closer to the owning service when needed. For
+example, failed rule apply must not mutate the active ruleset.
+
 ### Avoid testing
 
 * simple constructors
