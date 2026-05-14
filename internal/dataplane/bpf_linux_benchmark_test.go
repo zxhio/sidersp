@@ -33,8 +33,8 @@ func BenchmarkBPFKernelTCPReset(b *testing.B) {
 	defer reader.Close()
 	defer objs.Close()
 
-	beforeTX := readStat(b, objs, statXDPTX)
-	beforeMatch := readStat(b, objs, statMatchedRules)
+	beforeTX := readStat(b, objs, statKernelResponseXDPTXPackets)
+	beforeMatch := readStat(b, objs, statMatchHitPackets)
 
 	b.SetBytes(int64(len(benchmarkKernelTCPResetPacket)))
 	b.ReportAllocs()
@@ -54,11 +54,11 @@ func BenchmarkBPFKernelTCPReset(b *testing.B) {
 	b.ReportMetric(float64(b.N)/elapsed.Seconds(), "pps")
 	b.ReportMetric(float64(len(benchmarkKernelTCPResetPacket)*8*b.N)/elapsed.Seconds()/1e9, "gbps")
 
-	if got := readStat(b, objs, statXDPTX) - beforeTX; got != uint64(b.N) {
-		b.Fatalf("xdp_tx delta = %d, want %d", got, b.N)
+	if got := readStat(b, objs, statKernelResponseXDPTXPackets) - beforeTX; got != uint64(b.N) {
+		b.Fatalf("kernel_response_xdp_tx_packets delta = %d, want %d", got, b.N)
 	}
-	if got := readStat(b, objs, statMatchedRules) - beforeMatch; got != uint64(b.N) {
-		b.Fatalf("matched_rules delta = %d, want %d", got, b.N)
+	if got := readStat(b, objs, statMatchHitPackets) - beforeMatch; got != uint64(b.N) {
+		b.Fatalf("match_hit_packets delta = %d, want %d", got, b.N)
 	}
 }
 

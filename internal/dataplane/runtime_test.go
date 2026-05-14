@@ -417,57 +417,78 @@ func TestKernelStatsFields(t *testing.T) {
 	t.Parallel()
 
 	fields := kernelStats{
-		RXPackets:      10,
-		ParseFailed:    2,
-		RuleCandidates: 8,
-		MatchedRules:   4,
-		RingbufDropped: 1,
+		IngressPackets:                10,
+		ParseOKPackets:                8,
+		ParseErrorPackets:             2,
+		MatchHitPackets:               4,
+		MatchMissPackets:              3,
+		KernelResponsePackets:         4,
+		KernelResponseXDPTXPackets:    1,
+		KernelResponseRedirectPackets: 2,
+		KernelResponseErrorPackets:    1,
+		XSKRedirectPackets:            5,
+		XSKRedirectErrorPackets:       6,
+		EventDroppedPackets:           7,
+		DiagRuleCandidates:            8,
+		DiagRedirectFailed:            9,
+		DiagFibLookupFailed:           10,
+		DiagXSKMetaFailed:             11,
+		DiagXSKMapRedirectFailed:      12,
 	}.fields()
 
-	if got := fields["rx_packets"]; got != uint64(10) {
-		t.Fatalf("rx_packets = %v, want %d", got, 10)
+	if got := fields["ingress_packets"]; got != uint64(10) {
+		t.Fatalf("ingress_packets = %v, want %d", got, 10)
 	}
-	if got := fields["parse_failed"]; got != uint64(2) {
-		t.Fatalf("parse_failed = %v, want %d", got, 2)
+	if got := fields["parse_ok_packets"]; got != uint64(8) {
+		t.Fatalf("parse_ok_packets = %v, want %d", got, 8)
 	}
-	if got := fields["rule_candidates"]; got != uint64(8) {
-		t.Fatalf("rule_candidates = %v, want %d", got, 8)
+	if got := fields["parse_error_packets"]; got != uint64(2) {
+		t.Fatalf("parse_error_packets = %v, want %d", got, 2)
 	}
-	if got := fields["matched_rules"]; got != uint64(4) {
-		t.Fatalf("matched_rules = %v, want %d", got, 4)
+	if got := fields["match_hit_packets"]; got != uint64(4) {
+		t.Fatalf("match_hit_packets = %v, want %d", got, 4)
 	}
-	if got := fields["ringbuf_dropped"]; got != uint64(1) {
-		t.Fatalf("ringbuf_dropped = %v, want %d", got, 1)
+	if got := fields["match_miss_packets"]; got != uint64(3) {
+		t.Fatalf("match_miss_packets = %v, want %d", got, 3)
 	}
-	if got := fields["xdp_tx"]; got != uint64(0) {
-		t.Fatalf("xdp_tx = %v, want %d", got, 0)
+	if got := fields["kernel_response_packets"]; got != uint64(4) {
+		t.Fatalf("kernel_response_packets = %v, want %d", got, 4)
 	}
-	if got := fields["xsk_redirected"]; got != uint64(0) {
-		t.Fatalf("xsk_redirected = %v, want %d", got, 0)
+	if got := fields["kernel_response_xdp_tx_packets"]; got != uint64(1) {
+		t.Fatalf("kernel_response_xdp_tx_packets = %v, want %d", got, 1)
 	}
-	if got := fields["tx_failed"]; got != uint64(0) {
-		t.Fatalf("tx_failed = %v, want %d", got, 0)
+	if got := fields["kernel_response_redirect_packets"]; got != uint64(2) {
+		t.Fatalf("kernel_response_redirect_packets = %v, want %d", got, 2)
 	}
-	if got := fields["xsk_redirect_failed"]; got != uint64(0) {
-		t.Fatalf("xsk_redirect_failed = %v, want %d", got, 0)
+	if got := fields["kernel_response_error_packets"]; got != uint64(1) {
+		t.Fatalf("kernel_response_error_packets = %v, want %d", got, 1)
 	}
-	if got := fields["xsk_meta_failed"]; got != uint64(0) {
-		t.Fatalf("xsk_meta_failed = %v, want %d", got, 0)
+	if got := fields["xsk_redirect_packets"]; got != uint64(5) {
+		t.Fatalf("xsk_redirect_packets = %v, want %d", got, 5)
 	}
-	if got := fields["xsk_map_redirect_failed"]; got != uint64(0) {
-		t.Fatalf("xsk_map_redirect_failed = %v, want %d", got, 0)
+	if got := fields["xsk_redirect_error_packets"]; got != uint64(6) {
+		t.Fatalf("xsk_redirect_error_packets = %v, want %d", got, 6)
 	}
-	if got := fields["redirect_tx"]; got != uint64(0) {
-		t.Fatalf("redirect_tx = %v, want %d", got, 0)
+	if got := fields["event_dropped_packets"]; got != uint64(7) {
+		t.Fatalf("event_dropped_packets = %v, want %d", got, 7)
 	}
-	if got := fields["redirect_failed"]; got != uint64(0) {
-		t.Fatalf("redirect_failed = %v, want %d", got, 0)
+	if got := fields["diag_rule_candidates"]; got != uint64(8) {
+		t.Fatalf("diag_rule_candidates = %v, want %d", got, 8)
 	}
-	if got := fields["fib_lookup_failed"]; got != uint64(0) {
-		t.Fatalf("fib_lookup_failed = %v, want %d", got, 0)
+	if got := fields["diag_redirect_failed"]; got != uint64(9) {
+		t.Fatalf("diag_redirect_failed = %v, want %d", got, 9)
 	}
-	if len(fields) != 14 {
-		t.Fatalf("len(fields) = %d, want %d", len(fields), 14)
+	if got := fields["diag_fib_lookup_failed"]; got != uint64(10) {
+		t.Fatalf("diag_fib_lookup_failed = %v, want %d", got, 10)
+	}
+	if got := fields["diag_xsk_meta_failed"]; got != uint64(11) {
+		t.Fatalf("diag_xsk_meta_failed = %v, want %d", got, 11)
+	}
+	if got := fields["diag_xsk_map_redirect_failed"]; got != uint64(12) {
+		t.Fatalf("diag_xsk_map_redirect_failed = %v, want %d", got, 12)
+	}
+	if len(fields) != 17 {
+		t.Fatalf("len(fields) = %d, want %d", len(fields), 17)
 	}
 }
 

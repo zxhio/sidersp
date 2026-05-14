@@ -244,6 +244,17 @@ counter 语义以 `stats.md` 的返回字段和累加位置为基础。
 | 10 | `STAT_XSK_REDIRECT_ERROR_PACKETS` | `xsk_redirect.error_packets` | XSK metadata 写入失败、XSK map redirect 失败或提交失败时 |
 | 11 | `STAT_EVENT_DROPPED_PACKETS` | `errors.xdp_packets` 的输入 | ringbuf reserve 失败或事件丢弃时 |
 
+diagnostic counters 使用同一个 `stats_map`，从 primary counters 后继续编号。它们不进入默认
+stats API 返回结构，只能作为显式 diagnostics/debug 返回的输入。
+
+| index | name | 对齐字段 | 累加位置 |
+|---:|---|---|---|
+| 12 | `STAT_DIAG_RULE_CANDIDATES` | diagnostics/debug | 索引预筛选后存在候选规则，或 flow cache 命中时 |
+| 13 | `STAT_DIAG_REDIRECT_FAILED` | diagnostics/debug | kernel response redirect 配置、出口解析或帧改写失败时 |
+| 14 | `STAT_DIAG_FIB_LOOKUP_FAILED` | diagnostics/debug | kernel response redirect FIB lookup 失败时 |
+| 15 | `STAT_DIAG_XSK_META_FAILED` | diagnostics/debug | XSK metadata 申请或写入失败时 |
+| 16 | `STAT_DIAG_XSK_MAP_REDIRECT_FAILED` | diagnostics/debug | `bpf_redirect_map()` 未返回 `XDP_REDIRECT` 时 |
+
 不进入 BPF `stats_map`：
 
 - `userspace_response.*`：由 userspace response runtime 累加。

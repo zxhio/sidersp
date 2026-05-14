@@ -45,23 +45,26 @@ const (
 )
 
 const (
-	statRXPackets uint32 = iota
-	statParseFailed
-	statRuleCandidates
-	statMatchedRules
-	statRingbufDropped
-	statXDPTX
-	statXskTX
-	statTXFailed
-	statXskFailed
-	statXskMetaFailed
-	statXskRedirectFailed
-	statRedirectTX
-	statRedirectFailed
-	statFibLookupFailed
+	statIngressPackets uint32 = iota
+	statParseOKPackets
+	statParseErrorPackets
+	statMatchHitPackets
+	statMatchMissPackets
+	statKernelResponsePackets
+	statKernelResponseXDPTXPackets
+	statKernelResponseRedirectPackets
+	statKernelResponseErrorPackets
+	statXSKRedirectPackets
+	statXSKRedirectErrorPackets
+	statEventDroppedPackets
+	statDiagRuleCandidates
+	statDiagRedirectFailed
+	statDiagFibLookupFailed
+	statDiagXSKMetaFailed
+	statDiagXSKMapRedirectFailed
 )
 
-const statCount = statFibLookupFailed + 1
+const statCount = statDiagXSKMapRedirectFailed + 1
 
 const (
 	tcpResetTXModeTX uint32 = iota

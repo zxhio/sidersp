@@ -18,23 +18,26 @@ int xdp_sidersp(struct xdp_md *xdp)
     __u32 zero = 0;
     parse_err_t err;
 
-    stat_inc(STAT_RX_PACKETS);
+    stat_inc(STAT_INGRESS_PACKETS);
 
     cfg = bpf_map_lookup_elem(&global_cfg_map, &zero);
 
     err = parse_packet(&ctx, data, data_end);
     if (err != PARSE_OK) {
-        stat_inc(STAT_PARSE_FAILED);
+        stat_inc(STAT_PARSE_ERROR_PACKETS);
         return ingress_failure_verdict(cfg);
     }
+    stat_inc(STAT_PARSE_OK_PACKETS);
     pkt_conds = ctx.conds;
 
-    if (!cfg)
+    if (!cfg) {
+        stat_inc(STAT_MATCH_MISS_PACKETS);
         return ingress_failure_verdict(cfg);
+    }
 
     if (lookup_flow_cache(&ctx, &best_rule)) {
-        stat_inc(STAT_RULE_CANDIDATES);
-        stat_inc(STAT_MATCHED_RULES);
+        stat_inc(STAT_DIAG_RULE_CANDIDATES);
+        stat_inc(STAT_MATCH_HIT_PACKETS);
     } else {
         mask_copy(&candidates, &cfg->all_active_rules);
 
@@ -55,15 +58,19 @@ int xdp_sidersp(struct xdp_md *xdp)
         else
             mask_and(&candidates, &cfg->dst_prefix_optional_rules);
 
-        if (mask_is_zero(&candidates))
+        if (mask_is_zero(&candidates)) {
+            stat_inc(STAT_MATCH_MISS_PACKETS);
             return ingress_failure_verdict(cfg);
+        }
 
-        stat_inc(STAT_RULE_CANDIDATES);
+        stat_inc(STAT_DIAG_RULE_CANDIDATES);
 
-        if (!pick_best_rule(&candidates, pkt_conds, &best_rule))
+        if (!pick_best_rule(&candidates, pkt_conds, &best_rule)) {
+            stat_inc(STAT_MATCH_MISS_PACKETS);
             return ingress_failure_verdict(cfg);
+        }
 
-        stat_inc(STAT_MATCHED_RULES);
+        stat_inc(STAT_MATCH_HIT_PACKETS);
     }
 
     switch (best_rule.action) {
@@ -84,7 +91,7 @@ int xdp_sidersp(struct xdp_md *xdp)
             return ingress_failure_verdict(cfg);
         redir = redirect_xsk_with_meta(xdp, &best_rule, cfg);
         if (redir == XDP_REDIRECT) {
-            stat_inc(STAT_XSK_TX);
+            stat_inc(STAT_XSK_REDIRECT_PACKETS);
             emit_event(&ctx, &best_rule, pkt_conds, VERDICT_XSK);
             return XDP_REDIRECT;
         }

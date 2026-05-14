@@ -21,7 +21,7 @@ static __always_inline void emit_event(const struct pkt_ctx *ctx,
     struct rule_event *evt = bpf_ringbuf_reserve(&event_ringbuf, sizeof(*evt), 0);
 
     if (!evt) {
-        stat_inc(STAT_RINGBUF_DROPPED);
+        stat_inc(STAT_EVENT_DROPPED_PACKETS);
         return;
     }
 
@@ -54,6 +54,7 @@ static __always_inline int run_kernel_tx_action(struct xdp_md *xdp,
     __u8 icmp_code;
     int ret;
 
+    stat_inc(STAT_KERNEL_RESPONSE_PACKETS);
     if (rule->action == ACTION_TCP_RESET) {
         if (ctx->tcp_flags & TCP_FLAG_RST)
             return XDP_PASS;
@@ -69,13 +70,14 @@ static __always_inline int run_kernel_tx_action(struct xdp_md *xdp,
 
     if (ret == XDP_TX || ret == XDP_REDIRECT) {
         store_flow_cache(ctx, rule);
-        stat_inc(ret == XDP_TX ? STAT_XDP_TX : STAT_REDIRECT_TX);
+        stat_inc(ret == XDP_TX ? STAT_KERNEL_RESPONSE_XDP_TX_PACKETS :
+                                 STAT_KERNEL_RESPONSE_REDIRECT_PACKETS);
         emit_event(ctx, rule, pkt_conds,
                    ret == XDP_TX ? VERDICT_TX : VERDICT_REDIRECT_TX);
         return ret;
     }
 
-    stat_inc(STAT_TX_FAILED);
+    stat_inc(STAT_KERNEL_RESPONSE_ERROR_PACKETS);
     if (ret == XDP_DROP)
         return XDP_DROP;
     return XDP_PASS;
@@ -206,7 +208,7 @@ static __always_inline int lookup_tx_fib(struct xdp_md *xdp,
     int fib_ret;
 
     if (!cfg || cfg->tcp_reset_egress_ifindex == 0) {
-        stat_inc(STAT_REDIRECT_FAILED);
+        stat_inc(STAT_DIAG_REDIRECT_FAILED);
         return -1;
     }
 
@@ -220,7 +222,7 @@ static __always_inline int lookup_tx_fib(struct xdp_md *xdp,
 
     fib_ret = bpf_fib_lookup(xdp, fib, sizeof(*fib), BPF_FIB_LOOKUP_OUTPUT);
     if (fib_ret != BPF_FIB_LKUP_RET_SUCCESS) {
-        stat_inc(STAT_FIB_LOOKUP_FAILED);
+        stat_inc(STAT_DIAG_FIB_LOOKUP_FAILED);
         return -1;
     }
 
@@ -242,7 +244,7 @@ static __always_inline int redirect_kernel_tx(struct xdp_md *xdp,
     if (ctx->vlan_id != VLAN_ID_NONE &&
         cfg->tcp_reset_vlan_mode == TCP_RESET_VLAN_ACCESS) {
         if (strip_vlan_header(xdp)) {
-            stat_inc(STAT_REDIRECT_FAILED);
+            stat_inc(STAT_DIAG_REDIRECT_FAILED);
             return tx_mutated_failure();
         }
     }
@@ -251,14 +253,14 @@ static __always_inline int redirect_kernel_tx(struct xdp_md *xdp,
     data_end = (void *)(long)xdp->data_end;
     eth = data;
     if ((void *)(eth + 1) > data_end) {
-        stat_inc(STAT_REDIRECT_FAILED);
+        stat_inc(STAT_DIAG_REDIRECT_FAILED);
         return tx_mutated_failure();
     }
 
     if (bpf_ntohs(eth->h_proto) == ETH_P_8021Q) {
         vlan = (void *)(eth + 1);
         if ((void *)(vlan + 1) > data_end) {
-            stat_inc(STAT_REDIRECT_FAILED);
+            stat_inc(STAT_DIAG_REDIRECT_FAILED);
             return tx_mutated_failure();
         }
         l3_off = sizeof(*eth) + sizeof(*vlan);
@@ -268,7 +270,7 @@ static __always_inline int redirect_kernel_tx(struct xdp_md *xdp,
 
     ip = data + l3_off;
     if ((void *)(ip + 1) > data_end) {
-        stat_inc(STAT_REDIRECT_FAILED);
+        stat_inc(STAT_DIAG_REDIRECT_FAILED);
         return tx_mutated_failure();
     }
 
@@ -376,7 +378,7 @@ static __always_inline int do_tcp_reset_tx(struct xdp_md *xdp,
         else
             ip = tx.data + sizeof(struct ethhdr);
         if ((void *)(ip + 1) > tx.data_end) {
-            stat_inc(STAT_REDIRECT_FAILED);
+            stat_inc(STAT_DIAG_REDIRECT_FAILED);
             return tx_failure_verdict(tx.tx_cfg);
         }
         if (lookup_tx_fib(xdp, tx.tx_cfg, ip->tos, IPPROTO_TCP,
@@ -512,8 +514,8 @@ static __always_inline int redirect_xsk_with_meta(struct xdp_md *xdp,
     int fallback = ingress_failure_verdict(cfg);
 
     if (bpf_xdp_adjust_meta(xdp, -(int)sizeof(*meta))) {
-        stat_inc(STAT_XSK_META_FAILED);
-        stat_inc(STAT_XSK_FAILED);
+        stat_inc(STAT_XSK_REDIRECT_ERROR_PACKETS);
+        stat_inc(STAT_DIAG_XSK_META_FAILED);
         return fallback;
     }
 
@@ -521,8 +523,8 @@ static __always_inline int redirect_xsk_with_meta(struct xdp_md *xdp,
     data_meta = (void *)(long)xdp->data_meta;
     meta = data_meta;
     if ((void *)(meta + 1) > data) {
-        stat_inc(STAT_XSK_META_FAILED);
-        stat_inc(STAT_XSK_FAILED);
+        stat_inc(STAT_XSK_REDIRECT_ERROR_PACKETS);
+        stat_inc(STAT_DIAG_XSK_META_FAILED);
         return fallback;
     }
 
@@ -534,8 +536,8 @@ static __always_inline int redirect_xsk_with_meta(struct xdp_md *xdp,
     if (redir == XDP_REDIRECT)
         return XDP_REDIRECT;
 
-    stat_inc(STAT_XSK_REDIRECT_FAILED);
-    stat_inc(STAT_XSK_FAILED);
+    stat_inc(STAT_XSK_REDIRECT_ERROR_PACKETS);
+    stat_inc(STAT_DIAG_XSK_MAP_REDIRECT_FAILED);
     return fallback;
 }
 

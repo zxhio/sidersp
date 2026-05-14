@@ -552,9 +552,9 @@ func toRefPacket(srcIP, dstIP netip.Addr, srcPort, dstPort uint16, proto string,
 // Category 1: Parser — parse correctness, safe pass, truncated packets
 // ---------------------------------------------------------------------------
 //
-// All cases: XDP returns PASS, rx_packets incremented.
-// Parse failures: parse_failed incremented, no rule match, no ringbuf event.
-// Parse successes: parse_failed unchanged.
+// All cases: XDP returns PASS, ingress_packets incremented.
+// Parse failures: parse_error_packets incremented, no rule match, no ringbuf event.
+// Parse successes: parse_error_packets unchanged.
 
 func TestBPFParserPassAndParseFailures(t *testing.T) {
 	requireBPFTestEnv(t)
@@ -593,32 +593,32 @@ func TestBPFParserPassAndParseFailures(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			beforeRx := readStat(t, objs, statRXPackets)
-			beforePF := readStat(t, objs, statParseFailed)
-			beforeMatch := readStat(t, objs, statMatchedRules)
+			beforeRx := readStat(t, objs, statIngressPackets)
+			beforePF := readStat(t, objs, statParseErrorPackets)
+			beforeMatch := readStat(t, objs, statMatchHitPackets)
 
 			ret, _, err := objs.XdpSidersp.Test(tc.pkt)
 			require.NoError(t, err, "prog.Test()")
 
-			afterRx := readStat(t, objs, statRXPackets)
-			afterPF := readStat(t, objs, statParseFailed)
-			afterMatch := readStat(t, objs, statMatchedRules)
+			afterRx := readStat(t, objs, statIngressPackets)
+			afterPF := readStat(t, objs, statParseErrorPackets)
+			afterMatch := readStat(t, objs, statMatchHitPackets)
 
 			if afterMatch > beforeMatch {
 				require.Equal(t, uint32(xdpTX), ret, "XDP retval")
 			} else {
 				require.Equal(t, uint32(xdpPass), ret, "XDP retval")
 			}
-			require.Greater(t, afterRx, beforeRx, "rx_packets not incremented")
+			require.Greater(t, afterRx, beforeRx, "ingress_packets not incremented")
 
 			if tc.wantParseFail {
-				require.Greater(t, afterPF, beforePF, "parse_failed not incremented for malformed packet")
+				require.Greater(t, afterPF, beforePF, "parse_error_packets not incremented for malformed packet")
 				require.LessOrEqual(t, afterMatch, beforeMatch, "parse-failed packet should not match any rule")
 				// No ringbuf event for parse failures.
 				_, found := tryReadEvent(t, reader)
 				require.False(t, found, "unexpected ringbuf event for parse-failed packet")
 			} else {
-				require.Equal(t, beforePF, afterPF, "parse_failed")
+				require.Equal(t, beforePF, afterPF, "parse_error_packets")
 				// If the packet happened to match a rule, drain the event.
 				if afterMatch > beforeMatch {
 					mustReadEvent(t, reader)
@@ -710,10 +710,10 @@ func TestBPFRuleMatchMatrix(t *testing.T) {
 			refPkt := toRefPacket(srcIP, dstIP, tc.srcPort, tc.dstPort, tc.proto, refVLAN)
 			want := refMatch(testRules, refPkt)
 
-			beforeMatch := readStat(t, objs, statMatchedRules)
+			beforeMatch := readStat(t, objs, statMatchHitPackets)
 			ret, _, err := objs.XdpSidersp.Test(pkt)
 			require.NoError(t, err, "prog.Test()")
-			afterMatch := readStat(t, objs, statMatchedRules)
+			afterMatch := readStat(t, objs, statMatchHitPackets)
 
 			bpfMatched := afterMatch > beforeMatch
 			require.Equal(t, wantXDPReturn(bpfMatched), ret, "XDP retval")
@@ -797,12 +797,12 @@ func TestBPFPrioritySelection(t *testing.T) {
 			require.Equal(t, tc.wantRuleID, want.RuleID, "reference matcher ruleID")
 
 			pkt := buildEthernetPkt(srcIP, dstIP, tc.srcPort, tc.dstPort, "tcp_syn")
-			beforeMatch := readStat(t, objs, statMatchedRules)
+			beforeMatch := readStat(t, objs, statMatchHitPackets)
 
 			ret, _, err := objs.XdpSidersp.Test(pkt)
 			require.NoError(t, err, "prog.Test()")
 
-			afterMatch := readStat(t, objs, statMatchedRules)
+			afterMatch := readStat(t, objs, statMatchHitPackets)
 			require.Equal(t, uint32(xdpTX), ret, "XDP retval")
 			require.Greater(t, afterMatch, beforeMatch, "packet should match at least one rule")
 
@@ -875,17 +875,17 @@ func TestBPFEventEncoding(t *testing.T) {
 		assert.Equal(t, wantConds, evt.PktConds, "pkt_conds")
 	})
 
-	// Case 3: No-match → no ringbuf event, matched_rules unchanged.
+	// Case 3: No-match → no ringbuf event, match_hit_packets unchanged.
 	t.Run("no_match_no_event", func(t *testing.T) {
 		pkt := buildEthernetPkt(ip("192.168.1.1"), ip("192.168.2.2"), 12345, 9999, "tcp_syn")
 
-		beforeMatch := readStat(t, objs, statMatchedRules)
+		beforeMatch := readStat(t, objs, statMatchHitPackets)
 		ret, _, err := objs.XdpSidersp.Test(pkt)
 		require.NoError(t, err, "prog.Test()")
-		afterMatch := readStat(t, objs, statMatchedRules)
+		afterMatch := readStat(t, objs, statMatchHitPackets)
 
 		require.Equal(t, uint32(xdpPass), ret, "XDP retval")
-		assert.LessOrEqual(t, afterMatch, beforeMatch, "matched_rules should not increment for no-match packet")
+		assert.LessOrEqual(t, afterMatch, beforeMatch, "match_hit_packets should not increment for no-match packet")
 		_, found := tryReadEvent(t, reader)
 		require.False(t, found, "unexpected ringbuf event for no-match packet")
 	})
@@ -939,10 +939,10 @@ func TestBPFBoundaryPackets(t *testing.T) {
 			refPkt := toRefPacket(srcIP, dstIP, tc.srcPort, tc.dstPort, "tcp_syn", vlanNone)
 			want := refMatch(testRules, refPkt)
 
-			beforeMatch := readStat(t, objs, statMatchedRules)
+			beforeMatch := readStat(t, objs, statMatchHitPackets)
 			ret, _, err := objs.XdpSidersp.Test(pkt)
 			require.NoError(t, err, "prog.Test()")
-			afterMatch := readStat(t, objs, statMatchedRules)
+			afterMatch := readStat(t, objs, statMatchHitPackets)
 
 			bpfMatched := afterMatch > beforeMatch
 			require.Equal(t, wantXDPReturn(bpfMatched), ret, "XDP retval")
@@ -995,15 +995,15 @@ func TestBPFTCPResetTXSemantics(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			pkt := buildTCPPkt(ip("10.0.1.100"), ip("10.0.5.2"), 54321, 80, tc.flags, tc.seq, tc.ack, tc.payload)
-			beforeTX := readStat(t, objs, statXDPTX)
-			beforeFail := readStat(t, objs, statTXFailed)
+			beforeTX := readStat(t, objs, statKernelResponseXDPTXPackets)
+			beforeFail := readStat(t, objs, statKernelResponseErrorPackets)
 
 			ret, out, err := objs.XdpSidersp.Test(pkt)
 			require.NoError(t, err, "prog.Test()")
 
 			require.Equal(t, uint32(xdpTX), ret, "XDP retval")
-			require.Equal(t, beforeTX+1, readStat(t, objs, statXDPTX), "xdp_tx")
-			require.Equal(t, beforeFail, readStat(t, objs, statTXFailed), "tx_failed")
+			require.Equal(t, beforeTX+1, readStat(t, objs, statKernelResponseXDPTXPackets), "kernel_response_xdp_tx_packets")
+			require.Equal(t, beforeFail, readStat(t, objs, statKernelResponseErrorPackets), "kernel_response_error_packets")
 			evt := mustReadEvent(t, reader)
 			require.Equal(t, uint32(2001), evt.RuleID, "event rule_id")
 			require.Equal(t, uint16(actionTCPReset), evt.Action, "event action")
@@ -1014,15 +1014,15 @@ func TestBPFTCPResetTXSemantics(t *testing.T) {
 
 	t.Run("rst_does_not_reply", func(t *testing.T) {
 		pkt := buildTCPPkt(ip("10.0.1.100"), ip("10.0.5.2"), 54321, 80, 0x14, 8000, 9000, nil)
-		beforeTX := readStat(t, objs, statXDPTX)
-		beforeFail := readStat(t, objs, statTXFailed)
+		beforeTX := readStat(t, objs, statKernelResponseXDPTXPackets)
+		beforeFail := readStat(t, objs, statKernelResponseErrorPackets)
 
 		ret, _, err := objs.XdpSidersp.Test(pkt)
 		require.NoError(t, err, "prog.Test()")
 
 		require.Equal(t, uint32(xdpPass), ret, "XDP retval")
-		require.Equal(t, beforeTX, readStat(t, objs, statXDPTX), "xdp_tx")
-		require.Equal(t, beforeFail, readStat(t, objs, statTXFailed), "tx_failed")
+		require.Equal(t, beforeTX, readStat(t, objs, statKernelResponseXDPTXPackets), "kernel_response_xdp_tx_packets")
+		require.Equal(t, beforeFail, readStat(t, objs, statKernelResponseErrorPackets), "kernel_response_error_packets")
 		_, found := tryReadEvent(t, reader)
 		require.False(t, found, "unexpected event for rst input")
 	})
@@ -1035,18 +1035,18 @@ func TestBPFTCPResetTXSemantics(t *testing.T) {
 			TcpResetVlanMode:       tcpResetVLANPreserve,
 			TcpResetFailureVerdict: tcpResetFailurePass,
 		}), "write tx config")
-		beforeTX := readStat(t, objs, statXDPTX)
-		beforeFail := readStat(t, objs, statTXFailed)
-		beforeRedirectFail := readStat(t, objs, statRedirectFailed)
+		beforeTX := readStat(t, objs, statKernelResponseXDPTXPackets)
+		beforeFail := readStat(t, objs, statKernelResponseErrorPackets)
+		beforeRedirectFail := readStat(t, objs, statDiagRedirectFailed)
 
 		ret, out, err := objs.XdpSidersp.Test(pkt)
 		require.NoError(t, err, "prog.Test()")
 
 		require.Equal(t, uint32(xdpPass), ret, "XDP retval")
 		require.Equal(t, pkt, out[:len(pkt)], "packet should not be rewritten before redirect preflight succeeds")
-		require.Equal(t, beforeTX, readStat(t, objs, statXDPTX), "xdp_tx")
-		require.Equal(t, beforeFail+1, readStat(t, objs, statTXFailed), "tx_failed")
-		require.Equal(t, beforeRedirectFail+1, readStat(t, objs, statRedirectFailed), "redirect_failed")
+		require.Equal(t, beforeTX, readStat(t, objs, statKernelResponseXDPTXPackets), "kernel_response_xdp_tx_packets")
+		require.Equal(t, beforeFail+1, readStat(t, objs, statKernelResponseErrorPackets), "kernel_response_error_packets")
+		require.Equal(t, beforeRedirectFail+1, readStat(t, objs, statDiagRedirectFailed), "diag_redirect_failed")
 		_, found := tryReadEvent(t, reader)
 		require.False(t, found, "unexpected event for failed redirect preflight")
 	})
@@ -1074,25 +1074,25 @@ func TestBPFBlockingFlowCacheReplaysCachedAction(t *testing.T) {
 
 	pkt := buildEthernetPkt(ip("10.0.1.100"), ip("10.0.5.2"), 54321, 80, "tcp_syn")
 
-	beforeCandidates := readStat(t, objs, statRuleCandidates)
-	beforeMatch := readStat(t, objs, statMatchedRules)
+	beforeCandidates := readStat(t, objs, statDiagRuleCandidates)
+	beforeMatch := readStat(t, objs, statMatchHitPackets)
 	ret, _, err := objs.XdpSidersp.Test(pkt)
 	require.NoError(t, err, "prog.Test()")
 	require.Equal(t, uint32(xdpTX), ret, "first packet should populate flow cache")
-	require.Equal(t, beforeCandidates+1, readStat(t, objs, statRuleCandidates), "rule_candidates after first packet")
-	require.Equal(t, beforeMatch+1, readStat(t, objs, statMatchedRules), "matched_rules after first packet")
+	require.Equal(t, beforeCandidates+1, readStat(t, objs, statDiagRuleCandidates), "diag_rule_candidates after first packet")
+	require.Equal(t, beforeMatch+1, readStat(t, objs, statMatchHitPackets), "match_hit_packets after first packet")
 	evt := mustReadEvent(t, reader)
 	require.Equal(t, uint32(2101), evt.RuleID, "first packet event rule_id")
 
 	require.NoError(t, writeGlobalConfig(objs.GlobalCfgMap, siderspGlobalCfg{}), "clear global config after cache fill")
 
-	beforeCandidates = readStat(t, objs, statRuleCandidates)
-	beforeMatch = readStat(t, objs, statMatchedRules)
+	beforeCandidates = readStat(t, objs, statDiagRuleCandidates)
+	beforeMatch = readStat(t, objs, statMatchHitPackets)
 	ret, _, err = objs.XdpSidersp.Test(pkt)
 	require.NoError(t, err, "prog.Test()")
 	require.Equal(t, uint32(xdpTX), ret, "cached packet should bypass cleared rule config")
-	require.Equal(t, beforeCandidates+1, readStat(t, objs, statRuleCandidates), "rule_candidates after cache hit")
-	require.Equal(t, beforeMatch+1, readStat(t, objs, statMatchedRules), "matched_rules after cache hit")
+	require.Equal(t, beforeCandidates+1, readStat(t, objs, statDiagRuleCandidates), "diag_rule_candidates after cache hit")
+	require.Equal(t, beforeMatch+1, readStat(t, objs, statMatchHitPackets), "match_hit_packets after cache hit")
 	evt = mustReadEvent(t, reader)
 	require.Equal(t, uint32(2101), evt.RuleID, "cache-hit event rule_id")
 }
@@ -1109,10 +1109,10 @@ func TestBPFEmptyRules(t *testing.T) {
 
 	pkt := buildEthernetPkt(ip("10.0.1.1"), ip("10.0.5.2"), 40000, 80, "tcp_syn")
 
-	beforeMatch := readStat(t, objs, statMatchedRules)
+	beforeMatch := readStat(t, objs, statMatchHitPackets)
 	ret, _, err := objs.XdpSidersp.Test(pkt)
 	require.NoError(t, err, "prog.Test()")
-	afterMatch := readStat(t, objs, statMatchedRules)
+	afterMatch := readStat(t, objs, statMatchHitPackets)
 
 	require.Equal(t, uint32(xdpPass), ret, "XDP retval")
 	require.LessOrEqual(t, afterMatch, beforeMatch, "empty rule set should not match any packet")

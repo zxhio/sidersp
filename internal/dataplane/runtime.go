@@ -353,79 +353,40 @@ func (r *Runtime) logKernelStats(ctx context.Context, interval time.Duration) {
 }
 
 func (r *Runtime) readKernelStats() (kernelStats, error) {
-	rxPackets, err := readPerCPUCounter(r.objs.StatsMap, statRXPackets)
-	if err != nil {
-		return kernelStats{}, fmt.Errorf("lookup rx_packets: %w", err)
-	}
-	parseFailed, err := readPerCPUCounter(r.objs.StatsMap, statParseFailed)
-	if err != nil {
-		return kernelStats{}, fmt.Errorf("lookup parse_failed: %w", err)
-	}
-	ruleCandidates, err := readPerCPUCounter(r.objs.StatsMap, statRuleCandidates)
-	if err != nil {
-		return kernelStats{}, fmt.Errorf("lookup rule_candidates: %w", err)
-	}
-	matchedRules, err := readPerCPUCounter(r.objs.StatsMap, statMatchedRules)
-	if err != nil {
-		return kernelStats{}, fmt.Errorf("lookup matched_rules: %w", err)
-	}
-	ringbufDropped, err := readPerCPUCounter(r.objs.StatsMap, statRingbufDropped)
-	if err != nil {
-		return kernelStats{}, fmt.Errorf("lookup ringbuf_dropped: %w", err)
-	}
-	xdpTX, err := readPerCPUCounter(r.objs.StatsMap, statXDPTX)
-	if err != nil {
-		return kernelStats{}, fmt.Errorf("lookup xdp_tx: %w", err)
-	}
-	xskRedirected, err := readPerCPUCounter(r.objs.StatsMap, statXskTX)
-	if err != nil {
-		return kernelStats{}, fmt.Errorf("lookup xsk_redirected: %w", err)
-	}
-	txFailed, err := readPerCPUCounter(r.objs.StatsMap, statTXFailed)
-	if err != nil {
-		return kernelStats{}, fmt.Errorf("lookup tx_failed: %w", err)
-	}
-	xskRedirectFailed, err := readPerCPUCounter(r.objs.StatsMap, statXskFailed)
-	if err != nil {
-		return kernelStats{}, fmt.Errorf("lookup xsk_redirect_failed: %w", err)
-	}
-	xskMetaFailed, err := readPerCPUCounter(r.objs.StatsMap, statXskMetaFailed)
-	if err != nil {
-		return kernelStats{}, fmt.Errorf("lookup xsk_meta_failed: %w", err)
-	}
-	xskMapRedirectFailed, err := readPerCPUCounter(r.objs.StatsMap, statXskRedirectFailed)
-	if err != nil {
-		return kernelStats{}, fmt.Errorf("lookup xsk_map_redirect_failed: %w", err)
-	}
-	redirectTX, err := readPerCPUCounter(r.objs.StatsMap, statRedirectTX)
-	if err != nil {
-		return kernelStats{}, fmt.Errorf("lookup redirect_tx: %w", err)
-	}
-	redirectFailed, err := readPerCPUCounter(r.objs.StatsMap, statRedirectFailed)
-	if err != nil {
-		return kernelStats{}, fmt.Errorf("lookup redirect_failed: %w", err)
-	}
-	fibLookupFailed, err := readPerCPUCounter(r.objs.StatsMap, statFibLookupFailed)
-	if err != nil {
-		return kernelStats{}, fmt.Errorf("lookup fib_lookup_failed: %w", err)
+	var stats kernelStats
+	reads := []struct {
+		name string
+		idx  uint32
+		dst  *uint64
+	}{
+		{"ingress_packets", statIngressPackets, &stats.IngressPackets},
+		{"parse_ok_packets", statParseOKPackets, &stats.ParseOKPackets},
+		{"parse_error_packets", statParseErrorPackets, &stats.ParseErrorPackets},
+		{"match_hit_packets", statMatchHitPackets, &stats.MatchHitPackets},
+		{"match_miss_packets", statMatchMissPackets, &stats.MatchMissPackets},
+		{"kernel_response_packets", statKernelResponsePackets, &stats.KernelResponsePackets},
+		{"kernel_response_xdp_tx_packets", statKernelResponseXDPTXPackets, &stats.KernelResponseXDPTXPackets},
+		{"kernel_response_redirect_packets", statKernelResponseRedirectPackets, &stats.KernelResponseRedirectPackets},
+		{"kernel_response_error_packets", statKernelResponseErrorPackets, &stats.KernelResponseErrorPackets},
+		{"xsk_redirect_packets", statXSKRedirectPackets, &stats.XSKRedirectPackets},
+		{"xsk_redirect_error_packets", statXSKRedirectErrorPackets, &stats.XSKRedirectErrorPackets},
+		{"event_dropped_packets", statEventDroppedPackets, &stats.EventDroppedPackets},
+		{"diag_rule_candidates", statDiagRuleCandidates, &stats.DiagRuleCandidates},
+		{"diag_redirect_failed", statDiagRedirectFailed, &stats.DiagRedirectFailed},
+		{"diag_fib_lookup_failed", statDiagFibLookupFailed, &stats.DiagFibLookupFailed},
+		{"diag_xsk_meta_failed", statDiagXSKMetaFailed, &stats.DiagXSKMetaFailed},
+		{"diag_xsk_map_redirect_failed", statDiagXSKMapRedirectFailed, &stats.DiagXSKMapRedirectFailed},
 	}
 
-	return kernelStats{
-		RXPackets:            rxPackets,
-		ParseFailed:          parseFailed,
-		RuleCandidates:       ruleCandidates,
-		MatchedRules:         matchedRules,
-		RingbufDropped:       ringbufDropped,
-		XDPTX:                xdpTX,
-		TXFailed:             txFailed,
-		XskRedirected:        xskRedirected,
-		XskRedirectFailed:    xskRedirectFailed,
-		XskMetaFailed:        xskMetaFailed,
-		XskMapRedirectFailed: xskMapRedirectFailed,
-		RedirectTX:           redirectTX,
-		RedirectFailed:       redirectFailed,
-		FibLookupFailed:      fibLookupFailed,
-	}, nil
+	for _, read := range reads {
+		value, err := readPerCPUCounter(r.objs.StatsMap, read.idx)
+		if err != nil {
+			return kernelStats{}, fmt.Errorf("lookup %s: %w", read.name, err)
+		}
+		*read.dst = value
+	}
+
+	return stats, nil
 }
 
 func (r *Runtime) ReadStats() (model.DataplaneStats, error) {
@@ -441,21 +402,16 @@ func (r *Runtime) ReadStats() (model.DataplaneStats, error) {
 	r.matchMu.RUnlock()
 
 	return model.DataplaneStats{
-		RXPackets:            stats.RXPackets,
-		ParseFailed:          stats.ParseFailed,
-		RuleCandidates:       stats.RuleCandidates,
-		MatchedRules:         stats.MatchedRules,
-		RuleMatches:          ruleMatches,
-		RingbufDropped:       stats.RingbufDropped,
-		XDPTX:                stats.XDPTX,
-		TXFailed:             stats.TXFailed,
-		XskRedirected:        stats.XskRedirected,
-		XskRedirectFailed:    stats.XskRedirectFailed,
-		XskMetaFailed:        stats.XskMetaFailed,
-		XskMapRedirectFailed: stats.XskMapRedirectFailed,
-		RedirectTX:           stats.RedirectTX,
-		RedirectFailed:       stats.RedirectFailed,
-		FibLookupFailed:      stats.FibLookupFailed,
+		RXPackets:         stats.IngressPackets,
+		ParseFailed:       stats.ParseErrorPackets,
+		MatchedRules:      stats.MatchHitPackets,
+		RuleMatches:       ruleMatches,
+		RingbufDropped:    stats.EventDroppedPackets,
+		XDPTX:             stats.KernelResponseXDPTXPackets,
+		TXFailed:          stats.KernelResponseErrorPackets,
+		XskRedirected:     stats.XSKRedirectPackets,
+		XskRedirectFailed: stats.XSKRedirectErrorPackets,
+		RedirectTX:        stats.KernelResponseRedirectPackets,
 	}, nil
 }
 

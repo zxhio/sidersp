@@ -87,7 +87,7 @@ func BenchmarkBPFFlowCacheCandidateScan(b *testing.B) {
 	b.Run("cold_miss_255_false_candidates", func(b *testing.B) {
 		requireBPFBenchmarkEnv(b)
 		objs := setupDrainingBenchmarkRuntime(b, rules)
-		beforeMatch := readStat(b, objs, statMatchedRules)
+		beforeMatch := readStat(b, objs, statMatchHitPackets)
 
 		b.SetBytes(int64(len(coldPackets[0])))
 		b.ReportAllocs()
@@ -104,8 +104,8 @@ func BenchmarkBPFFlowCacheCandidateScan(b *testing.B) {
 		}
 		reportBenchmarkRates(b, startedAt, len(coldPackets[0]))
 
-		if got := readStat(b, objs, statMatchedRules) - beforeMatch; got != uint64(b.N) {
-			b.Fatalf("matched_rules delta = %d, want %d", got, b.N)
+		if got := readStat(b, objs, statMatchHitPackets) - beforeMatch; got != uint64(b.N) {
+			b.Fatalf("match_hit_packets delta = %d, want %d", got, b.N)
 		}
 	})
 
@@ -115,7 +115,7 @@ func BenchmarkBPFFlowCacheCandidateScan(b *testing.B) {
 		ret, _, err := objs.XdpSidersp.Test(warmPacket)
 		require.NoError(b, err, "prime prog.Test()")
 		require.Equal(b, uint32(xdpTX), ret, "prime prog.Test() retval")
-		beforeMatch := readStat(b, objs, statMatchedRules)
+		beforeMatch := readStat(b, objs, statMatchHitPackets)
 
 		b.SetBytes(int64(len(warmPacket)))
 		b.ReportAllocs()
@@ -132,8 +132,8 @@ func BenchmarkBPFFlowCacheCandidateScan(b *testing.B) {
 		}
 		reportBenchmarkRates(b, startedAt, len(warmPacket))
 
-		if got := readStat(b, objs, statMatchedRules) - beforeMatch; got != uint64(b.N) {
-			b.Fatalf("matched_rules delta = %d, want %d", got, b.N)
+		if got := readStat(b, objs, statMatchHitPackets) - beforeMatch; got != uint64(b.N) {
+			b.Fatalf("match_hit_packets delta = %d, want %d", got, b.N)
 		}
 	})
 }
