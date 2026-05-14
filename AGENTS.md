@@ -63,7 +63,7 @@ Do not edit `internal/dataplane/sidersp_bpfel.go` directly; regenerate it.
 
 ## Skill Routing
 
-- File-backed plan before coding: `skills/planning-with-files`
+- File-backed plans and task routing: `skills/plan-workflow`
 - Multi-step refactors and module splits: `skills/refactor-workflow`
 - AI change review: `skills/agent-review`
 - Go structure and ownership: `skills/go-abstraction`
