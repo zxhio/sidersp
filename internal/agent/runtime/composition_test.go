@@ -58,6 +58,15 @@ func TestNewCompositionDataplaneModeOpensFromAttachment(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(42), stats.Ingress.Packets)
 
+	_, err = composition.Services.Dispatch.ReplaceDispatch(context.Background(), types.DispatchConfig{
+		Enabled:       true,
+		TargetIfIndex: 4,
+	})
+	require.NoError(t, err)
+	status, err := composition.Services.Status.Status(context.Background())
+	require.NoError(t, err)
+	require.True(t, status.DispatchEnabled)
+
 	events, err := composition.Services.Events.SubscribeEvents(context.Background())
 	require.Nil(t, events)
 	require.ErrorIs(t, err, service.ErrEventStreamUnsupported)

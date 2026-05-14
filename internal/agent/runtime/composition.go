@@ -79,6 +79,7 @@ func NewComposition(options Options, buildOpts ...BuildOption) (*Composition, er
 	attachmentRuntime := service.AttachmentConfigRuntime(state)
 	rulesetRuntime := service.RulesetRuntime(state)
 	responseRuntime := service.ResponseConfigRuntime(state)
+	dispatchRuntime := service.DispatchConfigRuntime(state)
 	statsRuntime := service.StatsRuntime(state)
 	eventRuntime := service.EventRuntime(state)
 	var closer interface {
@@ -89,6 +90,7 @@ func NewComposition(options Options, buildOpts ...BuildOption) (*Composition, er
 		attachmentRuntime = runtime
 		rulesetRuntime = runtime
 		responseRuntime = runtime
+		dispatchRuntime = runtime
 		statsRuntime = runtime
 		eventRuntime = runtime
 		closer = runtime
@@ -100,12 +102,12 @@ func NewComposition(options Options, buildOpts ...BuildOption) (*Composition, er
 				Attachments: attachmentRuntime,
 				Ruleset:     rulesetRuntime,
 				Response:    responseRuntime,
-				Dispatch:    state,
+				Dispatch:    dispatchRuntime,
 			}),
 			Ruleset:     service.NewRulesetService(rulesetRuntime),
 			Attachments: service.NewAttachmentService(attachmentRuntime),
 			Response:    service.NewResponseService(responseRuntime),
-			Dispatch:    service.NewDispatchService(state),
+			Dispatch:    service.NewDispatchService(dispatchRuntime),
 			Stats:       service.NewStatsService(statsRuntime),
 			Events:      service.NewEventService(eventRuntime),
 		},

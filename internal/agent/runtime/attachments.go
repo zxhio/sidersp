@@ -24,6 +24,9 @@ type DataplaneAttachmentRuntime struct {
 	runtimes    map[int]DataplaneRuntime
 	ruleset     types.Ruleset
 	response    responseState
+	dispatch    dispatchState
+
+	dispatchApplier dispatchApplier
 }
 
 func NewDataplaneAttachmentRuntime(validator service.AttachmentConfigRuntime, opener DataplaneOpener, interfaceByIndex interfaceLookup) *DataplaneAttachmentRuntime {
@@ -42,6 +45,7 @@ func NewDataplaneAttachmentRuntime(validator service.AttachmentConfigRuntime, op
 		interfaceByIndex: interfaceByIndex,
 		attachments:      make(map[int]types.Attachment),
 		runtimes:         make(map[int]DataplaneRuntime),
+		dispatchApplier:  noopDispatchApplier{},
 	}
 }
 
