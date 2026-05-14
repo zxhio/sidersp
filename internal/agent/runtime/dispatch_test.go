@@ -98,11 +98,15 @@ func testDispatchConfig(ifindex int, vlanMode string) types.DispatchConfig {
 }
 
 type recordingDispatchApplier struct {
-	configs []types.DispatchConfig
-	err     error
+	configs    []types.DispatchConfig
+	operations *[]string
+	err        error
 }
 
 func (a *recordingDispatchApplier) ApplyDispatch(ctx context.Context, config types.DispatchConfig) error {
+	if a.operations != nil {
+		*a.operations = append(*a.operations, "dispatch")
+	}
 	a.configs = append(a.configs, cloneDispatchConfig(config))
 	return a.err
 }

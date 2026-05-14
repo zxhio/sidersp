@@ -109,14 +109,7 @@ func (r *DataplaneAttachmentRuntime) CreateAttachment(ctx context.Context, attac
 		}
 		return types.Attachment{}, attachmentConflict(next.IfIndex)
 	}
-	if err := r.applyCurrentRulesetToRuntimeLocked(next.IfIndex, runtime); err != nil {
-		r.mu.Unlock()
-		if closeErr := runtime.Close(); closeErr != nil {
-			logrus.WithError(closeErr).WithField("ifindex", next.IfIndex).Error("Fail to close dataplane runtime")
-		}
-		return types.Attachment{}, err
-	}
-	if err := r.applyCurrentResponseToRuntimeLocked(next.IfIndex, runtime); err != nil {
+	if err := r.replayDesiredStateToRuntimeLocked(ctx, next.IfIndex, runtime); err != nil {
 		r.mu.Unlock()
 		if closeErr := runtime.Close(); closeErr != nil {
 			logrus.WithError(closeErr).WithField("ifindex", next.IfIndex).Error("Fail to close dataplane runtime")
@@ -178,14 +171,7 @@ func (r *DataplaneAttachmentRuntime) SetAttachmentEnabled(ctx context.Context, i
 		}
 		return types.Attachment{}, attachmentNotFound(ifindex)
 	}
-	if err := r.applyCurrentRulesetToRuntimeLocked(ifindex, runtime); err != nil {
-		r.mu.Unlock()
-		if closeErr := runtime.Close(); closeErr != nil {
-			logrus.WithError(closeErr).WithField("ifindex", ifindex).Error("Fail to close dataplane runtime")
-		}
-		return types.Attachment{}, err
-	}
-	if err := r.applyCurrentResponseToRuntimeLocked(ifindex, runtime); err != nil {
+	if err := r.replayDesiredStateToRuntimeLocked(ctx, ifindex, runtime); err != nil {
 		r.mu.Unlock()
 		if closeErr := runtime.Close(); closeErr != nil {
 			logrus.WithError(closeErr).WithField("ifindex", ifindex).Error("Fail to close dataplane runtime")

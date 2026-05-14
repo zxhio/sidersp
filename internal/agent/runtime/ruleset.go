@@ -87,20 +87,6 @@ func (r *DataplaneAttachmentRuntime) ClearRuleset(ctx context.Context) error {
 	return nil
 }
 
-func (r *DataplaneAttachmentRuntime) applyCurrentRulesetToRuntimeLocked(ifindex int, runtime DataplaneRuntime) error {
-	if !hasStoredRuleset(r.ruleset) {
-		return nil
-	}
-	rules, err := newDataplaneRuleSet(r.ruleset)
-	if err != nil {
-		return err
-	}
-	if err := runtime.ReplaceRules(rules); err != nil {
-		return fmt.Errorf("apply current ruleset to attachment %d: %w", ifindex, err)
-	}
-	return nil
-}
-
 func (r *DataplaneAttachmentRuntime) applyRulesetLocked(entries []dataplaneRuntimeEntry, next rule.RuleSet, previous rule.RuleSet) error {
 	applied := make([]dataplaneRuntimeEntry, 0, len(entries))
 	for _, entry := range entries {
@@ -152,6 +138,10 @@ func (r *DataplaneAttachmentRuntime) enabledDataplaneRuntimes() []dataplaneRunti
 }
 
 func previousDataplaneRuleSet(ruleset types.Ruleset) (rule.RuleSet, error) {
+	return currentDataplaneRuleSet(ruleset)
+}
+
+func currentDataplaneRuleSet(ruleset types.Ruleset) (rule.RuleSet, error) {
 	if !hasStoredRuleset(ruleset) {
 		return rule.RuleSet{}, nil
 	}

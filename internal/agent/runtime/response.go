@@ -82,17 +82,6 @@ func (r *DataplaneAttachmentRuntime) ClearResponse(ctx context.Context) error {
 	return nil
 }
 
-func (r *DataplaneAttachmentRuntime) applyCurrentResponseToRuntimeLocked(ifindex int, runtime DataplaneRuntime) error {
-	if !r.response.configured {
-		return nil
-	}
-	options := newXDPResponseOptions(r.response.config)
-	if err := runtime.ReplaceXDPResponse(options); err != nil {
-		return fmt.Errorf("apply current response config to attachment %d: %w", ifindex, err)
-	}
-	return nil
-}
-
 func applyResponseLocked(entries []dataplaneResponseRuntime, next dataplane.XDPResponseOptions, previous dataplane.XDPResponseOptions) error {
 	applied := make([]dataplaneResponseRuntime, 0, len(entries))
 	for _, entry := range entries {

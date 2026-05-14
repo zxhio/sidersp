@@ -126,6 +126,131 @@ func TestDataplaneAttachmentReenableOpensRuntimeAgain(t *testing.T) {
 	require.Len(t, opener.opens, 2)
 }
 
+func TestDataplaneAttachmentCreateReplaysDesiredStateInOrder(t *testing.T) {
+	first := &fakeDataplaneRuntime{programID: 101}
+	var operations []string
+	second := &fakeDataplaneRuntime{programID: 202, operations: &operations}
+	applier := &recordingDispatchApplier{operations: &operations}
+	opener := &recordingDataplaneOpener{next: []*fakeDataplaneRuntime{first, second}}
+	runtime := newTestDataplaneAttachmentRuntime(opener)
+	runtime.dispatchApplier = applier
+	_, err := runtime.CreateAttachment(context.Background(), types.Attachment{IfIndex: 36})
+	require.NoError(t, err)
+	_, err = service.NewResponseService(runtime).ReplaceResponse(context.Background(), testResponseConfig(60, types.VLANModeAccess))
+	require.NoError(t, err)
+	_, err = service.NewDispatchService(runtime).ReplaceDispatch(context.Background(), testDispatchConfig(61, types.VLANModePreserve))
+	require.NoError(t, err)
+	_, err = service.NewRulesetService(runtime).ReplaceRuleset(context.Background(), testDataplaneRuleset(9, 9009), false)
+	require.NoError(t, err)
+	operations = nil
+
+	_, err = runtime.CreateAttachment(context.Background(), types.Attachment{IfIndex: 37})
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"response", "dispatch", "ruleset"}, operations)
+	require.Len(t, second.appliedXDP, 1)
+	require.Equal(t, 60, second.appliedXDP[0].EgressIfIndex)
+	require.Len(t, applier.configs, 3)
+	require.Equal(t, 61, applier.configs[len(applier.configs)-1].TargetIfIndex)
+	require.Len(t, second.appliedRules, 1)
+	require.Equal(t, 9009, second.appliedRules[0].Rules[0].ID)
+}
+
+func TestDataplaneAttachmentReenableReplaysDesiredState(t *testing.T) {
+	first := &fakeDataplaneRuntime{programID: 101}
+	second := &fakeDataplaneRuntime{programID: 202}
+	applier := &recordingDispatchApplier{}
+	opener := &recordingDataplaneOpener{next: []*fakeDataplaneRuntime{first, second}}
+	runtime := newTestDataplaneAttachmentRuntime(opener)
+	runtime.dispatchApplier = applier
+	_, err := runtime.CreateAttachment(context.Background(), types.Attachment{IfIndex: 38})
+	require.NoError(t, err)
+	_, err = service.NewResponseService(runtime).ReplaceResponse(context.Background(), testResponseConfig(62, types.VLANModeAccess))
+	require.NoError(t, err)
+	_, err = service.NewDispatchService(runtime).ReplaceDispatch(context.Background(), testDispatchConfig(63, types.VLANModePreserve))
+	require.NoError(t, err)
+	_, err = service.NewRulesetService(runtime).ReplaceRuleset(context.Background(), testDataplaneRuleset(10, 10010), false)
+	require.NoError(t, err)
+	_, err = runtime.SetAttachmentEnabled(context.Background(), 38, false)
+	require.NoError(t, err)
+
+	got, err := runtime.SetAttachmentEnabled(context.Background(), 38, true)
+
+	require.NoError(t, err)
+	require.True(t, got.Enabled)
+	require.Equal(t, uint32(202), got.Runtime.ProgramID)
+	require.Len(t, second.appliedXDP, 1)
+	require.Equal(t, 62, second.appliedXDP[0].EgressIfIndex)
+	require.Equal(t, 63, applier.configs[len(applier.configs)-1].TargetIfIndex)
+	require.Len(t, second.appliedRules, 1)
+	require.Equal(t, 10010, second.appliedRules[0].Rules[0].ID)
+}
+
+func TestDataplaneAttachmentDryRunDoesNotReplayDesiredState(t *testing.T) {
+	opener := &recordingDataplaneOpener{}
+	applier := &recordingDispatchApplier{}
+	runtime := newTestDataplaneAttachmentRuntime(opener)
+	runtime.dispatchApplier = applier
+	svc := service.NewAttachmentService(runtime)
+
+	_, err := svc.CreateAttachment(context.Background(), types.Attachment{IfIndex: 39}, true)
+
+	require.NoError(t, err)
+	require.Empty(t, opener.opens)
+	require.Empty(t, applier.configs)
+}
+
+func TestDataplaneAttachmentCreateReplayFailureClosesRuntimeAndDoesNotStore(t *testing.T) {
+	fakeRuntime := &fakeDataplaneRuntime{
+		programID: 101,
+		xdpErr:    errors.New("response failed"),
+	}
+	opener := &recordingDataplaneOpener{next: []*fakeDataplaneRuntime{fakeRuntime}}
+	runtime := newTestDataplaneAttachmentRuntime(opener)
+
+	_, err := runtime.CreateAttachment(context.Background(), types.Attachment{IfIndex: 40})
+
+	require.ErrorContains(t, err, "response failed")
+	require.True(t, fakeRuntime.closed)
+	_, err = runtime.GetAttachment(context.Background(), 40)
+	require.ErrorAs(t, err, &types.NotFoundError{})
+}
+
+func TestDataplaneAttachmentReenableReplayFailureKeepsAttachmentDisabled(t *testing.T) {
+	first := &fakeDataplaneRuntime{programID: 101}
+	second := &fakeDataplaneRuntime{
+		programID: 202,
+		applyErr:  errors.New("ruleset failed"),
+	}
+	opener := &recordingDataplaneOpener{next: []*fakeDataplaneRuntime{first, second}}
+	runtime := newTestDataplaneAttachmentRuntime(opener)
+	_, err := runtime.CreateAttachment(context.Background(), types.Attachment{IfIndex: 41})
+	require.NoError(t, err)
+	_, err = runtime.SetAttachmentEnabled(context.Background(), 41, false)
+	require.NoError(t, err)
+
+	_, err = runtime.SetAttachmentEnabled(context.Background(), 41, true)
+
+	require.ErrorContains(t, err, "ruleset failed")
+	require.True(t, second.closed)
+	stored, getErr := runtime.GetAttachment(context.Background(), 41)
+	require.NoError(t, getErr)
+	require.False(t, stored.Enabled)
+	require.Zero(t, stored.Runtime.ProgramID)
+}
+
+func TestDataplaneAttachmentCreateWithoutRulesetAppliesEmptyRuleset(t *testing.T) {
+	fakeRuntime := &fakeDataplaneRuntime{programID: 101}
+	opener := &recordingDataplaneOpener{next: []*fakeDataplaneRuntime{fakeRuntime}}
+	runtime := newTestDataplaneAttachmentRuntime(opener)
+
+	_, err := runtime.CreateAttachment(context.Background(), types.Attachment{IfIndex: 42})
+
+	require.NoError(t, err)
+	require.Len(t, fakeRuntime.appliedRules, 1)
+	require.Empty(t, fakeRuntime.appliedRules[0].Rules)
+}
+
 func TestDataplaneAttachmentDeleteClosesRuntimeAndRemovesAttachment(t *testing.T) {
 	fakeRuntime := &fakeDataplaneRuntime{programID: 101}
 	opener := &recordingDataplaneOpener{next: []*fakeDataplaneRuntime{fakeRuntime}}
@@ -281,12 +406,13 @@ func TestDataplaneRulesetDryRunDoesNotApplyOrStore(t *testing.T) {
 	_, err := runtime.CreateAttachment(context.Background(), types.Attachment{IfIndex: 12})
 	require.NoError(t, err)
 	svc := service.NewRulesetService(runtime)
+	appliedBefore := len(fakeRuntime.appliedRules)
 
 	got, err := svc.ReplaceRuleset(context.Background(), testDataplaneRuleset(2, 2002), true)
 
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), got.Version)
-	require.Empty(t, fakeRuntime.appliedRules)
+	require.Len(t, fakeRuntime.appliedRules, appliedBefore)
 	stored, err := runtime.GetRuleset(context.Background())
 	require.NoError(t, err)
 	require.Zero(t, stored.Version)
@@ -308,10 +434,10 @@ func TestDataplaneRulesetReplaceAppliesAllEnabledAttachments(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, uint64(3), got.Version)
-	require.Len(t, first.appliedRules, 1)
-	require.Len(t, second.appliedRules, 1)
-	require.Equal(t, 3003, first.appliedRules[0].Rules[0].ID)
-	require.Equal(t, 3003, second.appliedRules[0].Rules[0].ID)
+	require.Len(t, first.appliedRules, 2)
+	require.Len(t, second.appliedRules, 2)
+	require.Equal(t, 3003, first.appliedRules[len(first.appliedRules)-1].Rules[0].ID)
+	require.Equal(t, 3003, second.appliedRules[len(second.appliedRules)-1].Rules[0].ID)
 
 	stored, err := runtime.GetRuleset(context.Background())
 	require.NoError(t, err)
@@ -340,10 +466,10 @@ func TestDataplaneRulesetApplyFailureDoesNotStoreAndRollsBack(t *testing.T) {
 	require.NoError(t, getErr)
 	require.Equal(t, previous.Version, stored.Version)
 	require.Equal(t, previous.Rules[0].RuleID, stored.Rules[0].RuleID)
-	require.Len(t, first.appliedRules, 3)
-	require.Equal(t, 4004, first.appliedRules[2].Rules[0].ID)
-	require.Len(t, second.appliedRules, 2)
-	require.Equal(t, 5005, second.appliedRules[1].Rules[0].ID)
+	require.Len(t, first.appliedRules, 4)
+	require.Equal(t, 4004, first.appliedRules[len(first.appliedRules)-1].Rules[0].ID)
+	require.Len(t, second.appliedRules, 3)
+	require.Equal(t, 5005, second.appliedRules[len(second.appliedRules)-1].Rules[0].ID)
 }
 
 func TestDataplaneRulesetClearAppliesEmptyRuleset(t *testing.T) {
@@ -359,8 +485,8 @@ func TestDataplaneRulesetClearAppliesEmptyRuleset(t *testing.T) {
 	err = svc.ClearRuleset(context.Background())
 
 	require.NoError(t, err)
-	require.Len(t, fakeRuntime.appliedRules, 2)
-	require.Empty(t, fakeRuntime.appliedRules[1].Rules)
+	require.Len(t, fakeRuntime.appliedRules, 3)
+	require.Empty(t, fakeRuntime.appliedRules[len(fakeRuntime.appliedRules)-1].Rules)
 	stored, err := runtime.GetRuleset(context.Background())
 	require.NoError(t, err)
 	require.Zero(t, stored.Version)
@@ -421,11 +547,11 @@ func TestDataplaneResponseReplaceAppliesAllEnabledAttachments(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 30, got.IfIndex)
 	require.Equal(t, types.VLANModeAccess, got.VLANMode)
-	require.Len(t, first.appliedXDP, 1)
-	require.Len(t, second.appliedXDP, 1)
-	require.Equal(t, 30, first.appliedXDP[0].EgressIfIndex)
-	require.Equal(t, types.VLANModeAccess, first.appliedXDP[0].VLANMode)
-	require.Equal(t, "pass", first.appliedXDP[0].FailureVerdict)
+	require.Len(t, first.appliedXDP, 2)
+	require.Len(t, second.appliedXDP, 2)
+	require.Equal(t, 30, first.appliedXDP[len(first.appliedXDP)-1].EgressIfIndex)
+	require.Equal(t, types.VLANModeAccess, first.appliedXDP[len(first.appliedXDP)-1].VLANMode)
+	require.Equal(t, "pass", first.appliedXDP[len(first.appliedXDP)-1].FailureVerdict)
 
 	stored, err := runtime.GetResponse(context.Background())
 	require.NoError(t, err)
@@ -456,11 +582,11 @@ func TestDataplaneResponseApplyFailureDoesNotStoreAndRollsBack(t *testing.T) {
 	stored, getErr := runtime.GetResponse(context.Background())
 	require.NoError(t, getErr)
 	require.Equal(t, previous, stored)
-	require.Len(t, first.appliedXDP, 3)
-	require.Equal(t, 40, first.appliedXDP[2].EgressIfIndex)
-	require.Equal(t, types.VLANModePreserve, first.appliedXDP[2].VLANMode)
-	require.Len(t, second.appliedXDP, 2)
-	require.Equal(t, 41, second.appliedXDP[1].EgressIfIndex)
+	require.Len(t, first.appliedXDP, 4)
+	require.Equal(t, 40, first.appliedXDP[len(first.appliedXDP)-1].EgressIfIndex)
+	require.Equal(t, types.VLANModePreserve, first.appliedXDP[len(first.appliedXDP)-1].VLANMode)
+	require.Len(t, second.appliedXDP, 3)
+	require.Equal(t, 41, second.appliedXDP[len(second.appliedXDP)-1].EgressIfIndex)
 }
 
 func TestDataplaneResponseClearAppliesDefaultConfig(t *testing.T) {
@@ -476,10 +602,10 @@ func TestDataplaneResponseClearAppliesDefaultConfig(t *testing.T) {
 	err = svc.ClearResponse(context.Background())
 
 	require.NoError(t, err)
-	require.Len(t, fakeRuntime.appliedXDP, 2)
-	require.Zero(t, fakeRuntime.appliedXDP[1].EgressIfIndex)
-	require.Equal(t, types.VLANModePreserve, fakeRuntime.appliedXDP[1].VLANMode)
-	require.Equal(t, "pass", fakeRuntime.appliedXDP[1].FailureVerdict)
+	require.Len(t, fakeRuntime.appliedXDP, 3)
+	require.Zero(t, fakeRuntime.appliedXDP[len(fakeRuntime.appliedXDP)-1].EgressIfIndex)
+	require.Equal(t, types.VLANModePreserve, fakeRuntime.appliedXDP[len(fakeRuntime.appliedXDP)-1].VLANMode)
+	require.Equal(t, "pass", fakeRuntime.appliedXDP[len(fakeRuntime.appliedXDP)-1].FailureVerdict)
 	stored, err := runtime.GetResponse(context.Background())
 	require.NoError(t, err)
 	require.Zero(t, stored.IfIndex)

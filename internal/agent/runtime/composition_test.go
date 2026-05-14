@@ -98,6 +98,7 @@ type fakeDataplaneRuntime struct {
 	eventCh      chan model.EventRecord
 	eventErr     error
 	eventClosed  bool
+	operations   *[]string
 	appliedRules []rule.RuleSet
 	appliedXDP   []dataplane.XDPResponseOptions
 	attached     bool
@@ -135,6 +136,7 @@ func (r *fakeDataplaneRuntime) ProgramID() (uint32, error) {
 }
 
 func (r *fakeDataplaneRuntime) ReplaceRules(set rule.RuleSet) error {
+	r.recordOperation("ruleset")
 	r.appliedRules = append(r.appliedRules, cloneRuleSet(set))
 	if r.applyErr != nil {
 		return r.applyErr
@@ -143,6 +145,7 @@ func (r *fakeDataplaneRuntime) ReplaceRules(set rule.RuleSet) error {
 }
 
 func (r *fakeDataplaneRuntime) ReplaceXDPResponse(options dataplane.XDPResponseOptions) error {
+	r.recordOperation("response")
 	r.appliedXDP = append(r.appliedXDP, options)
 	if r.xdpErr != nil {
 		return r.xdpErr
@@ -157,4 +160,11 @@ func (r *fakeDataplaneRuntime) Close() error {
 		close(r.eventCh)
 	}
 	return r.closeErr
+}
+
+func (r *fakeDataplaneRuntime) recordOperation(name string) {
+	if r.operations == nil {
+		return
+	}
+	*r.operations = append(*r.operations, name)
 }
