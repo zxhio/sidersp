@@ -48,9 +48,44 @@ func TestGetStatus(t *testing.T) {
 	require.NotContains(t, body, "data")
 }
 
+func TestGetStats(t *testing.T) {
+	router := newTestRouter()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/stats", nil)
+
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	require.Contains(t, body, "ingress")
+	require.Contains(t, body, "parse")
+	require.Contains(t, body, "match")
+	require.Contains(t, body, "kernel_response")
+	require.Contains(t, body, "xsk_redirect")
+	require.Contains(t, body, "userspace_response")
+	require.Contains(t, body, "dispatch")
+	require.Contains(t, body, "errors")
+	require.NotContains(t, body, "data")
+}
+
+func TestStreamEventsSetsSSEHeaders(t *testing.T) {
+	router := newTestRouter()
+	rec := httptest.NewRecorder()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/events/stream", nil).WithContext(ctx)
+
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Header().Get("Content-Type"), "text/event-stream")
+}
+
 func TestCreateAttachmentDryRunDoesNotModifyCurrentState(t *testing.T) {
 	attachments := newStaticAttachmentService()
-	router := NewRouter(staticStatusService{}, newStaticRulesetService(), attachments, staticResponseService{}, staticDispatchService{})
+	router := NewRouter(staticStatusService{}, newStaticRulesetService(), attachments, staticResponseService{}, staticDispatchService{}, staticStatsService{}, staticEventService{})
 
 	reqBody := []byte(`{"ifindex":3,"ifname":"eth1","xsk":{"enabled":true}}`)
 	rec := httptest.NewRecorder()
@@ -71,7 +106,7 @@ func TestCreateAttachmentDryRunDoesNotModifyCurrentState(t *testing.T) {
 
 func TestReplaceRulesetDryRunDoesNotModifyCurrentRuleset(t *testing.T) {
 	ruleset := newStaticRulesetService()
-	router := NewRouter(staticStatusService{}, ruleset, newStaticAttachmentService(), staticResponseService{}, staticDispatchService{})
+	router := NewRouter(staticStatusService{}, ruleset, newStaticAttachmentService(), staticResponseService{}, staticDispatchService{}, staticStatsService{}, staticEventService{})
 
 	reqBody := []byte(`{"version":3,"rules":[{"rule_id":1001,"priority":10,"match":{"protocol":"tcp","dst_ports":[80]},"response":{"action":"tcp_reset"}}]}`)
 	rec := httptest.NewRecorder()
@@ -91,7 +126,7 @@ func TestReplaceRulesetDryRunDoesNotModifyCurrentRuleset(t *testing.T) {
 
 func TestReplaceRulesetUpdatesCurrentRuleset(t *testing.T) {
 	ruleset := newStaticRulesetService()
-	router := NewRouter(staticStatusService{}, ruleset, newStaticAttachmentService(), staticResponseService{}, staticDispatchService{})
+	router := NewRouter(staticStatusService{}, ruleset, newStaticAttachmentService(), staticResponseService{}, staticDispatchService{}, staticStatsService{}, staticEventService{})
 
 	reqBody := []byte(`{"version":4,"rules":[{"rule_id":1002,"response":{"action":"alert"}}]}`)
 	rec := httptest.NewRecorder()
@@ -113,7 +148,7 @@ func TestClearRulesetClearsCurrentRuleset(t *testing.T) {
 			{RuleID: 1003, Response: types.RuleResponse{Action: "alert"}},
 		},
 	}
-	router := NewRouter(staticStatusService{}, ruleset, newStaticAttachmentService(), staticResponseService{}, staticDispatchService{})
+	router := NewRouter(staticStatusService{}, ruleset, newStaticAttachmentService(), staticResponseService{}, staticDispatchService{}, staticStatsService{}, staticEventService{})
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/ruleset", nil)
@@ -127,7 +162,7 @@ func TestClearRulesetClearsCurrentRuleset(t *testing.T) {
 }
 
 func newTestRouter() *gin.Engine {
-	return NewRouter(staticStatusService{}, newStaticRulesetService(), newStaticAttachmentService(), staticResponseService{}, staticDispatchService{})
+	return NewRouter(staticStatusService{}, newStaticRulesetService(), newStaticAttachmentService(), staticResponseService{}, staticDispatchService{}, staticStatsService{}, staticEventService{})
 }
 
 type staticStatusService struct{}
@@ -255,4 +290,16 @@ func (staticDispatchService) ReplaceDispatch(ctx context.Context, config types.D
 
 func (staticDispatchService) ClearDispatch(ctx context.Context) error {
 	return nil
+}
+
+type staticStatsService struct{}
+
+func (staticStatsService) Stats(ctx context.Context) (types.Stats, error) {
+	return types.Stats{}, nil
+}
+
+type staticEventService struct{}
+
+func (staticEventService) SubscribeEvents(ctx context.Context) (<-chan types.Event, error) {
+	return nil, nil
 }

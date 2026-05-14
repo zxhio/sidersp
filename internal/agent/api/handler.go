@@ -6,9 +6,11 @@ type Handler struct {
 	attachments AttachmentService
 	response    ResponseService
 	dispatch    DispatchService
+	stats       StatsService
+	events      EventService
 }
 
-func NewHandler(status StatusService, ruleset RulesetService, attachments AttachmentService, response ResponseService, dispatch DispatchService) Handler {
+func NewHandler(status StatusService, ruleset RulesetService, attachments AttachmentService, response ResponseService, dispatch DispatchService, stats StatsService, events EventService) Handler {
 	if status == nil {
 		panic("agent api: status service is required")
 	}
@@ -24,11 +26,19 @@ func NewHandler(status StatusService, ruleset RulesetService, attachments Attach
 	if dispatch == nil {
 		panic("agent api: dispatch service is required")
 	}
+	if stats == nil {
+		panic("agent api: stats service is required")
+	}
+	if events == nil {
+		panic("agent api: event service is required")
+	}
 	return Handler{
 		status:      status,
 		ruleset:     ruleset,
 		attachments: attachments,
 		response:    response,
 		dispatch:    dispatch,
+		stats:       stats,
+		events:      events,
 	}
 }

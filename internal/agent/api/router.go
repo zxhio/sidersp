@@ -2,13 +2,13 @@ package api
 
 import "github.com/gin-gonic/gin"
 
-func NewRouter(status StatusService, ruleset RulesetService, attachments AttachmentService, response ResponseService, dispatch DispatchService) *gin.Engine {
+func NewRouter(status StatusService, ruleset RulesetService, attachments AttachmentService, response ResponseService, dispatch DispatchService, stats StatsService, events EventService) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 
 	router := gin.New()
 	router.Use(gin.Recovery())
 
-	handler := NewHandler(status, ruleset, attachments, response, dispatch)
+	handler := NewHandler(status, ruleset, attachments, response, dispatch, stats, events)
 	v1 := router.Group("/api/v1")
 	v1.GET("/health", handler.GetHealth)
 	v1.GET("/status", handler.GetStatus)
@@ -26,6 +26,8 @@ func NewRouter(status StatusService, ruleset RulesetService, attachments Attachm
 	v1.GET("/dispatch", handler.GetDispatch)
 	v1.PUT("/dispatch", handler.ReplaceDispatch)
 	v1.DELETE("/dispatch", handler.ClearDispatch)
+	v1.GET("/stats", handler.GetStats)
+	v1.GET("/events/stream", handler.StreamEvents)
 
 	return router
 }

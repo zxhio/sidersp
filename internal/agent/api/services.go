@@ -36,3 +36,11 @@ type DispatchService interface {
 	ReplaceDispatch(ctx context.Context, config types.DispatchConfig) (types.DispatchConfig, error)
 	ClearDispatch(ctx context.Context) error
 }
+
+type StatsService interface {
+	Stats(ctx context.Context) (types.Stats, error)
+}
+
+type EventService interface {
+	SubscribeEvents(ctx context.Context) (<-chan types.Event, error)
+}

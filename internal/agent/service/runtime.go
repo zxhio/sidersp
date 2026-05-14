@@ -54,6 +54,14 @@ type DispatchConfigRuntime interface {
 	ClearDispatch(ctx context.Context) error
 }
 
+type StatsRuntime interface {
+	ReadStats(ctx context.Context) (types.Stats, error)
+}
+
+type EventRuntime interface {
+	SubscribeEvents(ctx context.Context) (<-chan types.Event, error)
+}
+
 type RuntimeDeps struct {
 	Attachments AttachmentRuntime
 	Ruleset     RulesetStatusRuntime

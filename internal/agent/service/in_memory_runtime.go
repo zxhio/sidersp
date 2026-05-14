@@ -214,3 +214,11 @@ func (r *InMemoryRuntime) ClearDispatch(ctx context.Context) error {
 	r.mu.Unlock()
 	return nil
 }
+
+func (r *InMemoryRuntime) ReadStats(ctx context.Context) (types.Stats, error) {
+	return types.Stats{}, nil
+}
+
+func (r *InMemoryRuntime) SubscribeEvents(ctx context.Context) (<-chan types.Event, error) {
+	return nil, nil
+}

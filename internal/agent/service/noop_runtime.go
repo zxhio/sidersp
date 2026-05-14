@@ -90,3 +90,11 @@ func (NoopRuntime) ReplaceDispatch(ctx context.Context, config types.DispatchCon
 func (NoopRuntime) ClearDispatch(ctx context.Context) error {
 	return nil
 }
+
+func (NoopRuntime) ReadStats(ctx context.Context) (types.Stats, error) {
+	return types.Stats{}, nil
+}
+
+func (NoopRuntime) SubscribeEvents(ctx context.Context) (<-chan types.Event, error) {
+	return nil, nil
+}

@@ -156,6 +156,80 @@ type DispatchConfigResponse struct {
 	MaxPacketBytes int    `json:"max_packet_bytes"`
 }
 
+type StatsResponse struct {
+	Ingress           IngressStatsBody           `json:"ingress"`
+	Parse             ParseStatsBody             `json:"parse"`
+	Match             MatchStatsBody             `json:"match"`
+	KernelResponse    KernelResponseStatsBody    `json:"kernel_response"`
+	XSKRedirect       XSKRedirectStatsBody       `json:"xsk_redirect"`
+	UserspaceResponse UserspaceResponseStatsBody `json:"userspace_response"`
+	Dispatch          DispatchStatsBody          `json:"dispatch"`
+	Errors            ErrorStatsBody             `json:"errors"`
+}
+
+type IngressStatsBody struct {
+	Packets uint64 `json:"packets"`
+}
+
+type ParseStatsBody struct {
+	OKPackets    uint64 `json:"ok_packets"`
+	ErrorPackets uint64 `json:"error_packets"`
+}
+
+type MatchStatsBody struct {
+	HitPackets  uint64 `json:"hit_packets"`
+	MissPackets uint64 `json:"miss_packets"`
+}
+
+type KernelResponseStatsBody struct {
+	Packets         uint64 `json:"packets"`
+	XDPTXPackets    uint64 `json:"xdp_tx_packets"`
+	RedirectPackets uint64 `json:"redirect_packets"`
+	ErrorPackets    uint64 `json:"error_packets"`
+}
+
+type XSKRedirectStatsBody struct {
+	Packets      uint64 `json:"packets"`
+	ErrorPackets uint64 `json:"error_packets"`
+}
+
+type UserspaceResponseStatsBody struct {
+	XSKRXPackets      uint64 `json:"xsk_rx_packets"`
+	Packets           uint64 `json:"packets"`
+	XSKTXPackets      uint64 `json:"xsk_tx_packets"`
+	AFPacketTXPackets uint64 `json:"af_packet_tx_packets"`
+	ErrorPackets      uint64 `json:"error_packets"`
+}
+
+type DispatchStatsBody struct {
+	Packets        uint64 `json:"packets"`
+	QueuedPackets  uint64 `json:"queued_packets"`
+	DroppedPackets uint64 `json:"dropped_packets"`
+	SentPackets    uint64 `json:"sent_packets"`
+	ErrorPackets   uint64 `json:"error_packets"`
+}
+
+type ErrorStatsBody struct {
+	XDPPackets uint64 `json:"xdp_packets"`
+	XSKPackets uint64 `json:"xsk_packets"`
+}
+
+type EventResponse struct {
+	Timestamp int64  `json:"timestamp"`
+	Type      string `json:"type"`
+	RuleID    uint32 `json:"rule_id"`
+	Action    string `json:"action"`
+	Path      string `json:"path,omitempty"`
+	Verdict   string `json:"verdict,omitempty"`
+	Result    string `json:"result,omitempty"`
+	IfIndex   int    `json:"ifindex,omitempty"`
+	SIP       uint32 `json:"sip"`
+	DIP       uint32 `json:"dip"`
+	SPort     uint16 `json:"sport"`
+	DPort     uint16 `json:"dport"`
+	IPProto   uint8  `json:"ip_proto"`
+}
+
 func newHealthResponse(item types.Health) HealthResponse {
 	return HealthResponse{Status: item.Status}
 }
@@ -434,5 +508,67 @@ func newDispatchConfigResponse(item types.DispatchConfig) DispatchConfigResponse
 		VLANMode:       item.VLANMode,
 		QueueSize:      item.QueueSize,
 		MaxPacketBytes: item.MaxPacketBytes,
+	}
+}
+
+func newStatsResponse(item types.Stats) StatsResponse {
+	return StatsResponse{
+		Ingress: IngressStatsBody{
+			Packets: item.Ingress.Packets,
+		},
+		Parse: ParseStatsBody{
+			OKPackets:    item.Parse.OKPackets,
+			ErrorPackets: item.Parse.ErrorPackets,
+		},
+		Match: MatchStatsBody{
+			HitPackets:  item.Match.HitPackets,
+			MissPackets: item.Match.MissPackets,
+		},
+		KernelResponse: KernelResponseStatsBody{
+			Packets:         item.KernelResponse.Packets,
+			XDPTXPackets:    item.KernelResponse.XDPTXPackets,
+			RedirectPackets: item.KernelResponse.RedirectPackets,
+			ErrorPackets:    item.KernelResponse.ErrorPackets,
+		},
+		XSKRedirect: XSKRedirectStatsBody{
+			Packets:      item.XSKRedirect.Packets,
+			ErrorPackets: item.XSKRedirect.ErrorPackets,
+		},
+		UserspaceResponse: UserspaceResponseStatsBody{
+			XSKRXPackets:      item.UserspaceResponse.XSKRXPackets,
+			Packets:           item.UserspaceResponse.Packets,
+			XSKTXPackets:      item.UserspaceResponse.XSKTXPackets,
+			AFPacketTXPackets: item.UserspaceResponse.AFPacketTXPackets,
+			ErrorPackets:      item.UserspaceResponse.ErrorPackets,
+		},
+		Dispatch: DispatchStatsBody{
+			Packets:        item.Dispatch.Packets,
+			QueuedPackets:  item.Dispatch.QueuedPackets,
+			DroppedPackets: item.Dispatch.DroppedPackets,
+			SentPackets:    item.Dispatch.SentPackets,
+			ErrorPackets:   item.Dispatch.ErrorPackets,
+		},
+		Errors: ErrorStatsBody{
+			XDPPackets: item.Errors.XDPPackets,
+			XSKPackets: item.Errors.XSKPackets,
+		},
+	}
+}
+
+func newEventResponse(item types.Event) EventResponse {
+	return EventResponse{
+		Timestamp: item.Timestamp,
+		Type:      item.Type,
+		RuleID:    item.RuleID,
+		Action:    item.Action,
+		Path:      item.Path,
+		Verdict:   item.Verdict,
+		Result:    item.Result,
+		IfIndex:   item.IfIndex,
+		SIP:       item.SIP,
+		DIP:       item.DIP,
+		SPort:     item.SPort,
+		DPort:     item.DPort,
+		IPProto:   item.IPProto,
 	}
 }
