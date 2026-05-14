@@ -86,9 +86,11 @@ type fakeDataplaneRuntime struct {
 	stats        model.DataplaneStats
 	events       []model.EventRecord
 	appliedRules []rule.RuleSet
+	appliedXDP   []dataplane.XDPResponseOptions
 	attached     bool
 	closed       bool
 	applyErr     error
+	xdpErr       error
 	closeErr     error
 }
 
@@ -113,6 +115,14 @@ func (r *fakeDataplaneRuntime) ReplaceRules(set rule.RuleSet) error {
 	r.appliedRules = append(r.appliedRules, cloneRuleSet(set))
 	if r.applyErr != nil {
 		return r.applyErr
+	}
+	return nil
+}
+
+func (r *fakeDataplaneRuntime) ReplaceXDPResponse(options dataplane.XDPResponseOptions) error {
+	r.appliedXDP = append(r.appliedXDP, options)
+	if r.xdpErr != nil {
+		return r.xdpErr
 	}
 	return nil
 }

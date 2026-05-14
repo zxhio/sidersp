@@ -34,6 +34,7 @@ type DataplaneRuntime interface {
 	Attach() error
 	ProgramID() (uint32, error)
 	ReplaceRules(set rule.RuleSet) error
+	ReplaceXDPResponse(options dataplane.XDPResponseOptions) error
 	Close() error
 }
 
@@ -77,6 +78,7 @@ func NewComposition(options Options, buildOpts ...BuildOption) (*Composition, er
 	state := service.NewInMemoryRuntime()
 	attachmentRuntime := service.AttachmentConfigRuntime(state)
 	rulesetRuntime := service.RulesetRuntime(state)
+	responseRuntime := service.ResponseConfigRuntime(state)
 	statsRuntime := service.StatsRuntime(state)
 	eventRuntime := service.EventRuntime(state)
 	var closer interface {
@@ -86,6 +88,7 @@ func NewComposition(options Options, buildOpts ...BuildOption) (*Composition, er
 		runtime := NewDataplaneAttachmentRuntime(state, build.dataplaneOpener, build.interfaceByIndex)
 		attachmentRuntime = runtime
 		rulesetRuntime = runtime
+		responseRuntime = runtime
 		statsRuntime = runtime
 		eventRuntime = runtime
 		closer = runtime
@@ -96,12 +99,12 @@ func NewComposition(options Options, buildOpts ...BuildOption) (*Composition, er
 			Status: service.NewStatusServiceWithRuntime(service.RuntimeDeps{
 				Attachments: attachmentRuntime,
 				Ruleset:     rulesetRuntime,
-				Response:    state,
+				Response:    responseRuntime,
 				Dispatch:    state,
 			}),
 			Ruleset:     service.NewRulesetService(rulesetRuntime),
 			Attachments: service.NewAttachmentService(attachmentRuntime),
-			Response:    service.NewResponseService(state),
+			Response:    service.NewResponseService(responseRuntime),
 			Dispatch:    service.NewDispatchService(state),
 			Stats:       service.NewStatsService(statsRuntime),
 			Events:      service.NewEventService(eventRuntime),

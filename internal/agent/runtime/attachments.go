@@ -23,6 +23,7 @@ type DataplaneAttachmentRuntime struct {
 	attachments map[int]types.Attachment
 	runtimes    map[int]DataplaneRuntime
 	ruleset     types.Ruleset
+	response    responseState
 }
 
 func NewDataplaneAttachmentRuntime(validator service.AttachmentConfigRuntime, opener DataplaneOpener, interfaceByIndex interfaceLookup) *DataplaneAttachmentRuntime {
@@ -111,6 +112,13 @@ func (r *DataplaneAttachmentRuntime) CreateAttachment(ctx context.Context, attac
 		}
 		return types.Attachment{}, err
 	}
+	if err := r.applyCurrentResponseToRuntimeLocked(next.IfIndex, runtime); err != nil {
+		r.mu.Unlock()
+		if closeErr := runtime.Close(); closeErr != nil {
+			logrus.WithError(closeErr).WithField("ifindex", next.IfIndex).Error("Fail to close dataplane runtime")
+		}
+		return types.Attachment{}, err
+	}
 	r.attachments[next.IfIndex] = cloneAttachment(next)
 	r.runtimes[next.IfIndex] = runtime
 	r.mu.Unlock()
@@ -167,6 +175,13 @@ func (r *DataplaneAttachmentRuntime) SetAttachmentEnabled(ctx context.Context, i
 		return types.Attachment{}, attachmentNotFound(ifindex)
 	}
 	if err := r.applyCurrentRulesetToRuntimeLocked(ifindex, runtime); err != nil {
+		r.mu.Unlock()
+		if closeErr := runtime.Close(); closeErr != nil {
+			logrus.WithError(closeErr).WithField("ifindex", ifindex).Error("Fail to close dataplane runtime")
+		}
+		return types.Attachment{}, err
+	}
+	if err := r.applyCurrentResponseToRuntimeLocked(ifindex, runtime); err != nil {
 		r.mu.Unlock()
 		if closeErr := runtime.Close(); closeErr != nil {
 			logrus.WithError(closeErr).WithField("ifindex", ifindex).Error("Fail to close dataplane runtime")

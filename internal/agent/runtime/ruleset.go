@@ -16,7 +16,7 @@ import (
 
 const maxDataplaneRuleSlots = 512
 
-type dataplaneRuleRuntime struct {
+type dataplaneRuntimeEntry struct {
 	ifindex int
 	runtime DataplaneRuntime
 }
@@ -52,7 +52,7 @@ func (r *DataplaneAttachmentRuntime) ReplaceRuleset(ctx context.Context, ruleset
 	if err != nil {
 		return types.Ruleset{}, err
 	}
-	entries := r.enabledRuleRuntimesLocked()
+	entries := r.enabledDataplaneRuntimesLocked()
 
 	if err := r.applyRulesetLocked(entries, nextRules, previousRules); err != nil {
 		return types.Ruleset{}, err
@@ -76,7 +76,7 @@ func (r *DataplaneAttachmentRuntime) ClearRuleset(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	entries := r.enabledRuleRuntimesLocked()
+	entries := r.enabledDataplaneRuntimesLocked()
 
 	if err := r.applyRulesetLocked(entries, rule.RuleSet{}, previousRules); err != nil {
 		return err
@@ -101,8 +101,8 @@ func (r *DataplaneAttachmentRuntime) applyCurrentRulesetToRuntimeLocked(ifindex 
 	return nil
 }
 
-func (r *DataplaneAttachmentRuntime) applyRulesetLocked(entries []dataplaneRuleRuntime, next rule.RuleSet, previous rule.RuleSet) error {
-	applied := make([]dataplaneRuleRuntime, 0, len(entries))
+func (r *DataplaneAttachmentRuntime) applyRulesetLocked(entries []dataplaneRuntimeEntry, next rule.RuleSet, previous rule.RuleSet) error {
+	applied := make([]dataplaneRuntimeEntry, 0, len(entries))
 	for _, entry := range entries {
 		if err := entry.runtime.ReplaceRules(cloneRuleSet(next)); err != nil {
 			if rollbackErr := rollbackRuleset(applied, previous); rollbackErr != nil {
@@ -116,7 +116,7 @@ func (r *DataplaneAttachmentRuntime) applyRulesetLocked(entries []dataplaneRuleR
 	return nil
 }
 
-func rollbackRuleset(entries []dataplaneRuleRuntime, previous rule.RuleSet) error {
+func rollbackRuleset(entries []dataplaneRuntimeEntry, previous rule.RuleSet) error {
 	var joined error
 	for i := len(entries) - 1; i >= 0; i-- {
 		entry := entries[i]
@@ -127,14 +127,14 @@ func rollbackRuleset(entries []dataplaneRuleRuntime, previous rule.RuleSet) erro
 	return joined
 }
 
-func (r *DataplaneAttachmentRuntime) enabledRuleRuntimesLocked() []dataplaneRuleRuntime {
-	entries := make([]dataplaneRuleRuntime, 0, len(r.runtimes))
+func (r *DataplaneAttachmentRuntime) enabledDataplaneRuntimesLocked() []dataplaneRuntimeEntry {
+	entries := make([]dataplaneRuntimeEntry, 0, len(r.runtimes))
 	for ifindex, runtime := range r.runtimes {
 		attachment, ok := r.attachments[ifindex]
 		if !ok || !attachment.Enabled || runtime == nil {
 			continue
 		}
-		entries = append(entries, dataplaneRuleRuntime{
+		entries = append(entries, dataplaneRuntimeEntry{
 			ifindex: ifindex,
 			runtime: runtime,
 		})

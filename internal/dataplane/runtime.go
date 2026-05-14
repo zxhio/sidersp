@@ -182,6 +182,14 @@ func (r *Runtime) Events() []model.EventRecord {
 	return r.events.list()
 }
 
+func (r *Runtime) ReplaceXDPResponse(opts XDPResponseOptions) error {
+	if err := r.writeXDPResponseConfig(opts); err != nil {
+		return err
+	}
+	r.opts.XDPResponse = opts
+	return nil
+}
+
 // ReplaceRules rebuilds the next rule snapshot and syncs only the changed BPF map entries.
 // The first sync still does a full map reset/write. Later syncs keep the existing
 // "transiently pass traffic during update" contract by clearing flow cache, zeroing

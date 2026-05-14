@@ -310,6 +310,130 @@ func TestDataplaneRulesetReenableAttachmentAppliesCurrentRuleset(t *testing.T) {
 	require.Equal(t, 8008, second.appliedRules[0].Rules[0].ID)
 }
 
+func TestDataplaneResponseReplaceAppliesAllEnabledAttachments(t *testing.T) {
+	first := &fakeDataplaneRuntime{programID: 101}
+	second := &fakeDataplaneRuntime{programID: 202}
+	opener := &recordingDataplaneOpener{next: []*fakeDataplaneRuntime{first, second}}
+	runtime := newTestDataplaneAttachmentRuntime(opener)
+	_, err := runtime.CreateAttachment(context.Background(), types.Attachment{IfIndex: 21})
+	require.NoError(t, err)
+	_, err = runtime.CreateAttachment(context.Background(), types.Attachment{IfIndex: 22})
+	require.NoError(t, err)
+	svc := service.NewResponseService(runtime)
+
+	got, err := svc.ReplaceResponse(context.Background(), testResponseConfig(30, types.VLANModeAccess))
+
+	require.NoError(t, err)
+	require.Equal(t, 30, got.IfIndex)
+	require.Equal(t, types.VLANModeAccess, got.VLANMode)
+	require.Len(t, first.appliedXDP, 1)
+	require.Len(t, second.appliedXDP, 1)
+	require.Equal(t, 30, first.appliedXDP[0].EgressIfIndex)
+	require.Equal(t, types.VLANModeAccess, first.appliedXDP[0].VLANMode)
+	require.Equal(t, "pass", first.appliedXDP[0].FailureVerdict)
+
+	stored, err := runtime.GetResponse(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, got, stored)
+	configured, err := runtime.ResponseConfigured(context.Background())
+	require.NoError(t, err)
+	require.True(t, configured)
+}
+
+func TestDataplaneResponseApplyFailureDoesNotStoreAndRollsBack(t *testing.T) {
+	first := &fakeDataplaneRuntime{programID: 101}
+	second := &fakeDataplaneRuntime{programID: 202}
+	opener := &recordingDataplaneOpener{next: []*fakeDataplaneRuntime{first, second}}
+	runtime := newTestDataplaneAttachmentRuntime(opener)
+	_, err := runtime.CreateAttachment(context.Background(), types.Attachment{IfIndex: 23})
+	require.NoError(t, err)
+	_, err = runtime.CreateAttachment(context.Background(), types.Attachment{IfIndex: 24})
+	require.NoError(t, err)
+	svc := service.NewResponseService(runtime)
+	previous := testResponseConfig(40, types.VLANModePreserve)
+	_, err = svc.ReplaceResponse(context.Background(), previous)
+	require.NoError(t, err)
+	second.xdpErr = errors.New("tx config failed")
+
+	_, err = svc.ReplaceResponse(context.Background(), testResponseConfig(41, types.VLANModeAccess))
+
+	require.ErrorContains(t, err, "tx config failed")
+	stored, getErr := runtime.GetResponse(context.Background())
+	require.NoError(t, getErr)
+	require.Equal(t, previous, stored)
+	require.Len(t, first.appliedXDP, 3)
+	require.Equal(t, 40, first.appliedXDP[2].EgressIfIndex)
+	require.Equal(t, types.VLANModePreserve, first.appliedXDP[2].VLANMode)
+	require.Len(t, second.appliedXDP, 2)
+	require.Equal(t, 41, second.appliedXDP[1].EgressIfIndex)
+}
+
+func TestDataplaneResponseClearAppliesDefaultConfig(t *testing.T) {
+	fakeRuntime := &fakeDataplaneRuntime{programID: 101}
+	opener := &recordingDataplaneOpener{next: []*fakeDataplaneRuntime{fakeRuntime}}
+	runtime := newTestDataplaneAttachmentRuntime(opener)
+	_, err := runtime.CreateAttachment(context.Background(), types.Attachment{IfIndex: 25})
+	require.NoError(t, err)
+	svc := service.NewResponseService(runtime)
+	_, err = svc.ReplaceResponse(context.Background(), testResponseConfig(50, types.VLANModeAccess))
+	require.NoError(t, err)
+
+	err = svc.ClearResponse(context.Background())
+
+	require.NoError(t, err)
+	require.Len(t, fakeRuntime.appliedXDP, 2)
+	require.Zero(t, fakeRuntime.appliedXDP[1].EgressIfIndex)
+	require.Equal(t, types.VLANModePreserve, fakeRuntime.appliedXDP[1].VLANMode)
+	require.Equal(t, "pass", fakeRuntime.appliedXDP[1].FailureVerdict)
+	stored, err := runtime.GetResponse(context.Background())
+	require.NoError(t, err)
+	require.Zero(t, stored.IfIndex)
+	require.Equal(t, types.VLANModePreserve, stored.VLANMode)
+	configured, err := runtime.ResponseConfigured(context.Background())
+	require.NoError(t, err)
+	require.False(t, configured)
+}
+
+func TestDataplaneResponseCreateAttachmentAppliesCurrentConfig(t *testing.T) {
+	first := &fakeDataplaneRuntime{programID: 101}
+	second := &fakeDataplaneRuntime{programID: 202}
+	opener := &recordingDataplaneOpener{next: []*fakeDataplaneRuntime{first, second}}
+	runtime := newTestDataplaneAttachmentRuntime(opener)
+	_, err := runtime.CreateAttachment(context.Background(), types.Attachment{IfIndex: 26})
+	require.NoError(t, err)
+	svc := service.NewResponseService(runtime)
+	_, err = svc.ReplaceResponse(context.Background(), testResponseConfig(60, types.VLANModeAccess))
+	require.NoError(t, err)
+
+	_, err = runtime.CreateAttachment(context.Background(), types.Attachment{IfIndex: 27})
+
+	require.NoError(t, err)
+	require.Len(t, second.appliedXDP, 1)
+	require.Equal(t, 60, second.appliedXDP[0].EgressIfIndex)
+	require.Equal(t, types.VLANModeAccess, second.appliedXDP[0].VLANMode)
+}
+
+func TestDataplaneResponseReenableAttachmentAppliesCurrentConfig(t *testing.T) {
+	first := &fakeDataplaneRuntime{programID: 101}
+	second := &fakeDataplaneRuntime{programID: 202}
+	opener := &recordingDataplaneOpener{next: []*fakeDataplaneRuntime{first, second}}
+	runtime := newTestDataplaneAttachmentRuntime(opener)
+	_, err := runtime.CreateAttachment(context.Background(), types.Attachment{IfIndex: 28})
+	require.NoError(t, err)
+	svc := service.NewResponseService(runtime)
+	_, err = svc.ReplaceResponse(context.Background(), testResponseConfig(70, types.VLANModeAccess))
+	require.NoError(t, err)
+	_, err = runtime.SetAttachmentEnabled(context.Background(), 28, false)
+	require.NoError(t, err)
+
+	_, err = runtime.SetAttachmentEnabled(context.Background(), 28, true)
+
+	require.NoError(t, err)
+	require.Len(t, second.appliedXDP, 1)
+	require.Equal(t, 70, second.appliedXDP[0].EgressIfIndex)
+	require.Equal(t, types.VLANModeAccess, second.appliedXDP[0].VLANMode)
+}
+
 func newTestDataplaneAttachmentRuntime(opener *recordingDataplaneOpener) *DataplaneAttachmentRuntime {
 	return NewDataplaneAttachmentRuntime(service.NewInMemoryRuntime(), opener.open, func(index int) (*net.Interface, error) {
 		return &net.Interface{Index: index, Name: "eth" + strconv.Itoa(index)}, nil
@@ -329,6 +453,14 @@ func testDataplaneRuleset(version uint64, ruleID uint32) types.Ruleset {
 				Response: types.RuleResponse{Action: "tcp_reset"},
 			},
 		},
+	}
+}
+
+func testResponseConfig(ifindex int, vlanMode string) types.ResponseConfig {
+	return types.ResponseConfig{
+		IfIndex:  ifindex,
+		IfName:   "eth" + strconv.Itoa(ifindex),
+		VLANMode: vlanMode,
 	}
 }
 
