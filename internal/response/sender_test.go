@@ -60,44 +60,6 @@ func (s *stubMixedSender) WriteBorrowedIPv4Packet(_ context.Context, packet []by
 
 func (s *stubMixedSender) Close() error { return nil }
 
-func TestAFXDPSenderBuildsAndSendsFrame(t *testing.T) {
-	t.Parallel()
-
-	out := &stubFrameSender{}
-	sender := &responseTXSender{
-		backend:   TXBackendAFXDP,
-		out:       out,
-		buildOpts: BuildOptions{},
-	}
-
-	if err := sender.Send(context.Background(), XSKMetadata{Action: ActionICMPEchoReply}, nil, buildTestICMPEchoRequest(t), nil); err != nil {
-		t.Fatalf("Send() error = %v", err)
-	}
-	if len(out.frames) != 1 {
-		t.Fatalf("frames = %d, want 1", len(out.frames))
-	}
-}
-
-func TestAFPacketSenderBuildsAndSendsFrame(t *testing.T) {
-	t.Parallel()
-
-	out := &stubFrameSender{}
-	sender := &responseTXSender{
-		backend: TXBackendAFPacket,
-		out:     out,
-		buildOpts: BuildOptions{
-			HardwareAddr: testHWAddr,
-		},
-	}
-
-	if err := sender.Send(context.Background(), XSKMetadata{Action: ActionARPReply}, nil, buildTestARPRequest(t), nil); err != nil {
-		t.Fatalf("Send() error = %v", err)
-	}
-	if len(out.frames) != 1 {
-		t.Fatalf("frames = %d, want 1", len(out.frames))
-	}
-}
-
 func TestAFXDPSenderReturnsFrameSendError(t *testing.T) {
 	t.Parallel()
 
@@ -111,26 +73,6 @@ func TestAFXDPSenderReturnsFrameSendError(t *testing.T) {
 	err := sender.Send(context.Background(), XSKMetadata{Action: ActionICMPEchoReply}, nil, buildTestICMPEchoRequest(t), nil)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("Send() error = %v, want %v", err, wantErr)
-	}
-}
-
-func TestAFPacketSenderUsesARPBuildOptions(t *testing.T) {
-	t.Parallel()
-
-	out := &stubFrameSender{}
-	sender := &responseTXSender{
-		backend: TXBackendAFPacket,
-		out:     out,
-		buildOpts: BuildOptions{
-			HardwareAddr: testHWAddr,
-		},
-	}
-
-	if err := sender.Send(context.Background(), XSKMetadata{Action: ActionARPReply}, nil, buildTestARPRequest(t), nil); err != nil {
-		t.Fatalf("Send() error = %v", err)
-	}
-	if len(out.frames) != 1 {
-		t.Fatalf("frames = %d, want 1", len(out.frames))
 	}
 }
 

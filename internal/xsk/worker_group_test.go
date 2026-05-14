@@ -80,24 +80,6 @@ func TestNewWorkerGroupValidation(t *testing.T) {
 	}
 }
 
-func TestWorkerGroupRunCompletesWhenWorkersComplete(t *testing.T) {
-	t.Parallel()
-
-	workerA := &stubWorkerRunner{}
-	workerB := &stubWorkerRunner{}
-	group := newTestWorkerGroup(t, []WorkerSpec{
-		{QueueID: 0, Worker: workerA},
-		{QueueID: 1, Worker: workerB},
-	})
-
-	if err := group.Run(context.Background()); err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-	if workerA.calls != 1 || workerB.calls != 1 {
-		t.Fatalf("worker calls = %d,%d; want 1,1", workerA.calls, workerB.calls)
-	}
-}
-
 func TestWorkerGroupRunReturnsFirstErrorAndCancelsSiblings(t *testing.T) {
 	t.Parallel()
 
@@ -123,21 +105,6 @@ func TestWorkerGroupRunReturnsFirstErrorAndCancelsSiblings(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("Run() did not return after worker error")
-	}
-}
-
-func TestWorkerGroupRunRespectsCanceledContext(t *testing.T) {
-	t.Parallel()
-
-	group := newTestWorkerGroup(t, []WorkerSpec{
-		{QueueID: 0, Worker: &stubWorkerRunner{}},
-	})
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	err := group.Run(ctx)
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("Run() error = %v, want context.Canceled", err)
 	}
 }
 

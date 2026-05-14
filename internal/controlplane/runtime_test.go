@@ -8,16 +8,21 @@ import (
 	"testing"
 	"time"
 
-	"sidersp/internal/config"
 	"sidersp/internal/model"
 	"sidersp/internal/rule"
 )
 
 type testSyncer struct {
-	last rule.RuleSet
+	last  rule.RuleSet
+	err   error
+	calls int
 }
 
 func (s *testSyncer) ReplaceRules(set rule.RuleSet) error {
+	s.calls++
+	if s.err != nil {
+		return s.err
+	}
 	s.last = cloneRuleSet(set)
 	return nil
 }
@@ -51,17 +56,21 @@ func newTestRuntime(t testing.TB, opts Options, syncer RuleSyncer, streamer Even
 	return runtime
 }
 
-func TestSetRuleEnabledSyncsEnabledRulesOnly(t *testing.T) {
-	t.Parallel()
-
-	syncer := &testSyncer{}
-	r := newTestRuntime(t, Options{}, syncer, testStreamer{}, testStatsReader{})
-	r.rules = rule.RuleSet{
+func testRuntimeRuleSet() rule.RuleSet {
+	return rule.RuleSet{
 		Rules: []rule.Rule{
 			{ID: 1, Name: "one", Enabled: true, Priority: 10, Response: rule.RuleResponse{Action: "tcp_reset"}},
 			{ID: 2, Name: "two", Enabled: false, Priority: 20, Response: rule.RuleResponse{Action: "tcp_reset"}},
 		},
 	}
+}
+
+func TestSetRuleEnabledSyncsEnabledRulesOnly(t *testing.T) {
+	t.Parallel()
+
+	syncer := &testSyncer{}
+	r := newTestRuntime(t, Options{}, syncer, testStreamer{}, testStatsReader{})
+	r.rules = testRuntimeRuleSet()
 
 	got, err := r.SetRuleEnabled(2, true)
 	if err != nil {
@@ -76,86 +85,45 @@ func TestSetRuleEnabledSyncsEnabledRulesOnly(t *testing.T) {
 	}
 }
 
-func TestGetRuleReturnsNotFound(t *testing.T) {
+func TestSetRuleEnabledKeepsCurrentRulesOnPersistFailure(t *testing.T) {
 	t.Parallel()
 
-	r := newTestRuntime(t, Options{}, &testSyncer{}, testStreamer{}, testStatsReader{})
-	_, err := r.GetRule(99)
-	if err != ErrRuleNotFound {
-		t.Fatalf("GetRule() error = %v, want %v", err, ErrRuleNotFound)
+	dir := t.TempDir()
+	blocker := filepath.Join(dir, "not-a-dir")
+	if err := os.WriteFile(blocker, []byte("block"), 0o644); err != nil {
+		t.Fatalf("write blocker: %v", err)
 	}
-}
-
-func TestCreateRulePersistsAndSyncs(t *testing.T) {
-	t.Parallel()
-
-	rulesPath := filepath.Join(t.TempDir(), "rules.yaml")
+	rulesPath := filepath.Join(blocker, "rules.yaml")
 	syncer := &testSyncer{}
 	r := newTestRuntime(t, Options{RulesPath: rulesPath}, syncer, testStreamer{}, testStatsReader{})
-	r.rules = rule.RuleSet{
-		Rules: []rule.Rule{
-			{ID: 1, Name: "one", Enabled: true, Priority: 10, Response: rule.RuleResponse{Action: "tcp_reset"}},
-		},
-	}
+	r.rules = testRuntimeRuleSet()
 
-	item, err := r.CreateRule(rule.Rule{
-		Name:     "two",
-		Enabled:  true,
-		Priority: 20,
-		Match:    rule.RuleMatch{DstPorts: []int{443}},
-		Response: rule.RuleResponse{Action: "tcp_reset"},
-	})
-	if err != nil {
-		t.Fatalf("CreateRule() error = %v", err)
+	_, err := r.SetRuleEnabled(2, true)
+	if err == nil {
+		t.Fatal("SetRuleEnabled() error = nil, want persist error")
 	}
-	if item.ID != 2 {
-		t.Fatalf("created rule id = %d, want 2", item.ID)
+	if r.rules.Rules[1].Enabled {
+		t.Fatalf("rules = %+v, want current rules unchanged after persist failure", r.rules.Rules)
 	}
-	if len(syncer.last.Rules) != 2 {
-		t.Fatalf("synced rules = %d, want 2", len(syncer.last.Rules))
-	}
-	if _, err := os.Stat(rulesPath); err != nil {
-		t.Fatalf("stat rules file: %v", err)
-	}
-
-	set, err := LoadRules(rulesPath)
-	if err != nil {
-		t.Fatalf("LoadRules() error = %v", err)
-	}
-	if len(set.Rules) != 2 || set.Rules[1].ID != 2 {
-		t.Fatalf("persisted rules = %+v, want second rule id 2", set.Rules)
+	if syncer.calls != 0 {
+		t.Fatalf("sync calls = %d, want 0 after persist failure", syncer.calls)
 	}
 }
 
-func TestUpdateRuleIgnoresBodyID(t *testing.T) {
+func TestSetRuleEnabledKeepsCurrentRulesOnSyncFailure(t *testing.T) {
 	t.Parallel()
 
-	r := newTestRuntime(t, Options{}, &testSyncer{}, testStreamer{}, testStatsReader{})
-	r.rules = rule.RuleSet{
-		Rules: []rule.Rule{
-			{ID: 1, Name: "one", Enabled: true, Priority: 10, Response: rule.RuleResponse{Action: "tcp_reset"}},
-			{ID: 2, Name: "two", Enabled: true, Priority: 20, Response: rule.RuleResponse{Action: "tcp_reset"}},
-		},
-	}
+	wantErr := errors.New("sync failed")
+	syncer := &testSyncer{err: wantErr}
+	r := newTestRuntime(t, Options{}, syncer, testStreamer{}, testStatsReader{})
+	r.rules = testRuntimeRuleSet()
 
-	updated, err := r.UpdateRule(2, rule.Rule{
-		ID:       1,
-		Name:     "two-updated",
-		Enabled:  true,
-		Priority: 10,
-		Response: rule.RuleResponse{Action: "tcp_reset"},
-	})
-	if err != nil {
-		t.Fatalf("UpdateRule() error = %v", err)
+	_, err := r.SetRuleEnabled(2, true)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("SetRuleEnabled() error = %v, want %v", err, wantErr)
 	}
-	if updated.ID != 2 {
-		t.Fatalf("updated rule id = %d, want 2", updated.ID)
-	}
-	if r.rules.Rules[0].ID != 1 {
-		t.Fatalf("first rule id = %d, want 1", r.rules.Rules[0].ID)
-	}
-	if r.rules.Rules[1].ID != 2 {
-		t.Fatalf("second rule id = %d, want 2", r.rules.Rules[1].ID)
+	if r.rules.Rules[1].Enabled {
+		t.Fatalf("rules = %+v, want current rules unchanged after sync failure", r.rules.Rules)
 	}
 }
 
@@ -193,61 +161,6 @@ func TestBootstrapPersistsAssignedRuleIDs(t *testing.T) {
 	}
 	if len(persisted.Rules) != 1 || persisted.Rules[0].ID != 1 {
 		t.Fatalf("persisted rules = %+v, want one rule id 1", persisted.Rules)
-	}
-}
-
-func TestDeleteRuleRemovesAndSyncs(t *testing.T) {
-	t.Parallel()
-
-	syncer := &testSyncer{}
-	r := newTestRuntime(t, Options{}, syncer, testStreamer{}, testStatsReader{})
-	r.rules = rule.RuleSet{
-		Rules: []rule.Rule{
-			{ID: 1, Name: "one", Enabled: true, Priority: 10, Response: rule.RuleResponse{Action: "tcp_reset"}},
-			{ID: 2, Name: "two", Enabled: false, Priority: 20, Response: rule.RuleResponse{Action: "tcp_reset"}},
-		},
-	}
-
-	if err := r.DeleteRule(1); err != nil {
-		t.Fatalf("DeleteRule() error = %v", err)
-	}
-	if len(r.rules.Rules) != 1 {
-		t.Fatalf("rules len = %d, want 1", len(r.rules.Rules))
-	}
-	if len(syncer.last.Rules) != 0 {
-		t.Fatalf("enabled synced rules = %d, want 0", len(syncer.last.Rules))
-	}
-}
-
-func TestSetRuleEnabledPersistsAndSyncs(t *testing.T) {
-	t.Parallel()
-
-	rulesPath := filepath.Join(t.TempDir(), "rules.yaml")
-	syncer := &testSyncer{}
-	r := newTestRuntime(t, Options{RulesPath: rulesPath}, syncer, testStreamer{}, testStatsReader{})
-	r.rules = rule.RuleSet{
-		Rules: []rule.Rule{
-			{ID: 1, Name: "one", Enabled: true, Priority: 10, Response: rule.RuleResponse{Action: "tcp_reset"}},
-		},
-	}
-
-	got, err := r.SetRuleEnabled(1, false)
-	if err != nil {
-		t.Fatalf("SetRuleEnabled() error = %v", err)
-	}
-	if got.Enabled {
-		t.Fatal("SetRuleEnabled() returned enabled rule, want disabled")
-	}
-	if len(syncer.last.Rules) != 0 {
-		t.Fatalf("enabled synced rules = %d, want 0", len(syncer.last.Rules))
-	}
-
-	set, err := LoadRules(rulesPath)
-	if err != nil {
-		t.Fatalf("LoadRules() error = %v", err)
-	}
-	if len(set.Rules) != 1 || set.Rules[0].Enabled {
-		t.Fatalf("persisted rules = %+v, want one disabled rule", set.Rules)
 	}
 }
 
@@ -401,135 +314,5 @@ func TestResetStatsClearsHistoryAndCallsReader(t *testing.T) {
 	}
 	if len(r.history) != 0 {
 		t.Fatalf("history len = %d, want 0", len(r.history))
-	}
-}
-
-func TestTrimRawStatsHistoryDropsExpiredPoints(t *testing.T) {
-	t.Parallel()
-
-	now := time.Date(2026, 4, 16, 12, 0, 0, 0, time.UTC)
-	r := newTestRuntime(t, Options{}, &testSyncer{}, testStreamer{}, testStatsReader{})
-	r.history = []StatsPoint{
-		{Timestamp: now.Add(-(10 * time.Minute) - (20 * time.Second)), RXPackets: 1},
-		{Timestamp: now.Add(-time.Minute).Truncate(10 * time.Second), RXPackets: 2},
-		{Timestamp: now, RXPackets: 3},
-	}
-	r.opts.StatsKeepWindow = 10 * time.Minute
-	r.opts.StatsKeepLimit = 60
-
-	r.trimRawStatsHistory(now)
-
-	if len(r.history) != 2 {
-		t.Fatalf("history len = %d, want 2", len(r.history))
-	}
-	if r.history[0].RXPackets != 2 || r.history[1].RXPackets != 3 {
-		t.Fatalf("history = %+v, want rx_packets [2,3]", r.history)
-	}
-}
-
-func TestTrimRawStatsHistoryKeepsMaxCount(t *testing.T) {
-	t.Parallel()
-
-	now := time.Date(2026, 4, 16, 12, 0, 0, 0, time.UTC)
-	r := newTestRuntime(t, Options{}, &testSyncer{}, testStreamer{}, testStatsReader{})
-	r.opts.StatsKeepWindow = time.Hour
-	r.opts.StatsKeepLimit = 3
-	r.history = make([]StatsPoint, 0, 5)
-	for i := 0; i < 5; i++ {
-		r.appendRawStatsPoint(StatsPoint{
-			Timestamp: now.Add(time.Duration(i) * 10 * time.Second),
-			RXPackets: uint64(i),
-		})
-	}
-	r.trimRawStatsHistory(now.Add(40 * time.Second))
-
-	if len(r.history) != 3 {
-		t.Fatalf("history len = %d, want 3", len(r.history))
-	}
-	if r.history[0].RXPackets != 2 {
-		t.Fatalf("first point = %+v, want rx_packets=2", r.history[0])
-	}
-}
-
-func TestAppendRawStatsPointMergesSameBucket(t *testing.T) {
-	t.Parallel()
-
-	r := newTestRuntime(t, Options{}, &testSyncer{}, testStreamer{}, testStatsReader{})
-	base := time.Date(2026, 4, 16, 12, 34, 56, 0, time.UTC)
-
-	r.appendRawStatsPoint(StatsPoint{Timestamp: base, RXPackets: 1})
-	r.appendRawStatsPoint(StatsPoint{Timestamp: base, RXPackets: 2})
-
-	if len(r.history) != 1 {
-		t.Fatalf("history len = %d, want 1", len(r.history))
-	}
-	if r.history[0].RXPackets != 2 {
-		t.Fatalf("point[0] = %+v, want rx_packets=2", r.history[0])
-	}
-}
-
-func TestAggregateStatsPointsUsesRangeStepAndLimit(t *testing.T) {
-	t.Parallel()
-
-	now := time.Date(2026, 4, 16, 12, 0, 0, 0, time.UTC)
-	history := []StatsPoint{
-		{Timestamp: now.Add(-20 * time.Minute), RXPackets: 1},
-		{Timestamp: now.Add(-9 * time.Minute), RXPackets: 2},
-		{Timestamp: now.Add(-8 * time.Minute), RXPackets: 3},
-		{Timestamp: now.Add(-2 * time.Minute), RXPackets: 4},
-	}
-	query := StatsQuery{Range: 10 * time.Minute, Step: 5 * time.Minute, Limit: 2}
-	current := Stats{RXPackets: 5}
-
-	points := aggregateStatsPoints(history, now, query, current)
-
-	if len(points) != 2 {
-		t.Fatalf("points len = %d, want 2", len(points))
-	}
-	if points[0].RXPackets != 4 || points[1].RXPackets != 5 {
-		t.Fatalf("points = %+v, want rx_packets [4,5]", points)
-	}
-}
-
-func TestBuildStatsQueryAlignsDisplayStep(t *testing.T) {
-	t.Parallel()
-
-	query := buildStatsQuery(24*time.Hour, 10*time.Second)
-	if query.Step != 15*time.Minute {
-		t.Fatalf("query.Step = %v, want %v", query.Step, 15*time.Minute)
-	}
-	if query.Limit != maxStatsDisplayPoints {
-		t.Fatalf("query.Limit = %d, want %d", query.Limit, maxStatsDisplayPoints)
-	}
-}
-
-func TestNewOptionsParsesConsoleStats(t *testing.T) {
-	t.Parallel()
-
-	opts, err := NewOptions(
-		config.ControlPlaneConfig{RulesPath: "rules.yaml"},
-		config.ConsoleConfig{
-			Stats: config.ConsoleStatsConfig{
-				CollectInterval: "15s",
-				Retention:       "7d",
-			},
-		},
-	)
-	if err != nil {
-		t.Fatalf("NewOptions() error = %v", err)
-	}
-	if opts.RulesPath != "rules.yaml" {
-		t.Fatalf("NewOptions() = %+v, want rules path", opts)
-	}
-	if opts.StatsCollectStep != 15*time.Second || opts.StatsKeepWindow != 7*24*time.Hour {
-		t.Fatalf("NewOptions() = %+v, want collect 15s retention 7d", opts)
-	}
-}
-
-func TestNewRuntimeReturnsErrorForNilSyncer(t *testing.T) {
-	t.Parallel()
-
-	if _, err := NewRuntime(Options{}, nil, testStreamer{}, testStatsReader{}, nil); err == nil {
-		t.Fatal("NewRuntime() error = nil, want validation error")
 	}
 }

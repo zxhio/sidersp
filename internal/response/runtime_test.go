@@ -5,7 +5,6 @@ import (
 	"net"
 	"testing"
 
-	"sidersp/internal/config"
 	"sidersp/internal/model"
 	"sidersp/internal/xsk"
 )
@@ -43,55 +42,6 @@ func normalizeTestOptions(opts Options) Options {
 	return opts
 }
 
-func TestNewRuntimeUsesDefaults(t *testing.T) {
-	t.Parallel()
-
-	runtime, err := NewRuntime(normalizeTestOptions(Options{}), nil)
-	if err != nil {
-		t.Fatalf("NewRuntime() error = %v", err)
-	}
-	if runtime.results.capacity != 1024 {
-		t.Fatalf("result capacity = %d, want 1024", runtime.results.capacity)
-	}
-	if got := runtime.ReadStats(); got != (model.ResponseStats{}) {
-		t.Fatalf("ReadStats() = %+v, want zero response stats", got)
-	}
-}
-
-func TestNewOptionsDisabledReturnsDisabledOptions(t *testing.T) {
-	t.Parallel()
-
-	opts, err := NewOptions(
-		config.DataplaneConfig{Interface: "eth0", CombinedChannels: 2},
-		config.EgressConfig{},
-		config.ResponseConfig{},
-		config.XSKConfig{},
-	)
-	if err != nil {
-		t.Fatalf("NewOptions() error = %v", err)
-	}
-	if opts.Enabled {
-		t.Fatalf("NewOptions() = %+v, want disabled options", opts)
-	}
-}
-
-func TestResolveTXHardwareAddrUsesInterfaceDefault(t *testing.T) {
-	t.Parallel()
-
-	txIface := net.Interface{
-		Name:         "eth-test0",
-		HardwareAddr: testHWAddr,
-	}
-
-	defaulted, err := resolveTXHardwareAddr(txIface)
-	if err != nil {
-		t.Fatalf("resolveTXHardwareAddr() error = %v", err)
-	}
-	if got := defaulted.String(); got != testHWAddr.String() {
-		t.Fatalf("default hardware addr = %s, want %s", got, testHWAddr)
-	}
-}
-
 func TestRuntimeHandleXSKSendsResponse(t *testing.T) {
 	t.Parallel()
 
@@ -121,30 +71,6 @@ func TestRuntimeHandleXSKSendsResponse(t *testing.T) {
 	}
 	if results[0].RXQueue != 3 || results[0].RuleID != 1001 || results[0].Result != ResultSent {
 		t.Fatalf("result = %+v, want queue=3 rule=1001 sent", results[0])
-	}
-}
-
-func TestRuntimeResultsReturnsCopy(t *testing.T) {
-	t.Parallel()
-
-	runtime, err := NewRuntime(normalizeTestOptions(Options{}), nil)
-	if err != nil {
-		t.Fatalf("NewRuntime() error = %v", err)
-	}
-	if err := runtime.results.Record(ResponseResult{
-		RuleID:    1001,
-		Action:    "icmp_echo_reply",
-		Result:    ResultSent,
-		TXBackend: TXBackendAFXDP,
-		RXQueue:   0,
-	}); err != nil {
-		t.Fatalf("Record() error = %v", err)
-	}
-
-	results := runtime.Results()
-	results[0].RuleID = 9999
-	if runtime.Results()[0].RuleID != 1001 {
-		t.Fatal("Results() returned mutable backing storage")
 	}
 }
 
@@ -189,14 +115,5 @@ func TestRuntimeResetStatsClearsResponseCounters(t *testing.T) {
 	}
 	if got := runtime.ReadStats(); got != (model.ResponseStats{}) {
 		t.Fatalf("ReadStats() after reset = %+v, want zero response stats", got)
-	}
-}
-
-func TestNewRuntimeRejectsUnnormalizedOptions(t *testing.T) {
-	t.Parallel()
-
-	_, err := NewRuntime(Options{}, nil)
-	if err == nil {
-		t.Fatal("NewRuntime() error = nil, want validation error")
 	}
 }

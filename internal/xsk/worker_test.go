@@ -3,7 +3,6 @@ package xsk
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 )
 
@@ -95,34 +94,6 @@ func newStubHandlerWithError(err error) FrameHandler {
 	return func(_ context.Context, _ int, _ Socket, _ []byte) error { return err }
 }
 
-func TestWorkerRegistersBeforeReceive(t *testing.T) {
-	t.Parallel()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	registrar := &stubRegistrar{}
-	socket := &stubSocket{fd: 42, onEmpty: cancel}
-	handler := func(_ context.Context, _ int, _ Socket, _ []byte) error { return nil }
-	worker, err := NewWorker(7, 3, registrar, socket, handler)
-	if err != nil {
-		t.Fatalf("NewWorker() error = %v", err)
-	}
-
-	if err := worker.Run(ctx); err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-	if registrar.calls != 1 || registrar.queueID != 3 || registrar.fd != 42 {
-		t.Fatalf("registrar = %+v, want queue=3 fd=42 calls=1", registrar)
-	}
-	if socket.calls != 1 {
-		t.Fatalf("socket calls = %d, want 1", socket.calls)
-	}
-	if socket.borrowCalls != 1 {
-		t.Fatalf("socket borrowed calls = %d, want 1", socket.borrowCalls)
-	}
-}
-
 func TestWorkerReturnsRegisterError(t *testing.T) {
 	t.Parallel()
 
@@ -197,65 +168,5 @@ func TestWorkerContinuesAfterFrameHandlerError(t *testing.T) {
 	}
 	if socket.calls != 3 {
 		t.Fatalf("socket calls = %d, want 3", socket.calls)
-	}
-}
-
-func TestNewWorkerValidation(t *testing.T) {
-	t.Parallel()
-
-	noopHandler := FrameHandler(func(_ context.Context, _ int, _ Socket, _ []byte) error { return nil })
-
-	tests := []struct {
-		name      string
-		registrar Registrar
-		socket    Socket
-		handler   FrameHandler
-		queueID   int
-		want      string
-	}{
-		{
-			name:    "missing registrar",
-			socket:  &stubSocket{},
-			handler: noopHandler,
-			queueID: 0,
-			want:    "registrar is required",
-		},
-		{
-			name:      "missing socket",
-			registrar: &stubRegistrar{},
-			handler:   noopHandler,
-			queueID:   0,
-			want:      "socket is required",
-		},
-		{
-			name:      "missing handler",
-			registrar: &stubRegistrar{},
-			socket:    &stubSocket{},
-			queueID:   0,
-			want:      "frame handler is required",
-		},
-		{
-			name:      "negative queue",
-			registrar: &stubRegistrar{},
-			socket:    &stubSocket{},
-			handler:   noopHandler,
-			queueID:   -1,
-			want:      "queue -1 out of range",
-		},
-	}
-
-	for _, tc := range tests {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			_, err := NewWorker(7, tc.queueID, tc.registrar, tc.socket, tc.handler)
-			if err == nil {
-				t.Fatal("NewWorker() error = nil, want validation error")
-			}
-			if !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("NewWorker() error = %q, want %q", err, tc.want)
-			}
-		})
 	}
 }

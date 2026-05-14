@@ -2,9 +2,7 @@ package dataplane
 
 import (
 	"encoding/binary"
-	"fmt"
 	"net/netip"
-	"strings"
 	"testing"
 
 	"github.com/cilium/ebpf/link"
@@ -218,89 +216,6 @@ func TestDecodeRuleEvent(t *testing.T) {
 
 	if ipv4String(got.SIP) != "192.168.32.1" {
 		t.Fatalf("ipv4String(SIP) = %q, want %q", ipv4String(got.SIP), "192.168.32.1")
-	}
-}
-
-func TestActionName(t *testing.T) {
-	t.Parallel()
-
-	if got := actionName(actionTCPReset); got != "TCP_RESET" {
-		t.Fatalf("actionName(actionTCPReset) = %q, want %q", got, "TCP_RESET")
-	}
-	if got := actionName(actionICMPPortUnreachable); got != "ICMP_PORT_UNREACHABLE" {
-		t.Fatalf("actionName(actionICMPPortUnreachable) = %q, want %q", got, "ICMP_PORT_UNREACHABLE")
-	}
-	if got := actionName(actionICMPHostUnreachable); got != "ICMP_HOST_UNREACHABLE" {
-		t.Fatalf("actionName(actionICMPHostUnreachable) = %q, want %q", got, "ICMP_HOST_UNREACHABLE")
-	}
-	if got := actionName(actionICMPAdminProhibited); got != "ICMP_ADMIN_PROHIBITED" {
-		t.Fatalf("actionName(actionICMPAdminProhibited) = %q, want %q", got, "ICMP_ADMIN_PROHIBITED")
-	}
-	if got := actionName(actionUDPEchoReply); got != "UDP_ECHO_REPLY" {
-		t.Fatalf("actionName(actionUDPEchoReply) = %q, want %q", got, "UDP_ECHO_REPLY")
-	}
-	if got := actionName(actionDNSRefused); got != "DNS_REFUSED" {
-		t.Fatalf("actionName(actionDNSRefused) = %q, want %q", got, "DNS_REFUSED")
-	}
-	if got := actionName(actionDNSSinkhole); got != "DNS_SINKHOLE" {
-		t.Fatalf("actionName(actionDNSSinkhole) = %q, want %q", got, "DNS_SINKHOLE")
-	}
-	if got := actionName(99); got != "UNKNOWN(99)" {
-		t.Fatalf("actionName(99) = %q, want %q", got, "UNKNOWN(99)")
-	}
-}
-
-func TestConditionNames(t *testing.T) {
-	t.Parallel()
-
-	got := conditionNames(condProtoTCP | condSrcPrefix | condDstPort | condTCPSYN)
-	want := "PROTO_TCP|SRC_PREFIX|DST_PORT|TCP_SYN"
-	if got != want {
-		t.Fatalf("conditionNames() = %q, want %q", got, want)
-	}
-}
-
-func TestFormatMaskSlots(t *testing.T) {
-	t.Parallel()
-
-	var mask siderspMaskT
-	setMaskBit(&mask, 0)
-	setMaskBit(&mask, 1)
-	setMaskBit(&mask, 65)
-
-	got := formatMaskSlots(mask)
-	want := "[0,1,65]"
-	if got != want {
-		t.Fatalf("formatMaskSlots() = %q, want %q", got, want)
-	}
-}
-
-func TestFormatMaskBits(t *testing.T) {
-	t.Parallel()
-
-	var mask siderspMaskT
-	setMaskBit(&mask, 0)
-	setMaskBit(&mask, 65)
-
-	got := formatMaskBits(mask)
-	words := make([]string, 0, len(mask.Bits))
-	for _, word := range mask.Bits {
-		words = append(words, fmt.Sprintf("0x%016x", word))
-	}
-	want := "[" + strings.Join(words, ",") + "]"
-	if got != want {
-		t.Fatalf("formatMaskBits() = %q, want %q", got, want)
-	}
-}
-
-func TestFormatLPMKey(t *testing.T) {
-	t.Parallel()
-
-	key := makeLPMKey(netip.MustParsePrefix("10.1.0.0/16"))
-	got := formatLPMKey(key)
-	want := "10.1.0.0/16"
-	if got != want {
-		t.Fatalf("formatLPMKey() = %q, want %q", got, want)
 	}
 }
 

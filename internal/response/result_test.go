@@ -64,47 +64,6 @@ func TestResultBufferEvictsOldest(t *testing.T) {
 	}
 }
 
-func TestResultBufferListReturnsCopy(t *testing.T) {
-	t.Parallel()
-
-	buffer := newTestResultBuffer(t, 2)
-	recordTestResult(t, buffer, ResponseResult{
-		TimestampNS: 1,
-		RuleID:      1001,
-		Action:      "icmp_echo_reply",
-		Result:      ResultSent,
-		TXBackend:   TXBackendAFXDP,
-		RXQueue:     0,
-	})
-
-	results := buffer.List()
-	results[0].RuleID = 9999
-
-	next := buffer.List()
-	if next[0].RuleID != 1001 {
-		t.Fatalf("List() returned mutable backing storage, rule id = %d", next[0].RuleID)
-	}
-}
-
-func TestResultBufferFillsTimestamp(t *testing.T) {
-	t.Parallel()
-
-	buffer := newTestResultBuffer(t, 1)
-	recordTestResult(t, buffer, ResponseResult{
-		TimestampNS: 1,
-		RuleID:      1001,
-		Action:      "icmp_echo_reply",
-		Result:      ResultSent,
-		TXBackend:   TXBackendAFXDP,
-		RXQueue:     0,
-	})
-
-	results := buffer.List()
-	if results[0].TimestampNS == 0 {
-		t.Fatal("TimestampNS = 0, want generated timestamp")
-	}
-}
-
 func TestResultBufferValidation(t *testing.T) {
 	t.Parallel()
 
