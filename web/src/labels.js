@@ -52,15 +52,15 @@ export const RESPONSE_ACTION_OPTIONS = ACTION_OPTIONS.filter(option => [
 
 export const EVENT_OUTCOME_OPTIONS = [
   { value: 'observe', label: '仅观测' },
-  { value: 'tx', label: '原口发送' },
-  { value: 'xsk', label: '已送 XSK' },
+  { value: 'xdp_tx', label: '原口发送' },
+  { value: 'xsk_redirect', label: '已送 XSK' },
   { value: 'redirect_tx', label: '内核重定向发送' },
 ]
 
 export const EVENT_OUTCOME_HINTS = {
   observe: '规则命中后记录了一条观测事件，原始报文后续按入口失败策略处理。',
-  tx: 'BPF 在内核中构造响应报文，并通过 XDP_TX 从原入接口发出；对应统计页原口发送 / xdp_tx。',
-  xsk: 'BPF 已把原始报文重定向到 XSK；真正的用户态响应发送结果请看响应结果页；对应统计页 response_redirect / xsk_redirected。',
+  xdp_tx: 'BPF 在内核中构造响应报文，并通过 XDP_TX 从原入接口发出；对应统计页原口发送 / xdp_tx。',
+  xsk_redirect: 'BPF 已把原始报文重定向到 XSK；真正的用户态响应发送结果请看响应结果页；对应统计页 response_redirect / xsk_redirected。',
   redirect_tx: 'BPF 在内核中构造响应报文，经 bpf_fib_lookup 后通过 XDP_REDIRECT 提交到配置的出接口；对应统计页 redirect_egress / redirect_tx。',
 }
 

@@ -156,9 +156,9 @@ func verdictName(code uint8) string {
 	case 0:
 		return "observe"
 	case 1:
-		return "tx"
+		return "xdp_tx"
 	case 2:
-		return "xsk"
+		return "xsk_redirect"
 	case 3:
 		return "redirect_tx"
 	default:

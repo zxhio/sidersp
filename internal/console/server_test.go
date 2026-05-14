@@ -459,7 +459,7 @@ func TestListEvents(t *testing.T) {
 					PktConds:     131,
 					PktCondNames: "PROTO_TCP|SRC_PORT|DST_PORT",
 					Action:       "tcp_reset",
-					Verdict:      "tx",
+					Verdict:      "xdp_tx",
 					SIP:          "10.0.0.1",
 					DIP:          "10.0.0.2",
 					SPort:        12345,
@@ -471,7 +471,7 @@ func TestListEvents(t *testing.T) {
 		},
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/events?page=1&page_size=10&rule_id=1001&action=tcp_reset&verdict=tx", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/events?page=1&page_size=10&rule_id=1001&action=tcp_reset&verdict=xdp_tx", nil)
 	rec := httptest.NewRecorder()
 	server.newRouter().ServeHTTP(rec, req)
 
@@ -491,8 +491,8 @@ func TestListEvents(t *testing.T) {
 	if body.Total != 1 || body.Page != 1 || body.PageSize != 10 {
 		t.Fatalf("pagination = %+v, want total=1 page=1 page_size=10", body)
 	}
-	if len(body.Data) != 1 || body.Data[0].Action != "tcp_reset" || body.Data[0].Verdict != "tx" {
-		t.Fatalf("data = %+v, want tcp_reset tx event", body.Data)
+	if len(body.Data) != 1 || body.Data[0].Action != "tcp_reset" || body.Data[0].Verdict != "xdp_tx" {
+		t.Fatalf("data = %+v, want tcp_reset xdp_tx event", body.Data)
 	}
 }
 
