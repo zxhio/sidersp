@@ -1,9 +1,12 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+
+	"sidersp/internal/agent/types"
 )
 
 const (
@@ -35,4 +38,13 @@ func writeProblem(c *gin.Context, status int, code string, title string, detail 
 
 func writeInternalError(c *gin.Context, detail string) {
 	writeProblem(c, http.StatusInternalServerError, ErrorCodeInternal, "Internal error", detail)
+}
+
+func writeAPIError(c *gin.Context, err error) {
+	var validationErr types.ValidationError
+	if errors.As(err, &validationErr) {
+		writeProblem(c, http.StatusBadRequest, ErrorCodeValidationFailed, "Validation failed", validationErr.Detail)
+		return
+	}
+	writeInternalError(c, err.Error())
 }

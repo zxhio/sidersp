@@ -1,19 +1,21 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 
 	"sidersp/internal/agent/types"
 )
 
 func TestGetHealth(t *testing.T) {
-	router := NewRouter(staticStatusService{})
+	router := newTestRouter()
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
 
@@ -28,7 +30,7 @@ func TestGetHealth(t *testing.T) {
 }
 
 func TestGetStatus(t *testing.T) {
-	router := NewRouter(staticStatusService{})
+	router := newTestRouter()
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/status", nil)
 
@@ -46,6 +48,67 @@ func TestGetStatus(t *testing.T) {
 	require.NotContains(t, body, "data")
 }
 
+func TestReplaceRulesetDryRunDoesNotModifyCurrentRuleset(t *testing.T) {
+	ruleset := newStaticRulesetService()
+	router := NewRouter(staticStatusService{}, ruleset)
+
+	reqBody := []byte(`{"version":3,"rules":[{"rule_id":1001,"priority":10,"match":{"protocol":"tcp","dst_ports":[80]},"response":{"action":"tcp_reset"}}]}`)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/ruleset?dry_run=true", bytes.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, uint64(0), ruleset.current.Version)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	require.Equal(t, float64(3), body["version"])
+	require.NotContains(t, body, "data")
+}
+
+func TestReplaceRulesetUpdatesCurrentRuleset(t *testing.T) {
+	ruleset := newStaticRulesetService()
+	router := NewRouter(staticStatusService{}, ruleset)
+
+	reqBody := []byte(`{"version":4,"rules":[{"rule_id":1002,"response":{"action":"alert"}}]}`)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/ruleset", bytes.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, uint64(4), ruleset.current.Version)
+	require.Len(t, ruleset.current.Rules, 1)
+}
+
+func TestClearRulesetClearsCurrentRuleset(t *testing.T) {
+	ruleset := newStaticRulesetService()
+	ruleset.current = types.Ruleset{
+		Version: 5,
+		Rules: []types.Rule{
+			{RuleID: 1003, Response: types.RuleResponse{Action: "alert"}},
+		},
+	}
+	router := NewRouter(staticStatusService{}, ruleset)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/ruleset", nil)
+
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusNoContent, rec.Code)
+	require.Empty(t, rec.Body.String())
+	require.Zero(t, ruleset.current.Version)
+	require.Nil(t, ruleset.current.Rules)
+}
+
+func newTestRouter() *gin.Engine {
+	return NewRouter(staticStatusService{}, newStaticRulesetService())
+}
+
 type staticStatusService struct{}
 
 func (staticStatusService) Health(ctx context.Context) (types.Health, error) {
@@ -54,4 +117,29 @@ func (staticStatusService) Health(ctx context.Context) (types.Health, error) {
 
 func (staticStatusService) Status(ctx context.Context) (types.Status, error) {
 	return types.Status{Status: types.StatusRunning}, nil
+}
+
+type staticRulesetService struct {
+	current types.Ruleset
+}
+
+func newStaticRulesetService() *staticRulesetService {
+	return &staticRulesetService{}
+}
+
+func (s *staticRulesetService) GetRuleset(ctx context.Context) (types.Ruleset, error) {
+	return s.current, nil
+}
+
+func (s *staticRulesetService) ReplaceRuleset(ctx context.Context, ruleset types.Ruleset, dryRun bool) (types.Ruleset, error) {
+	if dryRun {
+		return ruleset, nil
+	}
+	s.current = ruleset
+	return s.current, nil
+}
+
+func (s *staticRulesetService) ClearRuleset(ctx context.Context) error {
+	s.current = types.Ruleset{}
+	return nil
 }

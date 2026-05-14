@@ -41,10 +41,12 @@ func listenAddrFromEnv() string {
 }
 
 func run(ctx context.Context, listenAddr string) error {
-	statusService := service.NewStatusServiceWithRuntime(service.NewNoopRuntimeDeps())
+	runtime := service.NewInMemoryRuntime()
+	statusService := service.NewStatusServiceWithRuntime(runtime.RuntimeDeps())
+	rulesetService := service.NewRulesetService(runtime)
 	srv := &http.Server{
 		Addr:    listenAddr,
-		Handler: api.NewRouter(statusService),
+		Handler: api.NewRouter(statusService, rulesetService),
 	}
 
 	errCh := make(chan error, 1)

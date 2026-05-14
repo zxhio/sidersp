@@ -14,6 +14,63 @@ type StatusResponse struct {
 	DispatchEnabled    bool   `json:"dispatch_enabled"`
 }
 
+type RulesetRequest struct {
+	Version *uint64        `json:"version"`
+	Rules   *[]RuleRequest `json:"rules"`
+}
+
+type RulesetResponse struct {
+	Version uint64         `json:"version"`
+	Rules   []RuleResponse `json:"rules"`
+}
+
+type RuleRequest struct {
+	RuleID   *uint32          `json:"rule_id,omitempty"`
+	Priority int              `json:"priority,omitempty"`
+	Match    RuleMatchBody    `json:"match,omitempty"`
+	Response RuleResponseBody `json:"response"`
+}
+
+type RuleResponse struct {
+	RuleID   uint32           `json:"rule_id"`
+	Priority int              `json:"priority,omitempty"`
+	Match    RuleMatchBody    `json:"match,omitempty"`
+	Response RuleResponseBody `json:"response"`
+}
+
+type RuleMatchBody struct {
+	Protocol    string       `json:"protocol,omitempty"`
+	VLANs       []int        `json:"vlans,omitempty"`
+	SrcPrefixes []string     `json:"src_prefixes,omitempty"`
+	DstPrefixes []string     `json:"dst_prefixes,omitempty"`
+	SrcPorts    []int        `json:"src_ports,omitempty"`
+	DstPorts    []int        `json:"dst_ports,omitempty"`
+	TCPFlags    TCPFlagsBody `json:"tcp_flags,omitempty"`
+	ICMP        *ICMPBody    `json:"icmp,omitempty"`
+	ARP         *ARPBody     `json:"arp,omitempty"`
+}
+
+type TCPFlagsBody struct {
+	SYN *bool `json:"syn,omitempty"`
+	ACK *bool `json:"ack,omitempty"`
+	RST *bool `json:"rst,omitempty"`
+	FIN *bool `json:"fin,omitempty"`
+	PSH *bool `json:"psh,omitempty"`
+}
+
+type ICMPBody struct {
+	Type string `json:"type"`
+}
+
+type ARPBody struct {
+	Operation string `json:"operation"`
+}
+
+type RuleResponseBody struct {
+	Action string         `json:"action"`
+	Params map[string]any `json:"params,omitempty"`
+}
+
 func newHealthResponse(item types.Health) HealthResponse {
 	return HealthResponse{Status: item.Status}
 }
@@ -26,4 +83,159 @@ func newStatusResponse(item types.Status) StatusResponse {
 		ResponseConfigured: item.ResponseConfigured,
 		DispatchEnabled:    item.DispatchEnabled,
 	}
+}
+
+func newRuleset(req RulesetRequest) (types.Ruleset, error) {
+	if req.Version == nil {
+		return types.Ruleset{}, types.NewValidationError("version is required")
+	}
+	if req.Rules == nil {
+		return types.Ruleset{}, types.NewValidationError("rules is required")
+	}
+
+	rules := make([]types.Rule, 0, len(*req.Rules))
+	for i, item := range *req.Rules {
+		rule, err := newRule(item, i)
+		if err != nil {
+			return types.Ruleset{}, err
+		}
+		rules = append(rules, rule)
+	}
+
+	return types.Ruleset{
+		Version: *req.Version,
+		Rules:   rules,
+	}, nil
+}
+
+func newRule(item RuleRequest, index int) (types.Rule, error) {
+	if item.RuleID == nil {
+		return types.Rule{}, types.NewValidationError("rules[%d].rule_id is required", index)
+	}
+	return types.Rule{
+		RuleID:   *item.RuleID,
+		Priority: item.Priority,
+		Match:    newRuleMatch(item.Match),
+		Response: types.RuleResponse{
+			Action: item.Response.Action,
+			Params: cloneBodyParams(item.Response.Params),
+		},
+	}, nil
+}
+
+func newRuleMatch(item RuleMatchBody) types.RuleMatch {
+	return types.RuleMatch{
+		Protocol:    item.Protocol,
+		VLANs:       append([]int(nil), item.VLANs...),
+		SrcPrefixes: append([]string(nil), item.SrcPrefixes...),
+		DstPrefixes: append([]string(nil), item.DstPrefixes...),
+		SrcPorts:    append([]int(nil), item.SrcPorts...),
+		DstPorts:    append([]int(nil), item.DstPorts...),
+		TCPFlags: types.TCPFlags{
+			SYN: cloneBool(item.TCPFlags.SYN),
+			ACK: cloneBool(item.TCPFlags.ACK),
+			RST: cloneBool(item.TCPFlags.RST),
+			FIN: cloneBool(item.TCPFlags.FIN),
+			PSH: cloneBool(item.TCPFlags.PSH),
+		},
+		ICMP: newICMPMatch(item.ICMP),
+		ARP:  newARPMatch(item.ARP),
+	}
+}
+
+func newICMPMatch(item *ICMPBody) *types.ICMPMatch {
+	if item == nil {
+		return nil
+	}
+	return &types.ICMPMatch{Type: item.Type}
+}
+
+func newARPMatch(item *ARPBody) *types.ARPMatch {
+	if item == nil {
+		return nil
+	}
+	return &types.ARPMatch{Operation: item.Operation}
+}
+
+func newRulesetResponse(item types.Ruleset) RulesetResponse {
+	return RulesetResponse{
+		Version: item.Version,
+		Rules:   newRuleResponses(item.Rules),
+	}
+}
+
+func newRuleResponses(items []types.Rule) []RuleResponse {
+	if items == nil {
+		return []RuleResponse{}
+	}
+	out := make([]RuleResponse, 0, len(items))
+	for _, item := range items {
+		out = append(out, newRuleResponse(item))
+	}
+	return out
+}
+
+func newRuleResponse(item types.Rule) RuleResponse {
+	return RuleResponse{
+		RuleID:   item.RuleID,
+		Priority: item.Priority,
+		Match:    newRuleMatchBody(item.Match),
+		Response: RuleResponseBody{
+			Action: item.Response.Action,
+			Params: cloneBodyParams(item.Response.Params),
+		},
+	}
+}
+
+func newRuleMatchBody(item types.RuleMatch) RuleMatchBody {
+	return RuleMatchBody{
+		Protocol:    item.Protocol,
+		VLANs:       append([]int(nil), item.VLANs...),
+		SrcPrefixes: append([]string(nil), item.SrcPrefixes...),
+		DstPrefixes: append([]string(nil), item.DstPrefixes...),
+		SrcPorts:    append([]int(nil), item.SrcPorts...),
+		DstPorts:    append([]int(nil), item.DstPorts...),
+		TCPFlags: TCPFlagsBody{
+			SYN: cloneBool(item.TCPFlags.SYN),
+			ACK: cloneBool(item.TCPFlags.ACK),
+			RST: cloneBool(item.TCPFlags.RST),
+			FIN: cloneBool(item.TCPFlags.FIN),
+			PSH: cloneBool(item.TCPFlags.PSH),
+		},
+		ICMP: newICMPBody(item.ICMP),
+		ARP:  newARPBody(item.ARP),
+	}
+}
+
+func newICMPBody(item *types.ICMPMatch) *ICMPBody {
+	if item == nil {
+		return nil
+	}
+	return &ICMPBody{Type: item.Type}
+}
+
+func newARPBody(item *types.ARPMatch) *ARPBody {
+	if item == nil {
+		return nil
+	}
+	return &ARPBody{Operation: item.Operation}
+}
+
+func cloneBool(item *bool) *bool {
+	if item == nil {
+		return nil
+	}
+	next := *item
+	return &next
+}
+
+func cloneBodyParams(params map[string]any) map[string]any {
+	if params == nil {
+		return nil
+	}
+	out := make(map[string]any, len(params))
+	for key, value := range params {
+		out[key] = value
+	}
+	return out
 }

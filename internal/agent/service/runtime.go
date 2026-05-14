@@ -1,13 +1,25 @@
 package service
 
-import "context"
+import (
+	"context"
+
+	"sidersp/internal/agent/types"
+)
 
 type AttachmentRuntime interface {
 	AttachmentCount(ctx context.Context) (int, error)
 }
 
-type RulesetRuntime interface {
+type RulesetStatusRuntime interface {
 	RulesetVersion(ctx context.Context) (uint64, error)
+}
+
+type RulesetRuntime interface {
+	RulesetStatusRuntime
+	GetRuleset(ctx context.Context) (types.Ruleset, error)
+	ValidateRuleset(ctx context.Context, ruleset types.Ruleset) error
+	ReplaceRuleset(ctx context.Context, ruleset types.Ruleset) (types.Ruleset, error)
+	ClearRuleset(ctx context.Context) error
 }
 
 type ResponseRuntime interface {
@@ -20,7 +32,7 @@ type DispatchRuntime interface {
 
 type RuntimeDeps struct {
 	Attachments AttachmentRuntime
-	Ruleset     RulesetRuntime
+	Ruleset     RulesetStatusRuntime
 	Response    ResponseRuntime
 	Dispatch    DispatchRuntime
 }
