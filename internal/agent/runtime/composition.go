@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"net"
 
 	"github.com/sirupsen/logrus"
@@ -8,6 +9,7 @@ import (
 	"sidersp/internal/agent/service"
 	"sidersp/internal/dataplane"
 	"sidersp/internal/rule"
+	"sidersp/internal/xsk"
 )
 
 type Services struct {
@@ -33,6 +35,7 @@ type DataplaneRuntime interface {
 	service.DataplaneEventSource
 	service.DataplaneEventSubscriber
 	Attach() error
+	RunXSK(context.Context) error
 	ProgramID() (uint32, error)
 	ReplaceRules(set rule.RuleSet) error
 	ReplaceXDPResponse(options dataplane.XDPResponseOptions) error
@@ -132,5 +135,13 @@ func (c *Composition) Close() error {
 }
 
 func openDataplane(options dataplane.Options) (DataplaneRuntime, error) {
-	return dataplane.Open(options, dataplane.XSKConsumers{})
+	return dataplane.Open(options, dataplane.XSKConsumers{
+		Response: noopXSKResponseConsumer{},
+	})
+}
+
+type noopXSKResponseConsumer struct{}
+
+func (noopXSKResponseConsumer) HandleXSK(context.Context, xsk.Envelope, xsk.Socket) error {
+	return nil
 }

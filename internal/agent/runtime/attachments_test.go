@@ -20,12 +20,20 @@ func TestDataplaneAttachmentDryRunDoesNotOpen(t *testing.T) {
 	opener := &recordingDataplaneOpener{}
 	runtime := newTestDataplaneAttachmentRuntime(opener)
 
-	got, err := runtime.ValidateAttachment(context.Background(), types.Attachment{IfIndex: 3})
+	got, err := runtime.ValidateAttachment(context.Background(), types.Attachment{
+		IfIndex: 3,
+		Channels: types.AttachmentChannels{
+			MaxRXQueueCount: 2,
+		},
+		XSK: types.AttachmentXSK{Enabled: true},
+	})
 
 	require.NoError(t, err)
 	require.Equal(t, 3, got.IfIndex)
 	require.Equal(t, "eth3", got.IfName)
 	require.True(t, got.Enabled)
+	require.True(t, got.XSK.Enabled)
+	require.Equal(t, []int{0, 1}, got.XSK.Queues)
 	require.Empty(t, opener.opens)
 
 	items, err := runtime.ListAttachments(context.Background())
@@ -54,10 +62,93 @@ func TestDataplaneAttachmentCreateOpensAndStoresState(t *testing.T) {
 	require.Equal(t, types.AttachModeGeneric, opener.opens[0].AttachMode)
 	require.Equal(t, types.MissVerdictDrop, opener.opens[0].IngressVerdict)
 	require.True(t, opener.runtimes[0].attached)
+	require.Zero(t, opener.runtimes[0].xskRuns)
 
 	stored, err := runtime.GetAttachment(context.Background(), 3)
 	require.NoError(t, err)
 	require.Equal(t, got, stored)
+}
+
+func TestDataplaneAttachmentCreateWithXSKMapsOptionsAndStartsRuntime(t *testing.T) {
+	fakeRuntime := &fakeDataplaneRuntime{
+		programID:  101,
+		xskStarted: make(chan struct{}),
+		xskDone:    make(chan struct{}),
+	}
+	opener := &recordingDataplaneOpener{next: []*fakeDataplaneRuntime{fakeRuntime}}
+	runtime := newTestDataplaneAttachmentRuntime(opener)
+
+	got, err := runtime.CreateAttachment(context.Background(), types.Attachment{
+		IfIndex: 3,
+		Channels: types.AttachmentChannels{
+			RXQueueCount:    2,
+			MaxRXQueueCount: 4,
+		},
+		XSK: types.AttachmentXSK{
+			Enabled: true,
+			Queues:  []int{1},
+			UMEM: types.AttachmentUMEM{
+				FrameSize:          4096,
+				FrameCount:         8192,
+				FillRingSize:       1024,
+				CompletionRingSize: 512,
+				RXRingSize:         256,
+				TXRingSize:         128,
+				TXFrameReserve:     64,
+			},
+		},
+	})
+
+	require.NoError(t, err)
+	waitForChannel(t, fakeRuntime.xskStarted)
+	require.True(t, got.Enabled)
+	require.Len(t, opener.opens, 1)
+	options := opener.opens[0]
+	require.Equal(t, "eth3", options.Interface)
+	require.Equal(t, 2, options.CombinedChannels)
+	require.True(t, options.XSK.Enabled)
+	require.Equal(t, 3, options.XSK.IfIndex)
+	require.Equal(t, []int{1}, options.XSK.Queues)
+	require.Equal(t, 3, options.XSK.AFXDP.IfIndex)
+	require.Equal(t, uint32(4096), options.XSK.AFXDP.FrameSize)
+	require.Equal(t, uint32(8192), options.XSK.AFXDP.FrameCount)
+	require.Equal(t, uint32(1024), options.XSK.AFXDP.FillRingSize)
+	require.Equal(t, uint32(512), options.XSK.AFXDP.CompletionRingSize)
+	require.Equal(t, uint32(256), options.XSK.AFXDP.RXRingSize)
+	require.Equal(t, uint32(128), options.XSK.AFXDP.TXRingSize)
+	require.Equal(t, uint32(64), options.XSK.AFXDP.TXFrameReserve)
+	require.Equal(t, 1, fakeRuntime.xskRuns)
+
+	require.NoError(t, runtime.Close())
+	waitForChannel(t, fakeRuntime.xskDone)
+	require.True(t, fakeRuntime.closed)
+}
+
+func TestDataplaneAttachmentCreateWithXSKEmptyQueuesUsesNormalizedQueues(t *testing.T) {
+	fakeRuntime := &fakeDataplaneRuntime{
+		programID:  101,
+		xskStarted: make(chan struct{}),
+		xskDone:    make(chan struct{}),
+	}
+	opener := &recordingDataplaneOpener{next: []*fakeDataplaneRuntime{fakeRuntime}}
+	runtime := newTestDataplaneAttachmentRuntime(opener)
+
+	got, err := runtime.CreateAttachment(context.Background(), types.Attachment{
+		IfIndex: 4,
+		Channels: types.AttachmentChannels{
+			MaxRXQueueCount: 3,
+		},
+		XSK: types.AttachmentXSK{Enabled: true},
+	})
+
+	require.NoError(t, err)
+	waitForChannel(t, fakeRuntime.xskStarted)
+	require.Equal(t, []int{0, 1, 2}, got.XSK.Queues)
+	require.Equal(t, []int{0, 1, 2}, opener.opens[0].XSK.Queues)
+	require.Equal(t, 3, opener.opens[0].CombinedChannels)
+
+	require.NoError(t, runtime.Close())
+	waitForChannel(t, fakeRuntime.xskDone)
 }
 
 func TestDataplaneAttachmentOpenFailureDoesNotStoreState(t *testing.T) {
@@ -71,6 +162,27 @@ func TestDataplaneAttachmentOpenFailureDoesNotStoreState(t *testing.T) {
 	require.NoError(t, listErr)
 	require.Empty(t, items)
 	require.Len(t, opener.opens, 1)
+}
+
+func TestDataplaneAttachmentAttachFailureDoesNotStoreStateOrStartXSK(t *testing.T) {
+	fakeRuntime := &fakeDataplaneRuntime{
+		attachErr:  errors.New("attach failed"),
+		xskStarted: make(chan struct{}),
+	}
+	opener := &recordingDataplaneOpener{next: []*fakeDataplaneRuntime{fakeRuntime}}
+	runtime := newTestDataplaneAttachmentRuntime(opener)
+
+	_, err := runtime.CreateAttachment(context.Background(), types.Attachment{
+		IfIndex: 4,
+		XSK:     types.AttachmentXSK{Enabled: true},
+	})
+
+	require.ErrorContains(t, err, "attach failed")
+	items, listErr := runtime.ListAttachments(context.Background())
+	require.NoError(t, listErr)
+	require.Empty(t, items)
+	require.True(t, fakeRuntime.closed)
+	require.Zero(t, fakeRuntime.xskRuns)
 }
 
 func TestDataplaneAttachmentDuplicateDoesNotOpenAgain(t *testing.T) {
@@ -124,6 +236,45 @@ func TestDataplaneAttachmentReenableOpensRuntimeAgain(t *testing.T) {
 	require.True(t, first.closed)
 	require.True(t, second.attached)
 	require.Len(t, opener.opens, 2)
+}
+
+func TestDataplaneAttachmentReenableWithXSKStartsRuntimeAgain(t *testing.T) {
+	first := &fakeDataplaneRuntime{
+		programID:  101,
+		xskStarted: make(chan struct{}),
+		xskDone:    make(chan struct{}),
+	}
+	second := &fakeDataplaneRuntime{
+		programID:  202,
+		xskStarted: make(chan struct{}),
+		xskDone:    make(chan struct{}),
+	}
+	opener := &recordingDataplaneOpener{next: []*fakeDataplaneRuntime{first, second}}
+	runtime := newTestDataplaneAttachmentRuntime(opener)
+	_, err := runtime.CreateAttachment(context.Background(), types.Attachment{
+		IfIndex: 7,
+		XSK:     types.AttachmentXSK{Enabled: true},
+	})
+	require.NoError(t, err)
+	waitForChannel(t, first.xskStarted)
+	_, err = runtime.SetAttachmentEnabled(context.Background(), 7, false)
+	require.NoError(t, err)
+	waitForChannel(t, first.xskDone)
+
+	got, err := runtime.SetAttachmentEnabled(context.Background(), 7, true)
+
+	require.NoError(t, err)
+	waitForChannel(t, second.xskStarted)
+	require.True(t, got.Enabled)
+	require.Equal(t, uint32(202), got.Runtime.ProgramID)
+	require.True(t, first.closed)
+	require.True(t, second.attached)
+	require.Len(t, opener.opens, 2)
+	require.True(t, opener.opens[1].XSK.Enabled)
+	require.Equal(t, []int{0}, opener.opens[1].XSK.Queues)
+
+	require.NoError(t, runtime.Close())
+	waitForChannel(t, second.xskDone)
 }
 
 func TestDataplaneAttachmentCreateReplaysDesiredStateInOrder(t *testing.T) {
@@ -264,6 +415,51 @@ func TestDataplaneAttachmentDeleteClosesRuntimeAndRemovesAttachment(t *testing.T
 	require.True(t, fakeRuntime.closed)
 	_, err = runtime.GetAttachment(context.Background(), 8)
 	require.ErrorAs(t, err, &types.NotFoundError{})
+}
+
+func TestDataplaneAttachmentDisableWithXSKStopsRuntime(t *testing.T) {
+	fakeRuntime := &fakeDataplaneRuntime{
+		programID:  101,
+		xskStarted: make(chan struct{}),
+		xskDone:    make(chan struct{}),
+	}
+	opener := &recordingDataplaneOpener{next: []*fakeDataplaneRuntime{fakeRuntime}}
+	runtime := newTestDataplaneAttachmentRuntime(opener)
+	_, err := runtime.CreateAttachment(context.Background(), types.Attachment{
+		IfIndex: 8,
+		XSK:     types.AttachmentXSK{Enabled: true},
+	})
+	require.NoError(t, err)
+	waitForChannel(t, fakeRuntime.xskStarted)
+
+	got, err := runtime.SetAttachmentEnabled(context.Background(), 8, false)
+
+	require.NoError(t, err)
+	waitForChannel(t, fakeRuntime.xskDone)
+	require.False(t, got.Enabled)
+	require.True(t, fakeRuntime.closed)
+}
+
+func TestDataplaneAttachmentDeleteWithXSKStopsRuntime(t *testing.T) {
+	fakeRuntime := &fakeDataplaneRuntime{
+		programID:  101,
+		xskStarted: make(chan struct{}),
+		xskDone:    make(chan struct{}),
+	}
+	opener := &recordingDataplaneOpener{next: []*fakeDataplaneRuntime{fakeRuntime}}
+	runtime := newTestDataplaneAttachmentRuntime(opener)
+	_, err := runtime.CreateAttachment(context.Background(), types.Attachment{
+		IfIndex: 8,
+		XSK:     types.AttachmentXSK{Enabled: true},
+	})
+	require.NoError(t, err)
+	waitForChannel(t, fakeRuntime.xskStarted)
+
+	err = runtime.DeleteAttachment(context.Background(), 8)
+
+	require.NoError(t, err)
+	waitForChannel(t, fakeRuntime.xskDone)
+	require.True(t, fakeRuntime.closed)
 }
 
 func TestDataplaneAttachmentCloseFailureReturnsErrorAndKeepsAttachmentEnabled(t *testing.T) {
@@ -728,6 +924,16 @@ func readRuntimeEvent(t *testing.T, events <-chan types.Event) types.Event {
 		t.Fatal("timed out waiting for runtime event")
 	}
 	return types.Event{}
+}
+
+func waitForChannel(t *testing.T, ch <-chan struct{}) {
+	t.Helper()
+
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for channel")
+	}
 }
 
 type recordingDataplaneOpener struct {

@@ -98,10 +98,15 @@ type fakeDataplaneRuntime struct {
 	eventCh      chan model.EventRecord
 	eventErr     error
 	eventClosed  bool
+	xskStarted   chan struct{}
+	xskDone      chan struct{}
+	xskErr       error
+	xskRuns      int
 	operations   *[]string
 	appliedRules []rule.RuleSet
 	appliedXDP   []dataplane.XDPResponseOptions
 	attached     bool
+	attachErr    error
 	closed       bool
 	applyErr     error
 	xdpErr       error
@@ -127,8 +132,26 @@ func (r *fakeDataplaneRuntime) SubscribeEvents(ctx context.Context) (<-chan mode
 }
 
 func (r *fakeDataplaneRuntime) Attach() error {
+	if r.attachErr != nil {
+		return r.attachErr
+	}
 	r.attached = true
 	return nil
+}
+
+func (r *fakeDataplaneRuntime) RunXSK(ctx context.Context) error {
+	r.xskRuns++
+	if r.xskStarted != nil {
+		close(r.xskStarted)
+	}
+	<-ctx.Done()
+	if r.xskDone != nil {
+		close(r.xskDone)
+	}
+	if ctx.Err() != nil {
+		return nil
+	}
+	return r.xskErr
 }
 
 func (r *fakeDataplaneRuntime) ProgramID() (uint32, error) {

@@ -11,7 +11,9 @@ import (
 	"sidersp/internal/agent/service"
 	"sidersp/internal/agent/types"
 	"sidersp/internal/dataplane"
+	"sidersp/internal/frameio/afxdp"
 	"sidersp/internal/model"
+	"sidersp/internal/xsk"
 )
 
 type DataplaneAttachmentRuntime struct {
@@ -27,6 +29,11 @@ type DataplaneAttachmentRuntime struct {
 	dispatch    dispatchState
 
 	dispatchApplier dispatchApplier
+}
+
+type openedDataplaneRuntime struct {
+	runtime  DataplaneRuntime
+	startXSK func()
 }
 
 func NewDataplaneAttachmentRuntime(validator service.AttachmentConfigRuntime, opener DataplaneOpener, interfaceByIndex interfaceLookup) *DataplaneAttachmentRuntime {
@@ -91,9 +98,13 @@ func (r *DataplaneAttachmentRuntime) CreateAttachment(ctx context.Context, attac
 		return types.Attachment{}, attachmentConflict(next.IfIndex)
 	}
 
-	runtime, err := r.openAttachment(next)
+	opened, err := r.openAttachment(next)
 	if err != nil {
 		return types.Attachment{}, err
+	}
+	runtime := opened.runtime
+	if opened.startXSK != nil {
+		go opened.startXSK()
 	}
 	if err := r.attachRuntimeState(&next, runtime); err != nil {
 		if closeErr := runtime.Close(); closeErr != nil {
@@ -153,9 +164,13 @@ func (r *DataplaneAttachmentRuntime) SetAttachmentEnabled(ctx context.Context, i
 
 	next := current
 	next.Enabled = true
-	runtime, err := r.openAttachment(next)
+	opened, err := r.openAttachment(next)
 	if err != nil {
 		return types.Attachment{}, err
+	}
+	runtime := opened.runtime
+	if opened.startXSK != nil {
+		go opened.startXSK()
 	}
 	if err := r.attachRuntimeState(&next, runtime); err != nil {
 		if closeErr := runtime.Close(); closeErr != nil {
@@ -246,19 +261,26 @@ func (r *DataplaneAttachmentRuntime) normalize(ctx context.Context, attachment t
 	return r.validator.ValidateAttachment(ctx, attachment)
 }
 
-func (r *DataplaneAttachmentRuntime) openAttachment(attachment types.Attachment) (DataplaneRuntime, error) {
+func (r *DataplaneAttachmentRuntime) openAttachment(attachment types.Attachment) (openedDataplaneRuntime, error) {
 	options := newDataplaneOptions(attachment)
 	runtime, err := r.opener(options)
 	if err != nil {
-		return nil, fmt.Errorf("open dataplane attachment %d: %w", attachment.IfIndex, err)
+		return openedDataplaneRuntime{}, fmt.Errorf("open dataplane attachment %d: %w", attachment.IfIndex, err)
 	}
 	if err := runtime.Attach(); err != nil {
 		if closeErr := runtime.Close(); closeErr != nil {
 			logrus.WithError(closeErr).WithField("ifindex", attachment.IfIndex).Error("Fail to close dataplane runtime")
 		}
-		return nil, fmt.Errorf("attach dataplane attachment %d: %w", attachment.IfIndex, err)
+		return openedDataplaneRuntime{}, fmt.Errorf("attach dataplane attachment %d: %w", attachment.IfIndex, err)
 	}
-	return runtime, nil
+	if attachment.XSK.Enabled {
+		managed := newManagedDataplaneRuntime(attachment.IfIndex, runtime)
+		return openedDataplaneRuntime{
+			runtime:  managed,
+			startXSK: managed.runXSK,
+		}, nil
+	}
+	return openedDataplaneRuntime{runtime: runtime}, nil
 }
 
 func (r *DataplaneAttachmentRuntime) attachRuntimeState(attachment *types.Attachment, runtime DataplaneRuntime) error {
@@ -372,14 +394,48 @@ func attachmentConflict(ifindex int) types.ConflictError {
 }
 
 func newDataplaneOptions(attachment types.Attachment) dataplane.Options {
-	return dataplane.Options{
-		Interface:      attachment.IfName,
-		AttachMode:     attachment.AttachMode,
-		IngressVerdict: attachment.MissVerdict,
+	options := dataplane.Options{
+		Interface:        attachment.IfName,
+		AttachMode:       attachment.AttachMode,
+		CombinedChannels: enabledRXQueueCount(attachment.Channels),
+		IngressVerdict:   attachment.MissVerdict,
 		XDPResponse: dataplane.XDPResponseOptions{
 			VLANMode:       "preserve",
 			FailureVerdict: "pass",
 		},
+	}
+	if attachment.XSK.Enabled {
+		options.XSK = newXSKOptions(attachment)
+	}
+	return options
+}
+
+func enabledRXQueueCount(channels types.AttachmentChannels) int {
+	if channels.RXQueueCount > 0 {
+		return channels.RXQueueCount
+	}
+	if channels.MaxRXQueueCount > 0 {
+		return channels.MaxRXQueueCount
+	}
+	return 0
+}
+
+func newXSKOptions(attachment types.Attachment) xsk.Options {
+	afxdpConfig := afxdp.DefaultSocketConfig()
+	afxdpConfig.IfIndex = attachment.IfIndex
+	afxdpConfig.FrameSize = uint32(attachment.XSK.UMEM.FrameSize)
+	afxdpConfig.FrameCount = uint32(attachment.XSK.UMEM.FrameCount)
+	afxdpConfig.FillRingSize = uint32(attachment.XSK.UMEM.FillRingSize)
+	afxdpConfig.CompletionRingSize = uint32(attachment.XSK.UMEM.CompletionRingSize)
+	afxdpConfig.RXRingSize = uint32(attachment.XSK.UMEM.RXRingSize)
+	afxdpConfig.TXRingSize = uint32(attachment.XSK.UMEM.TXRingSize)
+	afxdpConfig.TXFrameReserve = uint32(attachment.XSK.UMEM.TXFrameReserve)
+
+	return xsk.Options{
+		Enabled: true,
+		IfIndex: attachment.IfIndex,
+		Queues:  append([]int(nil), attachment.XSK.Queues...),
+		AFXDP:   afxdpConfig,
 	}
 }
 
