@@ -9,6 +9,7 @@ import (
 type stubResponseConsumer struct {
 	envelopes []Envelope
 	sockets   []Socket
+	errors    []error
 	err       error
 	hook      func()
 }
@@ -20,6 +21,10 @@ func (s *stubResponseConsumer) HandleXSK(_ context.Context, envelope Envelope, s
 		s.hook()
 	}
 	return s.err
+}
+
+func (s *stubResponseConsumer) RecordXSKError(_ context.Context, _ int, err error) {
+	s.errors = append(s.errors, err)
 }
 
 type stubAnalysisSubmitter struct {
@@ -94,5 +99,26 @@ func TestDispatcherIgnoresAnalysisError(t *testing.T) {
 	}
 	if len(analysis.envelopes) != 1 {
 		t.Fatalf("analysis envelopes = %d, want 1", len(analysis.envelopes))
+	}
+}
+
+func TestDispatcherRecordsMetadataDecodeError(t *testing.T) {
+	t.Parallel()
+
+	response := &stubResponseConsumer{}
+	dispatcher, err := NewDispatcher(Consumers{Response: response})
+	if err != nil {
+		t.Fatalf("NewDispatcher() error = %v", err)
+	}
+
+	err = dispatcher.Dispatch(context.Background(), 0, &stubSocket{fd: 42}, []byte{0x01, 0x02})
+	if err == nil {
+		t.Fatal("Dispatch() error = nil, want metadata decode error")
+	}
+	if len(response.errors) != 1 {
+		t.Fatalf("recorded response errors = %d, want 1", len(response.errors))
+	}
+	if len(response.envelopes) != 0 {
+		t.Fatalf("response envelopes = %d, want 0", len(response.envelopes))
 	}
 }

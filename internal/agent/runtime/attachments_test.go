@@ -14,6 +14,8 @@ import (
 	"sidersp/internal/agent/types"
 	"sidersp/internal/dataplane"
 	"sidersp/internal/model"
+	"sidersp/internal/rule"
+	"sidersp/internal/xsk"
 )
 
 func TestDataplaneAttachmentDryRunDoesNotOpen(t *testing.T) {
@@ -118,10 +120,27 @@ func TestDataplaneAttachmentCreateWithXSKMapsOptionsAndStartsRuntime(t *testing.
 	require.Equal(t, uint32(128), options.XSK.AFXDP.TXRingSize)
 	require.Equal(t, uint32(64), options.XSK.AFXDP.TXFrameReserve)
 	require.Equal(t, 1, fakeRuntime.xskRuns)
+	require.Len(t, opener.consumers, 1)
+	require.NotNil(t, opener.consumers[0].Response)
+	require.Nil(t, opener.consumers[0].Analysis)
 
 	require.NoError(t, runtime.Close())
 	waitForChannel(t, fakeRuntime.xskDone)
 	require.True(t, fakeRuntime.closed)
+}
+
+func TestDataplaneAttachmentCreateWithoutXSKDoesNotWireConsumers(t *testing.T) {
+	opener := &recordingDataplaneOpener{
+		next: []*fakeDataplaneRuntime{{programID: 101}},
+	}
+	runtime := newTestDataplaneAttachmentRuntime(opener)
+
+	_, err := runtime.CreateAttachment(context.Background(), types.Attachment{IfIndex: 43})
+
+	require.NoError(t, err)
+	require.Len(t, opener.consumers, 1)
+	require.Nil(t, opener.consumers[0].Response)
+	require.Nil(t, opener.consumers[0].Analysis)
 }
 
 func TestDataplaneAttachmentCreateWithXSKEmptyQueuesUsesNormalizedQueues(t *testing.T) {
@@ -520,6 +539,42 @@ func TestDataplaneAttachmentReadStatsAggregatesActiveRuntimes(t *testing.T) {
 	require.Equal(t, uint64(3), got.Errors.XDPPackets)
 }
 
+func TestDataplaneAttachmentReadStatsIncludesUserspaceResponseCounters(t *testing.T) {
+	fakeRuntime := &fakeDataplaneRuntime{programID: 101}
+	opener := &recordingDataplaneOpener{next: []*fakeDataplaneRuntime{fakeRuntime}}
+	runtime := newTestDataplaneAttachmentRuntime(opener)
+	_, err := runtime.CreateAttachment(context.Background(), types.Attachment{
+		IfIndex: 10,
+		XSK:     types.AttachmentXSK{Enabled: true},
+	})
+	require.NoError(t, err)
+
+	slot := runtime.responseConsumers[10]
+	require.NotNil(t, slot)
+	fakeConsumer := &fakeResponseConsumer{
+		stats: model.ResponseStats{
+			XSKRXPackets:     11,
+			ResponseSent:     7,
+			ResponseFailed:   3,
+			AFXDPTX:          5,
+			AFPacketTX:       2,
+			AFXDPTXFailed:    1,
+			AFPacketTXFailed: 2,
+		},
+	}
+	require.NoError(t, slot.Replace(fakeConsumer))
+
+	got, err := runtime.ReadStats(context.Background())
+
+	require.NoError(t, err)
+	require.Equal(t, uint64(11), got.UserspaceResponse.XSKRXPackets)
+	require.Equal(t, uint64(7), got.UserspaceResponse.Packets)
+	require.Equal(t, uint64(5), got.UserspaceResponse.XSKTXPackets)
+	require.Equal(t, uint64(2), got.UserspaceResponse.AFPacketTXPackets)
+	require.Equal(t, uint64(3), got.UserspaceResponse.ErrorPackets)
+	require.Equal(t, uint64(3), got.Errors.XSKPackets)
+}
+
 func TestDataplaneAttachmentSubscribeEventsMergesEnabledRuntimes(t *testing.T) {
 	first := &fakeDataplaneRuntime{
 		programID: 101,
@@ -872,7 +927,11 @@ func TestDataplaneResponseReenableAttachmentAppliesCurrentConfig(t *testing.T) {
 
 func newTestDataplaneAttachmentRuntime(opener *recordingDataplaneOpener) *DataplaneAttachmentRuntime {
 	return NewDataplaneAttachmentRuntime(service.NewInMemoryRuntime(), opener.open, func(index int) (*net.Interface, error) {
-		return &net.Interface{Index: index, Name: "eth" + strconv.Itoa(index)}, nil
+		return &net.Interface{
+			Index:        index,
+			Name:         "eth" + strconv.Itoa(index),
+			HardwareAddr: net.HardwareAddr{0x02, 0x00, 0x00, 0x00, byte(index >> 8), byte(index)},
+		}, nil
 	})
 }
 
@@ -937,14 +996,16 @@ func waitForChannel(t *testing.T, ch <-chan struct{}) {
 }
 
 type recordingDataplaneOpener struct {
-	opens    []dataplane.Options
-	next     []*fakeDataplaneRuntime
-	runtimes []*fakeDataplaneRuntime
-	err      error
+	opens     []dataplane.Options
+	consumers []dataplane.XSKConsumers
+	next      []*fakeDataplaneRuntime
+	runtimes  []*fakeDataplaneRuntime
+	err       error
 }
 
-func (o *recordingDataplaneOpener) open(options dataplane.Options) (DataplaneRuntime, error) {
+func (o *recordingDataplaneOpener) open(options dataplane.Options, consumers dataplane.XSKConsumers) (DataplaneRuntime, error) {
 	o.opens = append(o.opens, options)
+	o.consumers = append(o.consumers, consumers)
 	if o.err != nil {
 		return nil, o.err
 	}
@@ -957,4 +1018,33 @@ func (o *recordingDataplaneOpener) open(options dataplane.Options) (DataplaneRun
 	o.next = o.next[1:]
 	o.runtimes = append(o.runtimes, next)
 	return next, nil
+}
+
+type fakeResponseConsumer struct {
+	stats         model.ResponseStats
+	closed        bool
+	replacedRules []rule.RuleSet
+	handleErr     error
+	replaceErr    error
+	closeErr      error
+}
+
+func (c *fakeResponseConsumer) HandleXSK(context.Context, xsk.Envelope, xsk.Socket) error {
+	return c.handleErr
+}
+
+func (c *fakeResponseConsumer) RecordXSKError(context.Context, int, error) {}
+
+func (c *fakeResponseConsumer) ReplaceRules(set rule.RuleSet) error {
+	c.replacedRules = append(c.replacedRules, cloneRuleSet(set))
+	return c.replaceErr
+}
+
+func (c *fakeResponseConsumer) ReadStats() model.ResponseStats {
+	return c.stats
+}
+
+func (c *fakeResponseConsumer) Close() error {
+	c.closed = true
+	return c.closeErr
 }

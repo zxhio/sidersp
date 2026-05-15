@@ -36,7 +36,7 @@ func TestNewCompositionDataplaneModeOpensFromAttachment(t *testing.T) {
 	var opened []dataplane.Options
 	composition, err := NewComposition(Options{
 		Mode: ModeDataplane,
-	}, WithDataplaneOpener(func(options dataplane.Options) (DataplaneRuntime, error) {
+	}, WithDataplaneOpener(func(options dataplane.Options, consumers dataplane.XSKConsumers) (DataplaneRuntime, error) {
 		opened = append(opened, options)
 		return fakeRuntime, nil
 	}), WithInterfaceLookup(fakeInterfaceByIndex))
@@ -77,7 +77,11 @@ func TestNewCompositionDataplaneModeOpensFromAttachment(t *testing.T) {
 }
 
 func fakeInterfaceByIndex(index int) (*net.Interface, error) {
-	return &net.Interface{Index: index, Name: "eth" + strconv.Itoa(index)}, nil
+	return &net.Interface{
+		Index:        index,
+		Name:         "eth" + strconv.Itoa(index),
+		HardwareAddr: net.HardwareAddr{0x02, 0x00, 0x00, 0x00, byte(index >> 8), byte(index)},
+	}, nil
 }
 
 func requireServices(t *testing.T, services Services) {

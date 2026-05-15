@@ -116,6 +116,7 @@ func (s DataplaneStats) Counters() DataplaneCounters {
 }
 
 type ResponseCounters struct {
+	XSKRXPackets     uint64
 	ResponseSent     uint64
 	ResponseFailed   uint64
 	AFXDPTX          uint64
@@ -125,6 +126,7 @@ type ResponseCounters struct {
 }
 
 type ResponseStats struct {
+	XSKRXPackets     uint64 `json:"xsk_rx_packets"`
 	ResponseSent     uint64 `json:"response_sent"`
 	ResponseFailed   uint64 `json:"response_failed"`
 	AFXDPTX          uint64 `json:"afxdp_tx"`
@@ -135,6 +137,7 @@ type ResponseStats struct {
 
 func (s ResponseStats) Counters() ResponseCounters {
 	return ResponseCounters{
+		XSKRXPackets:     s.XSKRXPackets,
 		ResponseSent:     s.ResponseSent,
 		ResponseFailed:   s.ResponseFailed,
 		AFXDPTX:          s.AFXDPTX,

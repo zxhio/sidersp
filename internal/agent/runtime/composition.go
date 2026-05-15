@@ -8,8 +8,9 @@ import (
 
 	"sidersp/internal/agent/service"
 	"sidersp/internal/dataplane"
+	"sidersp/internal/frameio"
+	"sidersp/internal/frameio/afpacket"
 	"sidersp/internal/rule"
-	"sidersp/internal/xsk"
 )
 
 type Services struct {
@@ -42,13 +43,15 @@ type DataplaneRuntime interface {
 	Close() error
 }
 
-type DataplaneOpener func(dataplane.Options) (DataplaneRuntime, error)
+type DataplaneOpener func(dataplane.Options, dataplane.XSKConsumers) (DataplaneRuntime, error)
+type responseEgressWriterFactory func(string) (frameio.WriteCloser, error)
 
 type interfaceLookup func(index int) (*net.Interface, error)
 
 type buildOptions struct {
-	dataplaneOpener  DataplaneOpener
-	interfaceByIndex interfaceLookup
+	dataplaneOpener      DataplaneOpener
+	interfaceByIndex     interfaceLookup
+	responseEgressWriter responseEgressWriterFactory
 }
 
 type BuildOption func(*buildOptions)
@@ -65,6 +68,12 @@ func WithInterfaceLookup(lookup interfaceLookup) BuildOption {
 	}
 }
 
+func WithResponseEgressWriterFactory(factory responseEgressWriterFactory) BuildOption {
+	return func(options *buildOptions) {
+		options.responseEgressWriter = factory
+	}
+}
+
 func NewComposition(options Options, buildOpts ...BuildOption) (*Composition, error) {
 	options, err := options.normalize()
 	if err != nil {
@@ -72,8 +81,9 @@ func NewComposition(options Options, buildOpts ...BuildOption) (*Composition, er
 	}
 
 	build := buildOptions{
-		dataplaneOpener:  openDataplane,
-		interfaceByIndex: net.InterfaceByIndex,
+		dataplaneOpener:      openDataplane,
+		interfaceByIndex:     net.InterfaceByIndex,
+		responseEgressWriter: newAFPacketWriter,
 	}
 	for _, apply := range buildOpts {
 		apply(&build)
@@ -91,6 +101,7 @@ func NewComposition(options Options, buildOpts ...BuildOption) (*Composition, er
 	}
 	if options.Mode == ModeDataplane {
 		runtime := NewDataplaneAttachmentRuntime(state, build.dataplaneOpener, build.interfaceByIndex)
+		runtime.responseEgressWriter = build.responseEgressWriter
 		attachmentRuntime = runtime
 		rulesetRuntime = runtime
 		responseRuntime = runtime
@@ -134,14 +145,10 @@ func (c *Composition) Close() error {
 	return c.closer.Close()
 }
 
-func openDataplane(options dataplane.Options) (DataplaneRuntime, error) {
-	return dataplane.Open(options, dataplane.XSKConsumers{
-		Response: noopXSKResponseConsumer{},
-	})
+func openDataplane(options dataplane.Options, consumers dataplane.XSKConsumers) (DataplaneRuntime, error) {
+	return dataplane.Open(options, consumers)
 }
 
-type noopXSKResponseConsumer struct{}
-
-func (noopXSKResponseConsumer) HandleXSK(context.Context, xsk.Envelope, xsk.Socket) error {
-	return nil
+func newAFPacketWriter(ifname string) (frameio.WriteCloser, error) {
+	return afpacket.New(ifname)
 }

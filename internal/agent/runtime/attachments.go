@@ -17,23 +17,27 @@ import (
 )
 
 type DataplaneAttachmentRuntime struct {
-	validator        service.AttachmentConfigRuntime
-	opener           DataplaneOpener
-	interfaceByIndex interfaceLookup
+	validator            service.AttachmentConfigRuntime
+	opener               DataplaneOpener
+	interfaceByIndex     interfaceLookup
+	responseEgressWriter responseEgressWriterFactory
 
-	mu          sync.RWMutex
-	attachments map[int]types.Attachment
-	runtimes    map[int]DataplaneRuntime
-	ruleset     types.Ruleset
-	response    responseState
-	dispatch    dispatchState
+	mu                sync.RWMutex
+	attachments       map[int]types.Attachment
+	runtimes          map[int]DataplaneRuntime
+	responseConsumers map[int]*responseConsumerSlot
+	ruleset           types.Ruleset
+	response          responseState
+	dispatch          dispatchState
 
 	dispatchApplier dispatchApplier
 }
 
 type openedDataplaneRuntime struct {
-	runtime  DataplaneRuntime
-	startXSK func()
+	runtime          DataplaneRuntime
+	markXSKStarted   func() bool
+	startXSK         func()
+	responseConsumer *responseConsumerSlot
 }
 
 func NewDataplaneAttachmentRuntime(validator service.AttachmentConfigRuntime, opener DataplaneOpener, interfaceByIndex interfaceLookup) *DataplaneAttachmentRuntime {
@@ -47,12 +51,14 @@ func NewDataplaneAttachmentRuntime(validator service.AttachmentConfigRuntime, op
 		panic("agent runtime: interface lookup is required")
 	}
 	return &DataplaneAttachmentRuntime{
-		validator:        validator,
-		opener:           opener,
-		interfaceByIndex: interfaceByIndex,
-		attachments:      make(map[int]types.Attachment),
-		runtimes:         make(map[int]DataplaneRuntime),
-		dispatchApplier:  noopDispatchApplier{},
+		validator:            validator,
+		opener:               opener,
+		interfaceByIndex:     interfaceByIndex,
+		responseEgressWriter: newAFPacketWriter,
+		attachments:          make(map[int]types.Attachment),
+		runtimes:             make(map[int]DataplaneRuntime),
+		responseConsumers:    make(map[int]*responseConsumerSlot),
+		dispatchApplier:      noopDispatchApplier{},
 	}
 }
 
@@ -103,33 +109,33 @@ func (r *DataplaneAttachmentRuntime) CreateAttachment(ctx context.Context, attac
 		return types.Attachment{}, err
 	}
 	runtime := opened.runtime
-	if opened.startXSK != nil {
-		go opened.startXSK()
-	}
 	if err := r.attachRuntimeState(&next, runtime); err != nil {
-		if closeErr := runtime.Close(); closeErr != nil {
-			logrus.WithError(closeErr).WithField("ifindex", next.IfIndex).Error("Fail to close dataplane runtime")
-		}
+		r.closeOpenedRuntime(next.IfIndex, opened)
 		return types.Attachment{}, err
 	}
 	r.mu.Lock()
 	if _, ok := r.attachments[next.IfIndex]; ok {
 		r.mu.Unlock()
-		if closeErr := runtime.Close(); closeErr != nil {
-			logrus.WithError(closeErr).WithField("ifindex", next.IfIndex).Error("Fail to close dataplane runtime")
-		}
+		r.closeOpenedRuntime(next.IfIndex, opened)
 		return types.Attachment{}, attachmentConflict(next.IfIndex)
 	}
 	if err := r.replayDesiredStateToRuntimeLocked(ctx, next.IfIndex, runtime); err != nil {
 		r.mu.Unlock()
-		if closeErr := runtime.Close(); closeErr != nil {
-			logrus.WithError(closeErr).WithField("ifindex", next.IfIndex).Error("Fail to close dataplane runtime")
-		}
+		r.closeOpenedRuntime(next.IfIndex, opened)
+		return types.Attachment{}, err
+	}
+	if err := r.replayResponseConsumerLocked(next, opened.responseConsumer); err != nil {
+		r.mu.Unlock()
+		r.closeOpenedRuntime(next.IfIndex, opened)
 		return types.Attachment{}, err
 	}
 	r.attachments[next.IfIndex] = cloneAttachment(next)
 	r.runtimes[next.IfIndex] = runtime
+	if opened.responseConsumer != nil {
+		r.responseConsumers[next.IfIndex] = opened.responseConsumer
+	}
 	r.mu.Unlock()
+	startOpenedXSK(opened)
 
 	logrus.WithFields(logrus.Fields{
 		"ifindex": next.IfIndex,
@@ -169,33 +175,33 @@ func (r *DataplaneAttachmentRuntime) SetAttachmentEnabled(ctx context.Context, i
 		return types.Attachment{}, err
 	}
 	runtime := opened.runtime
-	if opened.startXSK != nil {
-		go opened.startXSK()
-	}
 	if err := r.attachRuntimeState(&next, runtime); err != nil {
-		if closeErr := runtime.Close(); closeErr != nil {
-			logrus.WithError(closeErr).WithField("ifindex", ifindex).Error("Fail to close dataplane runtime")
-		}
+		r.closeOpenedRuntime(ifindex, opened)
 		return types.Attachment{}, err
 	}
 	r.mu.Lock()
 	if _, ok := r.attachments[ifindex]; !ok {
 		r.mu.Unlock()
-		if closeErr := runtime.Close(); closeErr != nil {
-			logrus.WithError(closeErr).WithField("ifindex", ifindex).Error("Fail to close dataplane runtime")
-		}
+		r.closeOpenedRuntime(ifindex, opened)
 		return types.Attachment{}, attachmentNotFound(ifindex)
 	}
 	if err := r.replayDesiredStateToRuntimeLocked(ctx, ifindex, runtime); err != nil {
 		r.mu.Unlock()
-		if closeErr := runtime.Close(); closeErr != nil {
-			logrus.WithError(closeErr).WithField("ifindex", ifindex).Error("Fail to close dataplane runtime")
-		}
+		r.closeOpenedRuntime(ifindex, opened)
+		return types.Attachment{}, err
+	}
+	if err := r.replayResponseConsumerLocked(next, opened.responseConsumer); err != nil {
+		r.mu.Unlock()
+		r.closeOpenedRuntime(ifindex, opened)
 		return types.Attachment{}, err
 	}
 	r.attachments[ifindex] = cloneAttachment(next)
 	r.runtimes[ifindex] = runtime
+	if opened.responseConsumer != nil {
+		r.responseConsumers[ifindex] = opened.responseConsumer
+	}
 	r.mu.Unlock()
+	startOpenedXSK(opened)
 
 	logrus.WithFields(logrus.Fields{
 		"ifindex": next.IfIndex,
@@ -226,7 +232,14 @@ func (r *DataplaneAttachmentRuntime) ReadStats(ctx context.Context) (types.Stats
 		}
 		addDataplaneStats(&total, stats)
 	}
-	return service.NewStatsFromDataplane(total), nil
+	var responseTotal model.ResponseStats
+	for _, consumer := range r.activeResponseConsumers() {
+		addResponseStats(&responseTotal, consumer.ReadStats())
+	}
+	return service.NewStatsFromRuntime(model.RuntimeStats{
+		Dataplane: total,
+		Response:  responseTotal,
+	}), nil
 }
 
 func (r *DataplaneAttachmentRuntime) Close() error {
@@ -239,6 +252,12 @@ func (r *DataplaneAttachmentRuntime) Close() error {
 			closeErr = fmt.Errorf("close dataplane attachment %d: %w", ifindex, err)
 		}
 		delete(r.runtimes, ifindex)
+	}
+	for ifindex, consumer := range r.responseConsumers {
+		if err := consumer.Close(); err != nil && closeErr == nil {
+			closeErr = fmt.Errorf("close response consumer for attachment %d: %w", ifindex, err)
+		}
+		delete(r.responseConsumers, ifindex)
 	}
 	return closeErr
 }
@@ -263,24 +282,46 @@ func (r *DataplaneAttachmentRuntime) normalize(ctx context.Context, attachment t
 
 func (r *DataplaneAttachmentRuntime) openAttachment(attachment types.Attachment) (openedDataplaneRuntime, error) {
 	options := newDataplaneOptions(attachment)
-	runtime, err := r.opener(options)
+	consumers, responseConsumer, err := r.newXSKConsumers(attachment)
 	if err != nil {
+		return openedDataplaneRuntime{}, err
+	}
+	runtime, err := r.opener(options, consumers)
+	if err != nil {
+		if responseConsumer != nil {
+			_ = responseConsumer.Close()
+		}
 		return openedDataplaneRuntime{}, fmt.Errorf("open dataplane attachment %d: %w", attachment.IfIndex, err)
 	}
 	if err := runtime.Attach(); err != nil {
 		if closeErr := runtime.Close(); closeErr != nil {
 			logrus.WithError(closeErr).WithField("ifindex", attachment.IfIndex).Error("Fail to close dataplane runtime")
 		}
+		if responseConsumer != nil {
+			_ = responseConsumer.Close()
+		}
 		return openedDataplaneRuntime{}, fmt.Errorf("attach dataplane attachment %d: %w", attachment.IfIndex, err)
 	}
 	if attachment.XSK.Enabled {
 		managed := newManagedDataplaneRuntime(attachment.IfIndex, runtime)
 		return openedDataplaneRuntime{
-			runtime:  managed,
-			startXSK: managed.runXSK,
+			runtime:          managed,
+			markXSKStarted:   managed.markXSKStarted,
+			startXSK:         managed.runXSK,
+			responseConsumer: responseConsumer,
 		}, nil
 	}
-	return openedDataplaneRuntime{runtime: runtime}, nil
+	return openedDataplaneRuntime{runtime: runtime, responseConsumer: responseConsumer}, nil
+}
+
+func startOpenedXSK(opened openedDataplaneRuntime) {
+	if opened.startXSK == nil {
+		return
+	}
+	if opened.markXSKStarted != nil && !opened.markXSKStarted() {
+		return
+	}
+	go opened.startXSK()
 }
 
 func (r *DataplaneAttachmentRuntime) attachRuntimeState(attachment *types.Attachment, runtime DataplaneRuntime) error {
@@ -295,6 +336,7 @@ func (r *DataplaneAttachmentRuntime) attachRuntimeState(attachment *types.Attach
 func (r *DataplaneAttachmentRuntime) closeRuntime(ifindex int) error {
 	r.mu.RLock()
 	runtime := r.runtimes[ifindex]
+	consumer := r.responseConsumers[ifindex]
 	r.mu.RUnlock()
 
 	if runtime == nil {
@@ -303,13 +345,34 @@ func (r *DataplaneAttachmentRuntime) closeRuntime(ifindex int) error {
 	if err := runtime.Close(); err != nil {
 		return fmt.Errorf("close dataplane attachment %d: %w", ifindex, err)
 	}
+	if consumer != nil {
+		if err := consumer.Close(); err != nil {
+			return fmt.Errorf("close response consumer for attachment %d: %w", ifindex, err)
+		}
+	}
 
 	r.mu.Lock()
 	if r.runtimes[ifindex] == runtime {
 		delete(r.runtimes, ifindex)
 	}
+	if r.responseConsumers[ifindex] == consumer {
+		delete(r.responseConsumers, ifindex)
+	}
 	r.mu.Unlock()
 	return nil
+}
+
+func (r *DataplaneAttachmentRuntime) closeOpenedRuntime(ifindex int, opened openedDataplaneRuntime) {
+	if opened.runtime != nil {
+		if closeErr := opened.runtime.Close(); closeErr != nil {
+			logrus.WithError(closeErr).WithField("ifindex", ifindex).Error("Fail to close dataplane runtime")
+		}
+	}
+	if opened.responseConsumer != nil {
+		if closeErr := opened.responseConsumer.Close(); closeErr != nil {
+			logrus.WithError(closeErr).WithField("ifindex", ifindex).Error("Fail to close response consumer")
+		}
+	}
 }
 
 func (r *DataplaneAttachmentRuntime) hasAttachment(ifindex int) bool {
@@ -346,6 +409,20 @@ func (r *DataplaneAttachmentRuntime) activeRuntimes() []DataplaneRuntime {
 	return items
 }
 
+func (r *DataplaneAttachmentRuntime) activeResponseConsumers() []*responseConsumerSlot {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	items := make([]*responseConsumerSlot, 0, len(r.responseConsumers))
+	for ifindex, consumer := range r.responseConsumers {
+		if _, ok := r.runtimes[ifindex]; !ok || consumer == nil {
+			continue
+		}
+		items = append(items, consumer)
+	}
+	return items
+}
+
 func addDataplaneStats(total *model.DataplaneStats, stats model.DataplaneStats) {
 	total.RXPackets += stats.RXPackets
 	total.ParseOKPackets += stats.ParseOKPackets
@@ -372,6 +449,16 @@ func addDataplaneStats(total *model.DataplaneStats, stats model.DataplaneStats) 
 			total.RuleMatches[ruleID] += count
 		}
 	}
+}
+
+func addResponseStats(total *model.ResponseStats, stats model.ResponseStats) {
+	total.XSKRXPackets += stats.XSKRXPackets
+	total.ResponseSent += stats.ResponseSent
+	total.ResponseFailed += stats.ResponseFailed
+	total.AFXDPTX += stats.AFXDPTX
+	total.AFXDPTXFailed += stats.AFXDPTXFailed
+	total.AFPacketTX += stats.AFPacketTX
+	total.AFPacketTXFailed += stats.AFPacketTXFailed
 }
 
 func cloneAttachment(item types.Attachment) types.Attachment {

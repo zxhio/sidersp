@@ -7,6 +7,7 @@ import (
 )
 
 type statsCounters struct {
+	xskRX            atomic.Uint64
 	responseSent     atomic.Uint64
 	responseFailed   atomic.Uint64
 	afxdpTX          atomic.Uint64
@@ -17,6 +18,10 @@ type statsCounters struct {
 
 func newStatsCounters() *statsCounters {
 	return &statsCounters{}
+}
+
+func (c *statsCounters) recordXSKRX() {
+	c.xskRX.Add(1)
 }
 
 func (c *statsCounters) recordSent(backend TXBackend) {
@@ -41,6 +46,7 @@ func (c *statsCounters) recordFailed(backend TXBackend) {
 
 func (c *statsCounters) snapshot() model.ResponseStats {
 	return model.ResponseStats{
+		XSKRXPackets:     c.xskRX.Load(),
 		ResponseSent:     c.responseSent.Load(),
 		ResponseFailed:   c.responseFailed.Load(),
 		AFXDPTX:          c.afxdpTX.Load(),
@@ -51,6 +57,7 @@ func (c *statsCounters) snapshot() model.ResponseStats {
 }
 
 func (c *statsCounters) reset() {
+	c.xskRX.Store(0)
 	c.responseSent.Store(0)
 	c.responseFailed.Store(0)
 	c.afxdpTX.Store(0)

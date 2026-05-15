@@ -2,6 +2,7 @@ package response
 
 import (
 	"context"
+	"errors"
 	"net"
 	"testing"
 
@@ -72,6 +73,9 @@ func TestRuntimeHandleXSKSendsResponse(t *testing.T) {
 	if results[0].RXQueue != 3 || results[0].RuleID != 1001 || results[0].Result != ResultSent {
 		t.Fatalf("result = %+v, want queue=3 rule=1001 sent", results[0])
 	}
+	if stats := runtime.ReadStats(); stats.XSKRXPackets != 1 || stats.ResponseSent != 1 || stats.AFXDPTX != 1 {
+		t.Fatalf("ReadStats() = %+v, want xsk_rx=1 response_sent=1 afxdp_tx=1", stats)
+	}
 }
 
 func TestRuntimeReadStatsReturnsResponseCounters(t *testing.T) {
@@ -82,12 +86,16 @@ func TestRuntimeReadStatsReturnsResponseCounters(t *testing.T) {
 		t.Fatalf("NewRuntime() error = %v", err)
 	}
 
+	runtime.stats.recordXSKRX()
 	runtime.stats.recordSent(TXBackendAFXDP)
 	runtime.stats.recordSent(TXBackendAFPacket)
 	runtime.stats.recordFailed(TXBackendAFXDP)
 	runtime.stats.recordFailed(TXBackendAFPacket)
 
 	got := runtime.ReadStats()
+	if got.XSKRXPackets != 1 {
+		t.Fatalf("ReadStats() = %+v, want xsk_rx_packets=1", got)
+	}
 	if got.ResponseSent != 2 || got.ResponseFailed != 2 {
 		t.Fatalf("ReadStats() = %+v, want response_sent=2 response_failed=2", got)
 	}
@@ -96,6 +104,73 @@ func TestRuntimeReadStatsReturnsResponseCounters(t *testing.T) {
 	}
 	if got.AFPacketTX != 1 || got.AFPacketTXFailed != 1 {
 		t.Fatalf("ReadStats() = %+v, want afpacket counters = 1/1", got)
+	}
+}
+
+func TestRuntimeHandleXSKRecordsUnsupportedActionErrorStats(t *testing.T) {
+	t.Parallel()
+
+	runtime, err := NewRuntime(normalizeTestOptions(Options{}), nil)
+	if err != nil {
+		t.Fatalf("NewRuntime() error = %v", err)
+	}
+
+	socket := &stubXSKSocket{fd: 42}
+	envelope := xsk.Envelope{
+		QueueID: 3,
+		Metadata: xsk.Metadata{
+			RuleID: 1001,
+			Action: 99,
+		},
+		Frame: buildTestICMPEchoRequest(t),
+	}
+
+	if err := runtime.HandleXSK(context.Background(), envelope, socket); err == nil {
+		t.Fatal("HandleXSK() error = nil, want unsupported action")
+	}
+	if stats := runtime.ReadStats(); stats.XSKRXPackets != 1 || stats.ResponseFailed != 1 || stats.AFXDPTXFailed != 1 {
+		t.Fatalf("ReadStats() = %+v, want xsk_rx=1 response_failed=1 afxdp_tx_failed=1", stats)
+	}
+}
+
+func TestRuntimeHandleXSKRecordsMalformedPacketErrorStats(t *testing.T) {
+	t.Parallel()
+
+	runtime, err := NewRuntime(normalizeTestOptions(Options{}), nil)
+	if err != nil {
+		t.Fatalf("NewRuntime() error = %v", err)
+	}
+
+	socket := &stubXSKSocket{fd: 42}
+	envelope := xsk.Envelope{
+		QueueID: 3,
+		Metadata: xsk.Metadata{
+			RuleID: 1001,
+			Action: ActionICMPEchoReply,
+		},
+		Frame: []byte{0x01, 0x02},
+	}
+
+	if err := runtime.HandleXSK(context.Background(), envelope, socket); err == nil {
+		t.Fatal("HandleXSK() error = nil, want malformed packet")
+	}
+	if stats := runtime.ReadStats(); stats.XSKRXPackets != 1 || stats.ResponseFailed != 1 || stats.AFXDPTXFailed != 1 {
+		t.Fatalf("ReadStats() = %+v, want xsk_rx=1 response_failed=1 afxdp_tx_failed=1", stats)
+	}
+}
+
+func TestRuntimeRecordXSKErrorRecordsMetadataErrorStats(t *testing.T) {
+	t.Parallel()
+
+	runtime, err := NewRuntime(normalizeTestOptions(Options{}), nil)
+	if err != nil {
+		t.Fatalf("NewRuntime() error = %v", err)
+	}
+
+	runtime.RecordXSKError(context.Background(), 3, errors.New("metadata decode failed"))
+
+	if stats := runtime.ReadStats(); stats.XSKRXPackets != 1 || stats.ResponseFailed != 1 || stats.AFXDPTXFailed != 1 {
+		t.Fatalf("ReadStats() = %+v, want xsk_rx=1 response_failed=1 afxdp_tx_failed=1", stats)
 	}
 }
 

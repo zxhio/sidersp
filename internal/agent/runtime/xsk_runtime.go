@@ -15,6 +15,8 @@ type managedDataplaneRuntime struct {
 	cancel  context.CancelFunc
 	done    chan error
 	once    sync.Once
+	startMu sync.Mutex
+	started bool
 }
 
 func newManagedDataplaneRuntime(ifindex int, runtime DataplaneRuntime) *managedDataplaneRuntime {
@@ -26,6 +28,16 @@ func newManagedDataplaneRuntime(ifindex int, runtime DataplaneRuntime) *managedD
 		cancel:           cancel,
 		done:             make(chan error, 1),
 	}
+}
+
+func (r *managedDataplaneRuntime) markXSKStarted() bool {
+	r.startMu.Lock()
+	defer r.startMu.Unlock()
+	if r.started {
+		return false
+	}
+	r.started = true
+	return true
 }
 
 func (r *managedDataplaneRuntime) runXSK() {
@@ -44,8 +56,13 @@ func (r *managedDataplaneRuntime) Close() error {
 	var closeErr error
 	r.once.Do(func() {
 		r.cancel()
-		if runErr := <-r.done; runErr != nil && closeErr == nil {
-			closeErr = fmt.Errorf("run xsk runtime for attachment %d: %w", r.ifindex, runErr)
+		r.startMu.Lock()
+		started := r.started
+		r.startMu.Unlock()
+		if started {
+			if runErr := <-r.done; runErr != nil && closeErr == nil {
+				closeErr = fmt.Errorf("run xsk runtime for attachment %d: %w", r.ifindex, runErr)
+			}
 		}
 		if err := r.DataplaneRuntime.Close(); err != nil && closeErr == nil {
 			closeErr = err

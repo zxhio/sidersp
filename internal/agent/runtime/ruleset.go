@@ -57,6 +57,13 @@ func (r *DataplaneAttachmentRuntime) ReplaceRuleset(ctx context.Context, ruleset
 	if err := r.applyRulesetLocked(entries, nextRules, previousRules); err != nil {
 		return types.Ruleset{}, err
 	}
+	if err := r.applyResponseRulesLocked(nextRules, previousRules); err != nil {
+		if rollbackErr := rollbackRuleset(entries, previousRules); rollbackErr != nil {
+			logrus.WithError(rollbackErr).Error("Fail to rollback dataplane ruleset")
+			return types.Ruleset{}, fmt.Errorf("apply userspace response rules: %w; rollback failed: %w", err, rollbackErr)
+		}
+		return types.Ruleset{}, err
+	}
 
 	r.ruleset = cloneRuleset(ruleset)
 	logrus.WithFields(logrus.Fields{
@@ -81,10 +88,44 @@ func (r *DataplaneAttachmentRuntime) ClearRuleset(ctx context.Context) error {
 	if err := r.applyRulesetLocked(entries, rule.RuleSet{}, previousRules); err != nil {
 		return err
 	}
+	if err := r.applyResponseRulesLocked(rule.RuleSet{}, previousRules); err != nil {
+		if rollbackErr := rollbackRuleset(entries, previousRules); rollbackErr != nil {
+			logrus.WithError(rollbackErr).Error("Fail to rollback dataplane ruleset")
+			return fmt.Errorf("clear userspace response rules: %w; rollback failed: %w", err, rollbackErr)
+		}
+		return err
+	}
 
 	r.ruleset = types.Ruleset{}
 	logrus.WithField("attachments", len(entries)).Info("Cleared dataplane ruleset")
 	return nil
+}
+
+func (r *DataplaneAttachmentRuntime) applyResponseRulesLocked(next rule.RuleSet, previous rule.RuleSet) error {
+	entries := r.enabledResponseConsumersLocked()
+	applied := make([]responseConsumerRuntime, 0, len(entries))
+	for _, entry := range entries {
+		if err := entry.consumer.ReplaceRules(cloneRuleSet(next)); err != nil {
+			if rollbackErr := rollbackResponseRules(applied, previous); rollbackErr != nil {
+				logrus.WithError(rollbackErr).WithField("ifindex", entry.attachment.IfIndex).Error("Fail to rollback response rules")
+				return fmt.Errorf("apply response rules to attachment %d: %w; rollback failed: %w", entry.attachment.IfIndex, err, rollbackErr)
+			}
+			return fmt.Errorf("apply response rules to attachment %d: %w", entry.attachment.IfIndex, err)
+		}
+		applied = append(applied, entry)
+	}
+	return nil
+}
+
+func rollbackResponseRules(entries []responseConsumerRuntime, previous rule.RuleSet) error {
+	var joined error
+	for i := len(entries) - 1; i >= 0; i-- {
+		entry := entries[i]
+		if err := entry.consumer.ReplaceRules(cloneRuleSet(previous)); err != nil {
+			joined = errors.Join(joined, fmt.Errorf("rollback response rules on attachment %d: %w", entry.attachment.IfIndex, err))
+		}
+	}
+	return joined
 }
 
 func (r *DataplaneAttachmentRuntime) applyRulesetLocked(entries []dataplaneRuntimeEntry, next rule.RuleSet, previous rule.RuleSet) error {

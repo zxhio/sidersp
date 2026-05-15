@@ -47,6 +47,7 @@ func NewResponseExecutor(config ResponseExecutorConfig) (*ResponseExecutor, erro
 func (e *ResponseExecutor) Execute(ctx context.Context, meta XSKMetadata, frame []byte) error {
 	action, ok := ResponseActionName(meta.Action)
 	if !ok {
+		e.stats.recordFailed(e.sender.Backend())
 		return fmt.Errorf("execute response: unsupported action %d", meta.Action)
 	}
 

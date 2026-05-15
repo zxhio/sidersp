@@ -62,6 +62,27 @@ func TestNewStatsFromDataplaneDoesNotExposeDiagnosticsAsDefaultStats(t *testing.
 	require.Zero(t, got.Errors.XSKPackets)
 }
 
+func TestNewStatsFromRuntimeMapsUserspaceResponseStats(t *testing.T) {
+	got := NewStatsFromRuntime(model.RuntimeStats{
+		Response: model.ResponseStats{
+			XSKRXPackets:     10,
+			ResponseSent:     7,
+			ResponseFailed:   3,
+			AFXDPTX:          5,
+			AFXDPTXFailed:    2,
+			AFPacketTX:       2,
+			AFPacketTXFailed: 1,
+		},
+	})
+
+	require.Equal(t, uint64(10), got.UserspaceResponse.XSKRXPackets)
+	require.Equal(t, uint64(7), got.UserspaceResponse.Packets)
+	require.Equal(t, uint64(5), got.UserspaceResponse.XSKTXPackets)
+	require.Equal(t, uint64(2), got.UserspaceResponse.AFPacketTXPackets)
+	require.Equal(t, uint64(3), got.UserspaceResponse.ErrorPackets)
+	require.Equal(t, uint64(3), got.Errors.XSKPackets)
+}
+
 func TestNewEventFromDataplaneMapsEventFields(t *testing.T) {
 	observedAt := time.Unix(1710000000, 123).UTC()
 

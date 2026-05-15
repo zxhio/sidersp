@@ -61,33 +61,47 @@ func (a *DataplaneRuntimeAdapter) SubscribeEvents(ctx context.Context) (<-chan t
 }
 
 func NewStatsFromDataplane(stats model.DataplaneStats) types.Stats {
+	return NewStatsFromRuntime(model.RuntimeStats{Dataplane: stats})
+}
+
+func NewStatsFromRuntime(stats model.RuntimeStats) types.Stats {
+	dataplaneStats := stats.Dataplane
+	responseStats := stats.Response
 	return types.Stats{
 		Ingress: types.IngressStats{
-			Packets: stats.RXPackets,
+			Packets: dataplaneStats.RXPackets,
 		},
 		Parse: types.ParseStats{
-			OKPackets:    stats.ParseOKPackets,
-			ErrorPackets: stats.ParseFailed,
+			OKPackets:    dataplaneStats.ParseOKPackets,
+			ErrorPackets: dataplaneStats.ParseFailed,
 		},
 		Match: types.MatchStats{
-			HitPackets:  stats.MatchedRules,
-			MissPackets: stats.MatchMissPackets,
+			HitPackets:  dataplaneStats.MatchedRules,
+			MissPackets: dataplaneStats.MatchMissPackets,
 		},
 		KernelResponse: types.KernelResponseStats{
-			Packets:         stats.KernelResponsePackets,
-			XDPTXPackets:    stats.XDPTX,
-			RedirectPackets: stats.RedirectTX,
-			ErrorPackets:    stats.TXFailed,
+			Packets:         dataplaneStats.KernelResponsePackets,
+			XDPTXPackets:    dataplaneStats.XDPTX,
+			RedirectPackets: dataplaneStats.RedirectTX,
+			ErrorPackets:    dataplaneStats.TXFailed,
 		},
 		XSKRedirect: types.XSKRedirectStats{
-			Packets:      stats.XskRedirected,
-			ErrorPackets: stats.XskRedirectFailed,
+			Packets:      dataplaneStats.XskRedirected,
+			ErrorPackets: dataplaneStats.XskRedirectFailed,
+		},
+		UserspaceResponse: types.UserspaceResponseStats{
+			XSKRXPackets:      responseStats.XSKRXPackets,
+			Packets:           responseStats.ResponseSent,
+			XSKTXPackets:      responseStats.AFXDPTX,
+			AFPacketTXPackets: responseStats.AFPacketTX,
+			ErrorPackets:      responseStats.ResponseFailed,
 		},
 		Errors: types.ErrorStats{
-			XDPPackets: stats.ParseFailed +
-				stats.TXFailed +
-				stats.XskRedirectFailed +
-				stats.RingbufDropped,
+			XDPPackets: dataplaneStats.ParseFailed +
+				dataplaneStats.TXFailed +
+				dataplaneStats.XskRedirectFailed +
+				dataplaneStats.RingbufDropped,
+			XSKPackets: responseStats.ResponseFailed,
 		},
 	}
 }

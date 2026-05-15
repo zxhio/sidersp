@@ -96,7 +96,16 @@ func (r *Runtime) HandleXSK(ctx context.Context, envelope xsk.Envelope, socket x
 	if err != nil {
 		return err
 	}
+	r.stats.recordXSKRX()
 	return executor.Execute(ctx, envelope.Metadata, envelope.Frame)
+}
+
+func (r *Runtime) RecordXSKError(ctx context.Context, queueID int, err error) {
+	_ = ctx
+	_ = queueID
+	_ = err
+	r.stats.recordXSKRX()
+	r.stats.recordFailed(TXBackendAFXDP)
 }
 
 func (r *Runtime) executorForQueue(queueID int, socket xsk.Socket) (*ResponseExecutor, error) {

@@ -45,9 +45,17 @@ func (r *DataplaneAttachmentRuntime) ReplaceResponse(ctx context.Context, config
 
 	previous := r.response
 	previousOptions := newXDPResponseOptions(currentResponseConfig(previous))
+	previousConfig := currentResponseConfig(previous)
 	entries := r.enabledResponseRuntimesLocked()
 
 	if err := applyResponseLocked(entries, nextOptions, previousOptions); err != nil {
+		return types.ResponseConfig{}, err
+	}
+	if err := r.replaceResponseConsumersLocked(next, previousConfig); err != nil {
+		if rollbackErr := rollbackResponse(entries, previousOptions); rollbackErr != nil {
+			logrus.WithError(rollbackErr).Error("Fail to rollback dataplane response config")
+			return types.ResponseConfig{}, fmt.Errorf("apply response config: %w; rollback failed: %w", err, rollbackErr)
+		}
 		return types.ResponseConfig{}, err
 	}
 
@@ -70,10 +78,19 @@ func (r *DataplaneAttachmentRuntime) ClearResponse(ctx context.Context) error {
 
 	previous := r.response
 	previousOptions := newXDPResponseOptions(currentResponseConfig(previous))
-	nextOptions := newXDPResponseOptions(defaultDataplaneResponseConfig())
+	previousConfig := currentResponseConfig(previous)
+	nextConfig := defaultDataplaneResponseConfig()
+	nextOptions := newXDPResponseOptions(nextConfig)
 	entries := r.enabledResponseRuntimesLocked()
 
 	if err := applyResponseLocked(entries, nextOptions, previousOptions); err != nil {
+		return err
+	}
+	if err := r.replaceResponseConsumersLocked(nextConfig, previousConfig); err != nil {
+		if rollbackErr := rollbackResponse(entries, previousOptions); rollbackErr != nil {
+			logrus.WithError(rollbackErr).Error("Fail to rollback dataplane response config")
+			return fmt.Errorf("clear response config: %w; rollback failed: %w", err, rollbackErr)
+		}
 		return err
 	}
 

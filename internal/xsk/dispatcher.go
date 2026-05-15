@@ -13,6 +13,10 @@ type ResponseConsumer interface {
 	HandleXSK(context.Context, Envelope, Socket) error
 }
 
+type ResponseErrorRecorder interface {
+	RecordXSKError(context.Context, int, error)
+}
+
 type AnalysisSubmitter interface {
 	SubmitXSK(context.Context, Envelope) error
 }
@@ -44,6 +48,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, queueID int, socket Socket, f
 
 	meta, payload, err := DecodeMetadata(frame)
 	if err != nil {
+		recordResponseError(ctx, d.response, queueID, err)
 		return err
 	}
 	envelope := Envelope{
@@ -67,4 +72,12 @@ func (d *Dispatcher) Dispatch(ctx context.Context, queueID int, socket Socket, f
 		}
 	}
 	return responseErr
+}
+
+func recordResponseError(ctx context.Context, consumer ResponseConsumer, queueID int, err error) {
+	recorder, ok := consumer.(ResponseErrorRecorder)
+	if !ok {
+		return
+	}
+	recorder.RecordXSKError(ctx, queueID, err)
 }
