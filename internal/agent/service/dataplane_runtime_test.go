@@ -14,20 +14,26 @@ import (
 
 func TestNewStatsFromDataplaneMapsKernelStats(t *testing.T) {
 	got := NewStatsFromDataplane(model.DataplaneStats{
-		RXPackets:         100,
-		ParseFailed:       2,
-		MatchedRules:      30,
-		RingbufDropped:    3,
-		XDPTX:             11,
-		TXFailed:          5,
-		XskRedirected:     7,
-		XskRedirectFailed: 13,
-		RedirectTX:        23,
+		RXPackets:             100,
+		ParseOKPackets:        98,
+		ParseFailed:           2,
+		MatchedRules:          30,
+		MatchMissPackets:      68,
+		KernelResponsePackets: 17,
+		RingbufDropped:        3,
+		XDPTX:                 11,
+		TXFailed:              5,
+		XskRedirected:         7,
+		XskRedirectFailed:     13,
+		RedirectTX:            23,
 	})
 
 	require.Equal(t, uint64(100), got.Ingress.Packets)
+	require.Equal(t, uint64(98), got.Parse.OKPackets)
 	require.Equal(t, uint64(2), got.Parse.ErrorPackets)
 	require.Equal(t, uint64(30), got.Match.HitPackets)
+	require.Equal(t, uint64(68), got.Match.MissPackets)
+	require.Equal(t, uint64(17), got.KernelResponse.Packets)
 	require.Equal(t, uint64(11), got.KernelResponse.XDPTXPackets)
 	require.Equal(t, uint64(23), got.KernelResponse.RedirectPackets)
 	require.Equal(t, uint64(5), got.KernelResponse.ErrorPackets)
@@ -47,6 +53,7 @@ func TestNewStatsFromDataplaneDoesNotExposeDiagnosticsAsDefaultStats(t *testing.
 	})
 
 	require.Zero(t, got.Match.MissPackets)
+	require.Zero(t, got.KernelResponse.Packets)
 	require.Zero(t, got.UserspaceResponse.Packets)
 	require.Zero(t, got.Dispatch.Packets)
 	require.Zero(t, got.KernelResponse.ErrorPackets)

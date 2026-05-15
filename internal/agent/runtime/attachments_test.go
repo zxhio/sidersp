@@ -288,8 +288,22 @@ func TestDataplaneAttachmentCloseFailureReturnsErrorAndKeepsAttachmentEnabled(t 
 func TestDataplaneAttachmentReadStatsAggregatesActiveRuntimes(t *testing.T) {
 	opener := &recordingDataplaneOpener{
 		next: []*fakeDataplaneRuntime{
-			{programID: 101, stats: model.DataplaneStats{RXPackets: 10, ParseFailed: 1}},
-			{programID: 202, stats: model.DataplaneStats{RXPackets: 20, TXFailed: 2}},
+			{programID: 101, stats: model.DataplaneStats{
+				RXPackets:             10,
+				ParseOKPackets:        8,
+				ParseFailed:           1,
+				MatchedRules:          3,
+				MatchMissPackets:      5,
+				KernelResponsePackets: 2,
+			}},
+			{programID: 202, stats: model.DataplaneStats{
+				RXPackets:             20,
+				ParseOKPackets:        18,
+				TXFailed:              2,
+				MatchedRules:          4,
+				MatchMissPackets:      6,
+				KernelResponsePackets: 3,
+			}},
 		},
 	}
 	runtime := newTestDataplaneAttachmentRuntime(opener)
@@ -302,6 +316,11 @@ func TestDataplaneAttachmentReadStatsAggregatesActiveRuntimes(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, uint64(30), got.Ingress.Packets)
+	require.Equal(t, uint64(26), got.Parse.OKPackets)
+	require.Equal(t, uint64(1), got.Parse.ErrorPackets)
+	require.Equal(t, uint64(7), got.Match.HitPackets)
+	require.Equal(t, uint64(11), got.Match.MissPackets)
+	require.Equal(t, uint64(5), got.KernelResponse.Packets)
 	require.Equal(t, uint64(3), got.Errors.XDPPackets)
 }
 

@@ -456,16 +456,19 @@ func (r *Runtime) ReadStats() (model.DataplaneStats, error) {
 	r.matchMu.RUnlock()
 
 	return model.DataplaneStats{
-		RXPackets:         stats.IngressPackets,
-		ParseFailed:       stats.ParseErrorPackets,
-		MatchedRules:      stats.MatchHitPackets,
-		RuleMatches:       ruleMatches,
-		RingbufDropped:    stats.EventDroppedPackets,
-		XDPTX:             stats.KernelResponseXDPTXPackets,
-		TXFailed:          stats.KernelResponseErrorPackets,
-		XskRedirected:     stats.XSKRedirectPackets,
-		XskRedirectFailed: stats.XSKRedirectErrorPackets,
-		RedirectTX:        stats.KernelResponseRedirectPackets,
+		RXPackets:             stats.IngressPackets,
+		ParseOKPackets:        stats.ParseOKPackets,
+		ParseFailed:           stats.ParseErrorPackets,
+		MatchedRules:          stats.MatchHitPackets,
+		MatchMissPackets:      stats.MatchMissPackets,
+		KernelResponsePackets: stats.KernelResponsePackets,
+		RuleMatches:           ruleMatches,
+		RingbufDropped:        stats.EventDroppedPackets,
+		XDPTX:                 stats.KernelResponseXDPTXPackets,
+		TXFailed:              stats.KernelResponseErrorPackets,
+		XskRedirected:         stats.XSKRedirectPackets,
+		XskRedirectFailed:     stats.XSKRedirectErrorPackets,
+		RedirectTX:            stats.KernelResponseRedirectPackets,
 	}, nil
 }
 

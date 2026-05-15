@@ -53,56 +53,65 @@ type DiagnosticStage struct {
 }
 
 type DataplaneCounters struct {
-	RXPackets            uint64
-	ParseFailed          uint64
-	RuleCandidates       uint64
-	MatchedRules         uint64
-	RingbufDropped       uint64
-	XDPTX                uint64
-	TXFailed             uint64
-	XskRedirected        uint64
-	XskRedirectFailed    uint64
-	XskMetaFailed        uint64
-	XskMapRedirectFailed uint64
-	RedirectTX           uint64
-	RedirectFailed       uint64
-	FibLookupFailed      uint64
+	RXPackets             uint64
+	ParseOKPackets        uint64
+	ParseFailed           uint64
+	RuleCandidates        uint64
+	MatchedRules          uint64
+	MatchMissPackets      uint64
+	KernelResponsePackets uint64
+	RingbufDropped        uint64
+	XDPTX                 uint64
+	TXFailed              uint64
+	XskRedirected         uint64
+	XskRedirectFailed     uint64
+	XskMetaFailed         uint64
+	XskMapRedirectFailed  uint64
+	RedirectTX            uint64
+	RedirectFailed        uint64
+	FibLookupFailed       uint64
 }
 
 type DataplaneStats struct {
-	RXPackets            uint64            `json:"rx_packets"`
-	ParseFailed          uint64            `json:"parse_failed"`
-	RuleCandidates       uint64            `json:"rule_candidates"`
-	MatchedRules         uint64            `json:"matched_rules"`
-	RuleMatches          map[uint32]uint64 `json:"-"`
-	RingbufDropped       uint64            `json:"ringbuf_dropped"`
-	XDPTX                uint64            `json:"xdp_tx"`
-	TXFailed             uint64            `json:"tx_failed"`
-	XskRedirected        uint64            `json:"xsk_redirected"`
-	XskRedirectFailed    uint64            `json:"xsk_redirect_failed"`
-	XskMetaFailed        uint64            `json:"xsk_meta_failed"`
-	XskMapRedirectFailed uint64            `json:"xsk_map_redirect_failed"`
-	RedirectTX           uint64            `json:"redirect_tx"`
-	RedirectFailed       uint64            `json:"redirect_failed"`
-	FibLookupFailed      uint64            `json:"fib_lookup_failed"`
+	RXPackets             uint64            `json:"rx_packets"`
+	ParseOKPackets        uint64            `json:"parse_ok_packets"`
+	ParseFailed           uint64            `json:"parse_failed"`
+	RuleCandidates        uint64            `json:"rule_candidates"`
+	MatchedRules          uint64            `json:"matched_rules"`
+	MatchMissPackets      uint64            `json:"match_miss_packets"`
+	KernelResponsePackets uint64            `json:"kernel_response_packets"`
+	RuleMatches           map[uint32]uint64 `json:"-"`
+	RingbufDropped        uint64            `json:"ringbuf_dropped"`
+	XDPTX                 uint64            `json:"xdp_tx"`
+	TXFailed              uint64            `json:"tx_failed"`
+	XskRedirected         uint64            `json:"xsk_redirected"`
+	XskRedirectFailed     uint64            `json:"xsk_redirect_failed"`
+	XskMetaFailed         uint64            `json:"xsk_meta_failed"`
+	XskMapRedirectFailed  uint64            `json:"xsk_map_redirect_failed"`
+	RedirectTX            uint64            `json:"redirect_tx"`
+	RedirectFailed        uint64            `json:"redirect_failed"`
+	FibLookupFailed       uint64            `json:"fib_lookup_failed"`
 }
 
 func (s DataplaneStats) Counters() DataplaneCounters {
 	return DataplaneCounters{
-		RXPackets:            s.RXPackets,
-		ParseFailed:          s.ParseFailed,
-		RuleCandidates:       s.RuleCandidates,
-		MatchedRules:         s.MatchedRules,
-		RingbufDropped:       s.RingbufDropped,
-		XDPTX:                s.XDPTX,
-		TXFailed:             s.TXFailed,
-		XskRedirected:        s.XskRedirected,
-		XskRedirectFailed:    s.XskRedirectFailed,
-		XskMetaFailed:        s.XskMetaFailed,
-		XskMapRedirectFailed: s.XskMapRedirectFailed,
-		RedirectTX:           s.RedirectTX,
-		RedirectFailed:       s.RedirectFailed,
-		FibLookupFailed:      s.FibLookupFailed,
+		RXPackets:             s.RXPackets,
+		ParseOKPackets:        s.ParseOKPackets,
+		ParseFailed:           s.ParseFailed,
+		RuleCandidates:        s.RuleCandidates,
+		MatchedRules:          s.MatchedRules,
+		MatchMissPackets:      s.MatchMissPackets,
+		KernelResponsePackets: s.KernelResponsePackets,
+		RingbufDropped:        s.RingbufDropped,
+		XDPTX:                 s.XDPTX,
+		TXFailed:              s.TXFailed,
+		XskRedirected:         s.XskRedirected,
+		XskRedirectFailed:     s.XskRedirectFailed,
+		XskMetaFailed:         s.XskMetaFailed,
+		XskMapRedirectFailed:  s.XskMapRedirectFailed,
+		RedirectTX:            s.RedirectTX,
+		RedirectFailed:        s.RedirectFailed,
+		FibLookupFailed:       s.FibLookupFailed,
 	}
 }
 

@@ -66,12 +66,15 @@ func NewStatsFromDataplane(stats model.DataplaneStats) types.Stats {
 			Packets: stats.RXPackets,
 		},
 		Parse: types.ParseStats{
+			OKPackets:    stats.ParseOKPackets,
 			ErrorPackets: stats.ParseFailed,
 		},
 		Match: types.MatchStats{
-			HitPackets: stats.MatchedRules,
+			HitPackets:  stats.MatchedRules,
+			MissPackets: stats.MatchMissPackets,
 		},
 		KernelResponse: types.KernelResponseStats{
+			Packets:         stats.KernelResponsePackets,
 			XDPTXPackets:    stats.XDPTX,
 			RedirectPackets: stats.RedirectTX,
 			ErrorPackets:    stats.TXFailed,

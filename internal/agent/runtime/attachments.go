@@ -326,9 +326,12 @@ func (r *DataplaneAttachmentRuntime) activeRuntimes() []DataplaneRuntime {
 
 func addDataplaneStats(total *model.DataplaneStats, stats model.DataplaneStats) {
 	total.RXPackets += stats.RXPackets
+	total.ParseOKPackets += stats.ParseOKPackets
 	total.ParseFailed += stats.ParseFailed
 	total.RuleCandidates += stats.RuleCandidates
 	total.MatchedRules += stats.MatchedRules
+	total.MatchMissPackets += stats.MatchMissPackets
+	total.KernelResponsePackets += stats.KernelResponsePackets
 	total.RingbufDropped += stats.RingbufDropped
 	total.XDPTX += stats.XDPTX
 	total.TXFailed += stats.TXFailed
